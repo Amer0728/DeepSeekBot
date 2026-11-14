@@ -607,6 +607,9 @@ export function createRemoteHosts(options: {
       } else if (sameCredential(current, entry.host)) {
         const wasPending = relationshipEnrollmentPending(entry.host);
         entry.host = current;
+        entry.client.updateRoutes?.(current.routes, current.encryption, {
+          routePreference: current.routePreference,
+        });
         if (wasPending && listeners.size > 0 && !relationshipEnrollmentPending(current))
           start(entry);
       }

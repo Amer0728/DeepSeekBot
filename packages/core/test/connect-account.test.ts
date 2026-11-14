@@ -260,6 +260,92 @@ function setup(
 }
 
 describe('linked account computers', () => {
+  it.each([
+    'caller',
+    'sign-out',
+    'close',
+    'deadline',
+    'late-success',
+    'access-token-close',
+  ] as const)('cancels the serialized relationship token refresh on %s', async (mode) => {
+    let expire = false;
+    const services = fakeServices({
+      pending: 0,
+      hostId: 'haaaaaaaaaaaa',
+      offer: async () => {
+        expire = true;
+        return Response.json({ error: { code: 'session-expired' } }, { status: 401 });
+      },
+    });
+    const original = services.fetcher.getMockImplementation()!;
+    const started = deferred();
+    let release = () => {};
+    let blocked = false;
+    let refreshSignal: AbortSignal | null | undefined;
+    services.fetcher.mockImplementation(async (input, init) => {
+      if (expire && !blocked && String(init?.body).includes('grant_type=refresh_token')) {
+        blocked = true;
+        refreshSignal = init?.signal;
+        return new Promise<Response>((resolve, reject) => {
+          release = () =>
+            resolve(Response.json({ access_token: 'late-access', refresh_token: 'late-refresh' }));
+          refreshSignal?.addEventListener(
+            'abort',
+            () => (mode === 'late-success' ? release() : reject(refreshSignal?.reason)),
+            { once: true },
+          );
+          started.resolve();
+        });
+      }
+      return original(input, init);
+    });
+    const { account, credentials } = setup(services);
+    const caller = new AbortController();
+    const deadline = new AbortController();
+    let timeout: ReturnType<typeof vi.spyOn> | undefined;
+    let teardown: Promise<unknown> | undefined;
+    try {
+      await account.signIn();
+      await settle(account);
+      const session = await account.relationshipSession();
+      expect(session).toBeDefined();
+      const before = JSON.stringify([...credentials.records.values()]);
+      if (mode === 'deadline')
+        timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadline.signal);
+      if (mode === 'access-token-close') expire = true;
+      const work =
+        mode === 'access-token-close'
+          ? account
+              .accessToken({ fresh: true })
+              .then((token) => (token === undefined ? 'refused' : 'accepted'))
+          : session!.offer(session!.registrationId, 'a'.repeat(43), caller.signal).then(
+              () => 'accepted',
+              () => 'refused',
+            );
+      await started.promise;
+      if (mode === 'sign-out') teardown = account.signOut();
+      else if (mode === 'close' || mode === 'late-success' || mode === 'access-token-close')
+        teardown = account.close();
+      else if (mode === 'deadline') deadline.abort();
+      else caller.abort();
+      await vi.waitFor(() => expect(refreshSignal?.aborted).toBe(true), { timeout: 500 });
+      expect(await work).toBe('refused');
+      await teardown;
+      if (mode === 'sign-out') {
+        expect(account.status().state).toBe('signed-out');
+        expect(credentials.records.size).toBe(0);
+      } else expect(JSON.stringify([...credentials.records.values()])).toBe(before);
+      expect(services.calls.filter((call) => call.path.endsWith('/offer'))).toHaveLength(
+        mode === 'access-token-close' ? 0 : 1,
+      );
+    } finally {
+      release();
+      timeout?.mockRestore();
+      await teardown;
+      await account.close();
+    }
+  });
+
   it.each(['refresh', 'relay'])(
     'cancels a stalled health %s request and skips queued cancelled checks',
     async (stage) => {

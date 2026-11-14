@@ -458,6 +458,17 @@ export function createConnectAccount(options: {
   };
 
   const refresh = async (current: AccountRecord, signal?: AbortSignal): Promise<string> => {
+    const generation = attempt;
+    const refreshSignal = AbortSignal.any([
+      relationshipAbort.signal,
+      AbortSignal.timeout(10_000),
+      ...(signal === undefined ? [] : [signal]),
+    ]);
+    const guard = () => {
+      if (refreshSignal.aborted || generation !== attempt)
+        throw new AccountError('relay-unavailable');
+    };
+    guard();
     const reply = await post(
       'refresh-token',
       TOKEN_ENDPOINT,
@@ -466,8 +477,9 @@ export function createConnectAccount(options: {
         client_id: current.clientId,
         refresh_token: current.refreshToken,
       },
-      signal,
+      refreshSignal,
     );
+    guard();
     const access = reply.body['access_token'];
     const rotated = reply.body['refresh_token'];
     if (!reply.ok || typeof access !== 'string') {
@@ -484,6 +496,7 @@ export function createConnectAccount(options: {
       current.refreshToken = rotated;
       await save(current);
     }
+    guard();
     cached = access;
     return access;
   };
@@ -899,10 +912,10 @@ export function createConnectAccount(options: {
             signal,
           );
         try {
-          return await call(cached ?? (await refresh(current)));
+          return await call(cached ?? (await refresh(current, signal)));
         } catch (error) {
           if (!(error instanceof AccountError) || error.issue !== 'session-expired') throw error;
-          return await call(await refresh(current));
+          return await call(await refresh(current, signal));
         }
       } catch {
         return { status: 503, body: {} };
@@ -1126,7 +1139,7 @@ export function createConnectAccount(options: {
               const latest = await read();
               if (!latest || latest.account !== accountId || latest.hostId !== registrationId)
                 throw new AccountError('session-expired');
-              return refresh(latest);
+              return refresh(latest, signal);
             });
             guard();
             reply = await relayCall(operation, method, path, token, body, 10_000, signal);
