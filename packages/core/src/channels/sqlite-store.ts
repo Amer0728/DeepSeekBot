@@ -1,4 +1,5 @@
 import { TeamError } from '../team/error.js';
+import { acceptedQuestionAnswer } from './accepted-question-answer.js';
 import { channelAudienceSql } from '../team/channel-contract.js';
 import { OWNER_HUMAN_CONTEXT, type HumanContext } from '../humans/context.js';
 import { allBotPreview, assertAllBotPreview, type AllBotPreview } from './all-bot-mention.js';
@@ -1111,6 +1112,7 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
     preview?: AllBotPreview,
     origin?: ChannelMessageOrigin,
     canCommit?: (database?: DatabaseSync) => boolean,
+    acceptedQuestion = false,
   ) => {
     const identity = inputMessage.author.kind === 'human' ? humanIdentity(human) : undefined;
     const message =
@@ -1128,7 +1130,7 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
       throw new Error('Source Event Human identity requires a current database schema');
     const channel = readRecord(id);
     if (message.author.kind === 'human') {
-      humanAccess?.requirePost(human, id, preview !== undefined, message);
+      if (!acceptedQuestion) humanAccess?.requirePost(human, id, preview !== undefined, message);
       for (const ref of message.channelRefs ?? [])
         if (humanAccess && !humanAccess.canRead(human, ref.channelId))
           throw new TeamError('channel-not-found');
@@ -3315,6 +3317,29 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
       if (channel === undefined || channel.deletedAt !== undefined) return undefined;
       if (!channel.members.includes(botSlug)) return undefined;
       return setReaction(id, 'bot', botSlug, messageId, emoji, active);
+    },
+    async reconcileQuestionAnswer(human, id, reference, answer) {
+      const request = projectRows(id, placementsById(id, [reference.messageId]))[0];
+      const message = acceptedQuestionAnswer(
+        request,
+        reference,
+        answer,
+        human ? humanIdentity(human) : undefined,
+      );
+      if (!message) return undefined;
+      const result = append(
+        human ?? OWNER_HUMAN_CONTEXT,
+        id,
+        message,
+        true,
+        undefined,
+        undefined,
+        undefined,
+        true,
+      );
+      return result?.status === 'appended' || result?.status === 'existing'
+        ? result.message
+        : undefined;
     },
     async appendMessage(human: HumanContext, id, message, origin) {
       const result = append(human, id, message, false, undefined, origin);

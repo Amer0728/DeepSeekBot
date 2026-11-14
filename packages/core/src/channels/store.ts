@@ -1,4 +1,9 @@
 import type { ChannelPolicy } from '../team/channel-contract.js';
+import type { AskUserQuestionAnswer } from '@deepseek-ai/dsh-user-questions/types';
+import {
+  acceptedQuestionAnswer,
+  type AcceptedQuestionReference,
+} from './accepted-question-answer.js';
 import { OWNER_HUMAN_CONTEXT, type HumanContext } from '../humans/context.js';
 import { isChannelNotice } from './channel-notice.js';
 import { channelCallPictureRange, type ChannelCallWindowFilter } from './call-window.js';
@@ -578,6 +583,12 @@ export interface ChannelStore {
     origin?: ChannelMessageOrigin,
     beforeCommit?: () => boolean,
   ): Promise<ChannelMessage | undefined>;
+  reconcileQuestionAnswer(
+    human: HumanContext | undefined,
+    channelId: string,
+    request: AcceptedQuestionReference,
+    answer: AskUserQuestionAnswer,
+  ): Promise<ChannelMessage | undefined>;
   readMessages(id: string, options?: ChannelReadOptions): ChannelMessage[];
   queryMessages(id: string, options?: ChannelMessageQueryOptions): ChannelMessageQueryPage;
   searchHumanMessages?(
@@ -1099,6 +1110,28 @@ export function createChannelStore(options: ChannelStoreOptions): ChannelStore {
       const renamed = { ...record, name: trimmed };
       write(renamed);
       return renamed;
+    },
+    async reconcileQuestionAnswer(human, id, reference, answer) {
+      const message = acceptedQuestionAnswer(
+        this.message(id, reference.messageId),
+        reference,
+        answer,
+        human ? this.humanIdentity(human) : undefined,
+      );
+      if (!message) return undefined;
+      const result = await this.appendMessageOnce(
+        human ?? OWNER_HUMAN_CONTEXT,
+        id,
+        message,
+        undefined,
+        undefined,
+        () =>
+          acceptedQuestionAnswer(this.message(id, reference.messageId), reference, answer) !==
+          undefined,
+      );
+      return result.status === 'appended' || result.status === 'existing'
+        ? result.message
+        : undefined;
     },
     appendMessage(human: HumanContext, id, input, origin, beforeCommit) {
       const message =

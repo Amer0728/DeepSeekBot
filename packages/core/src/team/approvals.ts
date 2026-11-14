@@ -9,12 +9,7 @@ import { isDshGovernedTool } from '../workspaces/grant-execution.js';
 import type { TeamRoles } from './roles.js';
 import { TeamError } from './error.js';
 
-import {
-  isMaskedApprovalCard,
-  type ApprovalKind,
-  type ApprovalCard,
-  type ApprovalDecider,
-} from './approval-contract.js';
+import { type ApprovalKind, type ApprovalCard, type ApprovalDecider } from './approval-contract.js';
 export { maskedApprovalCardSchema, isMaskedApprovalCard } from './approval-contract.js';
 export type {
   ApprovalKind,
@@ -161,17 +156,9 @@ export class TeamApprovals {
 
   requireRequest(human: HumanContext, channelId: string, messageId: string): void {
     const message = this.request(channelId, messageId);
-    if (message?.author.kind !== 'bot' || !this.audience(human, channelId))
-      throw new TeamError('approval-not-allowed');
-    const channel = this.channels.get(channelId);
-    const owner = this.botOwner(message.author.slug);
     if (
-      owner !== human.humanId &&
-      !channel?.humanParticipants?.includes(human.humanId) &&
-      (channel?.type !== 'group' ||
-        !this.channels
-          .listHumanMembers(human, channelId)
-          .some((member) => member.humanId === human.humanId))
+      message?.author.kind !== 'bot' ||
+      !this.decisionAudience(human, channelId, message.author.slug)
     )
       throw new TeamError('approval-not-allowed');
     this.require(
@@ -179,6 +166,19 @@ export class TeamApprovals {
       message.author.slug,
       message.toolApprovalRequest !== undefined &&
         isDshGovernedTool(message.toolApprovalRequest.toolName),
+    );
+  }
+
+  private decisionAudience(human: HumanContext, channelId: string, botSlug: string): boolean {
+    if (!this.audience(human, channelId)) return false;
+    const channel = this.channels.get(channelId);
+    return (
+      this.botOwner(botSlug) === human.humanId ||
+      channel?.humanParticipants?.includes(human.humanId) === true ||
+      (channel?.type === 'group' &&
+        this.channels
+          .listHumanMembers(human, channelId)
+          .some((member) => member.humanId === human.humanId))
     );
   }
 
@@ -215,7 +215,10 @@ export class TeamApprovals {
       requestedAt: message.at,
       ...(typeof row?.created_at === 'string' ? { decidedAt: row.created_at } : {}),
     };
-    if (!this.canApprove(human, message.author.slug, opaque) || !this.audience(human, channelId))
+    if (
+      !this.canApprove(human, message.author.slug, opaque) ||
+      !this.decisionAudience(human, channelId, message.author.slug)
+    )
       return { masked: true, ...base };
     const decidedBy = z
       .object({ humanId: z.string(), displayName: z.string().optional() })
@@ -299,6 +302,17 @@ export class TeamApprovals {
       if (!cards.has(key)) cards.set(key, this.card(human, channel, message));
       return cards.get(key);
     };
+    const hidesPreview = (channel: string, id: string): boolean => {
+      const target = read(channel, id);
+      if (!target || Reflect.get(target, 'contentPurge') !== undefined) return true;
+      const requestId = resolutions
+        .map((key) => target[key]?.requestMessageId)
+        .find((reference) => reference !== undefined);
+      const request = requestId === undefined ? target : read(channel, requestId);
+      if (!request || Reflect.get(request, 'contentPurge') !== undefined) return true;
+      const card = cardOf(channel, request);
+      return (requestId !== undefined && card === undefined) || card?.masked === true;
+    };
     const opaqueReaders = new Map<string, boolean>();
     const visit = (entry: unknown, inherited?: string, inheritedBot?: string): void => {
       if (Array.isArray(entry)) {
@@ -366,15 +380,15 @@ export class TeamApprovals {
         if (attributed) Reflect.set(Reflect.get(entry, 'replyToPreview'), 'author', attributed);
       }
       if (channel && typeof record['replyTo'] === 'string' && preview) {
-        const target = read(channel, record['replyTo']);
-        const targetCard = target && cardOf(channel, target);
-        if (
-          !target ||
-          Reflect.get(target, 'contentPurge') !== undefined ||
-          (targetCard && isMaskedApprovalCard(targetCard))
-        )
-          Reflect.set(entry, 'replyToPreview', null);
+        if (hidesPreview(channel, record['replyTo'])) Reflect.set(entry, 'replyToPreview', null);
       }
+      const post = object(record['botChannelPost']);
+      if (
+        typeof post?.['channelId'] === 'string' &&
+        typeof post['messageId'] === 'string' &&
+        hidesPreview(post['channelId'], post['messageId'])
+      )
+        Reflect.set(entry, 'botChannelPostPreview', null);
       if (channel && author?.kind === 'bot' && typeof author.slug === 'string')
         Reflect.set(
           entry,

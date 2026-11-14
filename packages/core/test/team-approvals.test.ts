@@ -420,6 +420,13 @@ describe('M5 approval projections and decisions', () => {
         replyTo: request.id,
       };
       await f.channels.appendMessage(bob, f.group.id, reply);
+      f.database.transaction((db) =>
+        db
+          .prepare(
+            `INSERT INTO channel_human_members(channel_id, human_id, display_name, visible_from_revision, joined_at) VALUES (?, 'admin', 'Admin', 0, ?)`,
+          )
+          .run(f.group.id, reply.at),
+      );
       const canonical = f.channels.message(f.group.id, reply.id)!;
       expect(canonical.replyToPreview?.body).toContain('CONFIDENTIAL');
       expect(f.team.approvals.project(bob, canonical, f.group.id).replyToPreview).toBeNull();
@@ -1124,9 +1131,13 @@ describe('M5 approval projections and decisions', () => {
     masked(await f.invoke(bob, 'channelMessages', { channelId: f.group.id }));
   });
 
-  it.each([alice, owner])(
-    'persists a native timed answer through the authenticated $humanId path across SDK copies',
-    async (human) => {
+  it.each([
+    { human: alice, revoke: false },
+    { human: owner, revoke: false },
+    { human: alice, revoke: true },
+  ])(
+    'persists a native timed answer through the authenticated $human.humanId path (revoked: $revoke)',
+    async ({ human, revoke }) => {
       const local = createRequire(import.meta.url);
       const foreign: typeof import('@deepseek-ai/dsh-session') = await import(
         pathToFileURL(local.resolve('@deepseek-ai/dsh-session')).href + '?m5-carrier'
@@ -1246,12 +1257,52 @@ describe('M5 approval projections and decisions', () => {
       expect(await pending).toEqual(payload.answer);
       const snapshot = vi.spyOn(session, 'snapshotEvents');
       nativeAnswered = true;
+      if (revoke) {
+        f.database.transaction((db) =>
+          db
+            .prepare("UPDATE humans SET status = 'suspended' WHERE human_id = ?")
+            .run(human.humanId),
+        );
+        expect(() => f.team.approvals.requireRequest(human, f.group.id, request.messageId)).toThrow(
+          'approval-not-allowed',
+        );
+        f.userQuestions.close();
+        await f.userQuestions.recover([{ channelId: f.group.id, messageId: request.messageId }]);
+      }
       await f.userQuestions.reconcileSession(session.id);
       const resolution = f.channels.readMessages(f.group.id).find((m) => m.userQuestionResolution);
       expect(resolution?.userQuestionResolution?.decidedBy?.humanId).toBe(human.humanId);
       expect(resolution?.author).toMatchObject({ kind: 'human', humanId: human.humanId });
       expect(timed?.answeringHuman?.(session.id, 'pick-plan', payload.answer)).toEqual(human);
       expect(snapshot).not.toHaveBeenCalled();
+      await f.userQuestions.reconcileSession(session.id);
+      await f.channels.reconcileQuestionAnswer(
+        human,
+        f.group.id,
+        { messageId: request.messageId, sessionId: session.id, callId: 'pick-plan' },
+        payload.answer,
+      );
+      expect(
+        f.channels.readMessages(f.group.id).filter((m) => m.userQuestionResolution),
+      ).toHaveLength(1);
+      if (revoke) {
+        const next = f.userQuestions.ask({
+          agent,
+          questions: [{ id: 'q', question: 'New request' }],
+          wait: { callId: ToolCallId('new-request'), timed: true },
+        });
+        void next.catch(() => {});
+        await vi.waitFor(() => expect(f.userQuestions.requests(botSlug)).toHaveLength(1));
+        const card = f.userQuestions.requests(botSlug)[0]!;
+        await expect(
+          f.userQuestions.answer(
+            botSlug,
+            card.messageId,
+            { answers: [{ id: 'q', selected: [], custom: 'new' }] },
+            human,
+          ),
+        ).rejects.toMatchObject({ code: 'approval-not-allowed' });
+      }
     },
   );
 
@@ -1430,6 +1481,172 @@ describe('M5 approval projections and decisions', () => {
     );
     expect(f.db.diagnostics().metrics.reads - start).toBeLessThanOrEqual(9 + authorReads);
   });
+
+  it.each(['public', 'roles'] as const)(
+    'masks requests for an unjoined administrator in a %s Group',
+    async (visibility) => {
+      const f = fixture();
+      f.team.channelAccess.visibilitySet(
+        bob,
+        f.group.id,
+        visibility === 'public'
+          ? { kind: 'public' }
+          : { kind: 'roles', roleIds: ['member', 'admin'] },
+      );
+      const request = await seed(f, 'question');
+      expect(() => f.team.approvals.requireRequest(admin, f.group.id, request.id)).toThrow(
+        'approval-not-allowed',
+      );
+      expect(f.team.approvals.card(admin, f.group.id, request)?.masked).toBe(true);
+      expect(
+        await f.invoke(admin, 'channelSearch', { channelId: f.group.id, text: 'CONFIDENTIAL' }),
+      ).toMatchObject({ messages: [] });
+      masked(await f.invoke(admin, 'channelMessages', { channelId: f.group.id }), request.id);
+      expect(
+        f.team.approvals.searchText(admin, f.group.id, request.id, request.body),
+      ).not.toContain('CONFIDENTIAL');
+      expect(() => f.team.approvals.requireRequest(alice, f.group.id, request.id)).not.toThrow();
+      expect(f.team.approvals.card(alice, f.group.id, request)?.masked).toBe(false);
+      f.database.transaction((db) =>
+        db
+          .prepare(
+            `INSERT INTO channel_human_members(channel_id, human_id, display_name, visible_from_revision, joined_at) VALUES (?, 'admin', 'Admin', 0, ?)`,
+          )
+          .run(f.group.id, request.at),
+      );
+      expect(() => f.team.approvals.requireRequest(admin, f.group.id, request.id)).not.toThrow();
+      expect(f.team.approvals.card(admin, f.group.id, request)?.masked).toBe(false);
+    },
+  );
+
+  it.each(['tool', 'question', 'secret'] as const)(
+    'hides %s approval text in owner DM trace previews, including stale targets',
+    async (kind) => {
+      const f = fixture();
+      const dm = f.channels.getOrCreateDm(alice, 'alice-bot', 'Planner')!;
+      const request = await seed(f, kind);
+      const trace = f.channels
+        .readMessages(dm.id)
+        .find((m) => m.botChannelPost?.messageId === request.id)!;
+      expect(trace.botChannelPostPreview).toContain('CONFIDENTIAL');
+      if (kind === 'tool')
+        masked(await f.invoke(alice, 'channelMessages', { channelId: dm.id }), request.id);
+      expect(f.team.approvals.project(alice, trace, dm.id).botChannelPostPreview).toBe(
+        kind === 'tool' ? null : trace.botChannelPostPreview,
+      );
+      const read = f.channels.message.bind(f.channels);
+      for (const state of ['missing', 'purged'] as const) {
+        const spy = vi.spyOn(f.channels, 'message').mockImplementation((channel, id) =>
+          id === request.id
+            ? state === 'missing'
+              ? undefined
+              : {
+                  id,
+                  at: request.at,
+                  author: request.author,
+                  body: '',
+                  contentPurge: { at: request.at },
+                }
+            : read(channel, id),
+        );
+        expect(f.team.approvals.project(alice, trace, dm.id).botChannelPostPreview).toBeNull();
+        spy.mockRestore();
+      }
+      const ordinary = {
+        id: randomUUID(),
+        at: request.at,
+        author: request.author,
+        body: 'Ordinary',
+      };
+      await f.channels.appendMessage(owner, f.group.id, ordinary);
+      const normalTrace = f.channels
+        .readMessages(dm.id)
+        .find((m) => m.botChannelPost?.messageId === ordinary.id)!;
+      expect(f.team.approvals.project(alice, normalTrace, dm.id).botChannelPostPreview).toBe(
+        'Ordinary',
+      );
+    },
+  );
+
+  it.each(['tool', 'question', 'secret'] as const)(
+    'hides replies quoting a %s resolution by following its original request',
+    async (kind) => {
+      const f = fixture();
+      const request = await seed(f, kind, 'owner-bot');
+      const resolution: ChannelMessage = {
+        id: randomUUID(),
+        at: request.at,
+        author: { kind: 'human' },
+        body: 'CONFIDENTIAL_ANSWER',
+        replyTo: request.id,
+        ...(kind === 'tool'
+          ? {
+              toolApprovalDecision: {
+                requestMessageId: request.id,
+                outcome: 'allowed-once' as const,
+                decidedBy: { humanId: owner.humanId },
+              },
+            }
+          : kind === 'question'
+            ? {
+                userQuestionResolution: {
+                  requestMessageId: request.id,
+                  state: 'answered' as const,
+                  decidedBy: { humanId: owner.humanId },
+                  answers: [{ id: 'q', selected: ['CONFIDENTIAL_ANSWER'] }],
+                },
+              }
+            : {
+                privateInputResolution: {
+                  requestMessageId: request.id,
+                  state: 'configured' as const,
+                  references: {},
+                  decidedBy: { humanId: owner.humanId },
+                },
+              }),
+      };
+      await f.channels.appendMessage(owner, f.group.id, resolution);
+      const reply: ChannelMessage = {
+        id: randomUUID(),
+        at: request.at,
+        author: { kind: 'human' },
+        body: 'Public reply',
+        replyTo: resolution.id,
+      };
+      await f.channels.appendMessage(bob, f.group.id, reply);
+      const canonical = f.channels.message(f.group.id, reply.id)!;
+      expect(canonical.replyToPreview?.body).toBe('CONFIDENTIAL_ANSWER');
+      expect(f.team.approvals.project(bob, canonical, f.group.id).replyToPreview).toBeNull();
+      f.database.transaction((db) =>
+        db
+          .prepare(
+            `INSERT INTO channel_human_members(channel_id, human_id, display_name, visible_from_revision, joined_at) VALUES (?, 'admin', 'Admin', 0, ?)`,
+          )
+          .run(f.group.id, request.at),
+      );
+      expect(f.team.approvals.project(admin, canonical, f.group.id).replyToPreview?.body).toBe(
+        'CONFIDENTIAL_ANSWER',
+      );
+      const read = f.channels.message.bind(f.channels);
+      for (const state of ['missing', 'purged'] as const) {
+        const spy = vi.spyOn(f.channels, 'message').mockImplementation((channel, id) =>
+          id === request.id
+            ? state === 'missing'
+              ? undefined
+              : {
+                  id,
+                  at: request.at,
+                  author: request.author,
+                  body: '',
+                  contentPurge: { at: request.at },
+                }
+            : read(channel, id),
+        );
+        expect(f.team.approvals.project(admin, canonical, f.group.id).replyToPreview).toBeNull();
+        spy.mockRestore();
+      }
+    },
+  );
 
   it('requires current roles, refuses suspended deciders and never grants an unjoined administrator access', async () => {
     const f = fixture();

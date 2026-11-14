@@ -620,30 +620,15 @@ export class ChannelUserQuestions {
           const answeringHuman =
             this.#timed?.answeringHuman?.(pending.sessionId, pending.callId, native.answer) ??
             pending.answeringHuman;
-          const saved = await this.#channels.appendMessage(
-            answeringHuman ?? OWNER_HUMAN_CONTEXT,
+          const saved = await this.#channels.reconcileQuestionAnswer(
+            answeringHuman,
             pending.channelId,
             {
-              id: randomUUID(),
-              at: new Date().toISOString(),
-              author: answeringHuman ? { kind: 'human' } : { kind: 'system' },
-              body: native.answer.answers
-                .map((item) => item.custom ?? item.selected.join(', '))
-                .join('\n'),
-              replyTo: id,
-              userQuestionResolution: {
-                requestMessageId: id,
-                state: 'answered',
-                answers: native.answer.answers,
-                ...(answeringHuman
-                  ? {
-                      decidedBy: this.approvals?.decider(answeringHuman) ?? {
-                        humanId: answeringHuman.humanId,
-                      },
-                    }
-                  : {}),
-              },
+              messageId: id,
+              sessionId: pending.sessionId,
+              callId: pending.callId,
             },
+            native.answer,
           );
           if (saved !== undefined && this.#pending.get(id) === pending) {
             this.#pending.delete(id);
@@ -658,7 +643,11 @@ export class ChannelUserQuestions {
 
   discardReply(sessionId: string, callId: string): void {
     for (const pending of this.#pending.values())
-      if (pending.sessionId === sessionId && pending.callId === callId) pending.submitted = false;
+      if (pending.sessionId === sessionId && pending.callId === callId) {
+        this.#timed?.discardAnswer?.(sessionId, callId);
+        pending.submitted = false;
+        pending.answeringHuman = undefined;
+      }
   }
 
   #answerFailure(messageId: string, pending: Pending, phase: string, error: unknown): void {
