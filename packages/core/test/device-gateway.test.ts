@@ -337,7 +337,6 @@ it('never uses the Owner session for a grant that is not bound to the current Ow
       headers: { authorization },
     })
   ).json()) as { ticket: string };
-  // The grant now belongs to a Human who is not the Host Owner (a member grant or a transferred Owner).
   ownerHumanId = 'not-the-owner';
   const refused = { code: 'device-revoked' };
   const unary = await fetch(`${host.base}/botharness-device/api/botharness/list`, {
