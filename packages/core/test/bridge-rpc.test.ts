@@ -689,7 +689,14 @@ describe('bridge typert service', () => {
     const { service } = setup();
 
     expect(remoteMethods(service).map((marker) => marker.exportName ?? marker.method)).toEqual([
+      'privateObjects',
+      'privateContentOpen',
+      'privateContentPage',
+      'auditLog',
+      'auditVerify',
       'teamMode',
+      'modelsAllowed',
+      'usageByMember',
       'teamModeSet',
       'teamOwnerPasswordSet',
       'teamInsecureHttpSet',

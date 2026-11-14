@@ -11,6 +11,8 @@ import { Note } from './ds/note.js';
 import { SettingsRow, SettingsRows, SettingsSection } from './ds/settings-row.js';
 import { color, radius, space, text } from './ds/tokens.stylex.js';
 import type { BotHarnessKey, BotHarnessTranslate } from './locale.js';
+import { TeamUsageSection } from './team-usage-section.js';
+import { USAGE_VIEW } from './team-usage.js';
 import { useMountedResource } from './mounted-resource.js';
 import { AuditLogSection } from './team-audit.js';
 import { AUDIT_VIEW } from './team-audit-bridge.js';
@@ -123,8 +125,11 @@ const REFUSAL_COPY: Record<TeamRefusal, BotHarnessKey> = {
   'channel-post-restricted': 'team.error.channelPostRestricted',
   'channel-mention-restricted': 'team.error.channelMentionRestricted',
   'stale-channel-policy': 'team.error.staleChannelPolicy',
+  'model-not-allowed': 'team.error.modelNotAllowed',
   'object-not-found': 'team.error.objectNotFound',
   'own-content': 'team.error.ownContent',
+  'private-views-full': 'team.error.privateViewsFull',
+  'audit-integrity-failed': 'team.error.auditIntegrityFailed',
 };
 
 export function teamErrorText(t: BotHarnessTranslate, error: unknown): string {
@@ -229,6 +234,8 @@ export function TeamSection({ call, t }: TeamSectionProps): ReactElement {
   const viewer = view.viewer;
   const manageMembers = canManage(viewer, MANAGE_MEMBERS);
   const manageRoles = canManage(viewer, MANAGE_ROLES);
+  const usage =
+    view.enabled && canManage(viewer, USAGE_VIEW) ? <TeamUsageSection call={call} t={t} /> : null;
   const auditView =
     view.enabled && canManage(viewer, AUDIT_VIEW) ? <AuditLogSection call={call} t={t} /> : null;
   const sheetMember =
@@ -368,6 +375,7 @@ export function TeamSection({ call, t }: TeamSectionProps): ReactElement {
           {rowError === undefined ? null : <Note tone="danger">{rowError}</Note>}
         </SettingsSection>
         {admin}
+        {usage}
         {auditView}
         {dialog?.kind === 'my-devices' ? (
           <MyDevicesDialog
@@ -464,6 +472,7 @@ export function TeamSection({ call, t }: TeamSectionProps): ReactElement {
       ) : null}
 
       {admin}
+      {usage}
       {auditView}
 
       {dialog?.kind === 'owner-password' ? (

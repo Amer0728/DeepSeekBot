@@ -114,7 +114,8 @@ export async function openPrivateContent(
 
 export async function loadAuditLog(call: BridgeCall, signal?: AbortSignal): Promise<AuditRecord[]> {
   const value = await unwrap(call, 'auditLog', { limit: 50 }, signal);
-  return list(record(value)?.['items'] ?? value, parseAuditRecord);
+  const page = record(value);
+  return list(page?.['records'] ?? page?.['items'] ?? value, parseAuditRecord);
 }
 
 export async function verifyAudit(call: BridgeCall): Promise<boolean> {

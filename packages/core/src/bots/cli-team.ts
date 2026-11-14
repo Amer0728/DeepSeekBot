@@ -1,3 +1,4 @@
+import { privateKindSchema } from '../team/private-contract.js';
 import {
   channelPolicySchema,
   channelVisibilitySchema,
@@ -10,6 +11,9 @@ import type { BotCreateCliIo } from './bot-create-cli.js';
 
 export const TEAM_OPTIONS = {
   as: { type: 'string' },
+  after: { type: 'string' },
+  reason: { type: 'string' },
+  models: { type: 'string' },
   'human-id': { type: 'string' },
   post: { type: 'string' },
   'add-members': { type: 'string' },
@@ -30,6 +34,15 @@ export const TEAM_OPTIONS = {
   'password-stdin': { type: 'boolean' },
 } as const;
 export const TEAM_COMMANDS = [
+  { command: 'audit', description: 'list [--after] [--limit] | verify' },
+  {
+    command: 'private',
+    description:
+      'list [--member <username>] [--kind] | open <kind> <id> [--reason] | page <viewId> --before <messageId>',
+  },
+
+  { command: 'usage', description: 'members --period today|week|month|quarter' },
+  { command: 'models', description: 'allowed' },
   { command: 'dm', description: '<username>' },
   { command: 'team-directory', description: 'active DM recipients' },
   {
@@ -50,6 +63,13 @@ export const TEAM_COMMANDS = [
 ] as const;
 
 type TeamValues = {
+  after?: string;
+  limit?: string;
+  kind?: string;
+  reason?: string;
+  before?: string;
+  models?: string;
+  period?: string;
   'human-id'?: string;
   post?: string;
   'add-members'?: string;
@@ -146,19 +166,78 @@ export async function runTeamCommand(
   rpc: Rpc,
 ): Promise<unknown> {
   const [action, argument] = rest;
+  if (command === 'models' && action === 'allowed' && rest.length === 1)
+    return rpc('modelsAllowed', {});
+  if (command === 'usage' && action === 'members' && rest.length === 1) {
+    const period = values.period ?? 'today';
+    if (!['today', 'week', 'month', 'quarter'].includes(period)) return usage();
+    return rpc('usageByMember', { period });
+  }
+  if (command === 'audit') {
+    if (action === 'verify' && rest.length === 1) return rpc('auditVerify', {});
+    if (action === 'list' && rest.length === 1) {
+      const limit = values.limit === undefined ? undefined : Number(values.limit);
+      if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 200))
+        return usage();
+      return rpc('auditLog', {
+        ...(values.after === undefined ? {} : { after: values.after }),
+        ...(limit === undefined ? {} : { limit }),
+      });
+    }
+    return usage();
+  }
+  if (command === 'private') {
+    if (action === 'list' && rest.length === 1) {
+      if (values.kind !== undefined && !privateKindSchema.safeParse(values.kind).success)
+        return usage();
+      if (values.member !== undefined && values.member.length !== 1) return usage();
+      return rpc('privateObjects', {
+        ...(values.kind === undefined ? {} : { kind: values.kind }),
+        ...(values.member?.[0] === undefined ? {} : { username: values.member[0] }),
+      });
+    }
+    if (action === 'open' && rest.length === 3 && privateKindSchema.safeParse(argument).success)
+      return rpc('privateContentOpen', {
+        kind: argument,
+        objectId: rest[2],
+        ...(values.reason === undefined ? {} : { reason: values.reason }),
+      });
+    if (action === 'page' && rest.length === 2 && argument && values.before)
+      return rpc('privateContentPage', { viewId: argument, before: values.before });
+    return usage();
+  }
   if (command === 'roles') {
     if (action === 'list' && rest.length === 1) return rpc('roles', {});
     if (action === 'catalog' && rest.length === 1) return rpc('permissionCatalog', {});
     if (action === 'create' && rest.length === 1 && values.name && values.permissions !== undefined)
-      return rpc('roleCreate', { name: values.name, permissions: ids(values.permissions) });
+      return rpc('roleCreate', {
+        name: values.name,
+        permissions: ids(values.permissions),
+        ...(values.models === undefined
+          ? {}
+          : {
+              models:
+                values.models === 'all'
+                  ? { kind: 'all' }
+                  : { kind: 'only', routes: ids(values.models) },
+            }),
+      });
     if (
       action === 'update' &&
       argument &&
       rest.length === 2 &&
-      (values.name !== undefined || values.permissions !== undefined)
+      (values.name !== undefined || values.permissions !== undefined || values.models !== undefined)
     )
       return rpc('roleUpdate', {
         roleId: argument,
+        ...(values.models === undefined
+          ? {}
+          : {
+              models:
+                values.models === 'all'
+                  ? { kind: 'all' }
+                  : { kind: 'only', routes: ids(values.models) },
+            }),
         ...(values.name === undefined ? {} : { name: values.name }),
         ...(values.permissions === undefined ? {} : { permissions: ids(values.permissions) }),
       });

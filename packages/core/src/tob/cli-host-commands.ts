@@ -168,7 +168,7 @@ export const TOB_HOST_CLI_READS: ReadonlySet<string> = new Set([
 ]);
 
 const REFUSED_OPTIONS = ['--host', '--token-file', '--home'];
-const REFUSED_COMMANDS = new Set(['ssh-tunnel', 'voice-local-kit']);
+const REFUSED_COMMANDS = new Set(['ssh-tunnel', 'voice-local-kit', 'audit', 'private']);
 const MAX_ARGS = 256;
 const MAX_ARG_BYTES = 64 * 1024;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
