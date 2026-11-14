@@ -60,12 +60,10 @@ async function scenario(missing: boolean) {
           expect(() =>
             nativeFileSpaceDenial(core, session as never, 'write', { file_path: originalPath }),
           ).toThrow(/explicit edit-original/);
-          expect(native('write', core.attachments.fileTarget(independent.fileId!).path)).toBe(
-            'grant-protected-path',
+          expect(native('write', core.attachments.fileTarget(independent.fileId!).path)).toMatch(
+            /outside/,
           );
-          expect(native('write', join(dirname(originalPath), 'other.txt'))).toBe(
-            'grant-protected-path',
-          );
+          expect(native('write', join(dirname(originalPath), 'other.txt'))).toMatch(/outside/);
           expect(
             core.runtime.originalAttachmentRoot?.('another-session', originalPath, 'read'),
           ).toBeUndefined();

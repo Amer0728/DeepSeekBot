@@ -342,6 +342,8 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       list: () => [workspace],
     });
     const f = fixture({ coreOptions: { workspaces } });
+    workspace.path = join(f.dshHome, 'spaces/bob/files/project');
+    mkdirSync(workspace.path, { recursive: true });
     const bot = createBot(f);
     const grant = await f.core.grants.create(bot.bot.slug, workspace.id);
     const rule = f.core.toolRules.createPending({

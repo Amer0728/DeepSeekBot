@@ -9236,6 +9236,21 @@ function buildBridgeMethods(
           ok: false,
           error: { code: target.code, message: target.message },
         };
+      try {
+        const bot = deps.registry.get(slug);
+        if (deps.team && bot) deps.team.spaces.assertMemoryPath(botOwner(bot), slug, target.to);
+      } catch (error) {
+        if (error instanceof WorkspaceGrantError)
+          return {
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.code,
+              ...(error.details ? { details: error.details } : {}),
+            },
+          };
+        throw error;
+      }
       if (target.to === target.from)
         return { ok: true, value: { memoryDir: target.from, moved: false } };
       try {

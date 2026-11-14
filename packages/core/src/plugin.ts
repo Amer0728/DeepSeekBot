@@ -748,6 +748,13 @@ function initializeCore(
     registry = createPersonaBotRegistry({
       rootDir,
       defaultMemoryPath: (slug, humanId) => accountMemoryPath(realpathSync(dshHome), humanId, slug),
+      validateMemoryPath: (slug, humanId, path) => spaces.assertMemoryPath(humanId, slug, path),
+      creationTopics: ['workspace-grants'],
+      onCreated: (bot, connection) => {
+        const humanId = bot.ownerHumanId ?? team.ownerContext().humanId;
+        if (!team.isOwner(humanContext(humanId)))
+          grants.initializeAccount(bot.slug, 'spaces/' + humanId, connection);
+      },
       database: operationalDatabase,
       onImport: (event) =>
         options.warn?.(

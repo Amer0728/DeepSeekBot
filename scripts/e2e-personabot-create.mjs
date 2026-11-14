@@ -2,6 +2,7 @@ import { processIsRunning } from './dev-instance-lifecycle.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { randomUUID } from 'node:crypto';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -260,6 +261,17 @@ try {
   });
   const slug = created.bot?.slug;
   if (typeof slug !== 'string') throw new Error('PersonaBot creation returned no slug');
+  await rpc(port, 'botharness', 'teamOwnerPasswordSet', { password: 'smoke-' + randomUUID() });
+  for (const enabled of [false, true]) {
+    await rpc(port, 'botharness', 'teamModeSet', { enabled });
+    const currentOptions = await rpc(port, 'botharness', 'workspaceOptions');
+    if (!currentOptions.workspaces.some((entry) => entry.id === workspaceId))
+      throw new Error('Owner native Workspace option disappeared after changing Team mode');
+    const granted = await rpc(port, 'botharness', 'grantCreate', { slug, workspaceId });
+    if (granted.grant?.workspaceId !== workspaceId)
+      throw new Error('Owner native Workspace Grant was refused after changing Team mode');
+  }
+  await rpc(port, 'botharness', 'teamModeSet', { enabled: false });
   const dm = await rpc(port, 'botharness', 'channelDm', { slug, displayName });
   const channelId = dm.channel?.id;
   if (typeof channelId !== 'string') throw new Error('PersonaBot DM Channel is unavailable');
@@ -439,6 +451,7 @@ try {
       version,
       result: 'pass',
       workspaceCreated: true,
+      ownerNativeGrantsInBothModes: true,
       personaBotCreated: true,
       persistedAfterRestart: true,
       gitMemoryReady: true,
