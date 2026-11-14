@@ -6,7 +6,11 @@ import { describe, expect, it } from 'vitest';
 import { createCore } from '../src/plugin.js';
 import { attachOperationalModule } from '../src/database/owner.js';
 import { createDshBotAgentAdapter } from '../src/runtime/dsh-bot-agent-adapter.js';
-import { nativeFileToolDenial, nativeExecutionRoot } from '../src/workspaces/grant-native-tools.js';
+import {
+  nativeFileToolDenial,
+  nativeFileSpaceDenial,
+  nativeExecutionRoot,
+} from '../src/workspaces/grant-native-tools.js';
 import { FakeAgentHost } from './dsh-agent-host-fixture.js';
 import { createTempRoot } from './helpers.js';
 import type { ChannelAttachmentRef } from '../src/attachments/ref.js';
@@ -49,7 +53,13 @@ async function scenario(missing: boolean) {
           const native = (name: string, path = originalPath) =>
             nativeFileToolDenial(core, session as never, name, { file_path: path });
           expect(native('read')).toBeUndefined();
+          expect(
+            nativeFileSpaceDenial(core, session as never, 'read', { file_path: originalPath }),
+          ).toBeUndefined();
           expect(() => native('write')).toThrow(/explicit edit-original/);
+          expect(() =>
+            nativeFileSpaceDenial(core, session as never, 'write', { file_path: originalPath }),
+          ).toThrow(/explicit edit-original/);
           expect(native('write', core.attachments.fileTarget(independent.fileId!).path)).toMatch(
             /outside/,
           );
@@ -59,6 +69,9 @@ async function scenario(missing: boolean) {
           ).toBeUndefined();
           await call(tools, 'channel_attachment_open', { ...input, access: 'edit-original' });
           expect(native('edit')).toBeUndefined();
+          expect(
+            nativeFileSpaceDenial(core, session as never, 'edit', { file_path: originalPath }),
+          ).toBeUndefined();
           expect(
             nativeExecutionRoot(core, session as never, 'edit', { file_path: originalPath }),
           ).toBe(dirname(originalPath));
@@ -162,6 +175,7 @@ async function scenario(missing: boolean) {
     body: 'Explicitly edit this original',
   });
   await core.runtime.whenIdle();
+  if (errors.length > 0) throw errors[0];
   expect(errors).toEqual([]);
   expect(turns).toBe(1);
   expect(core.runtime.originalAttachmentRoot?.(sessionId, originalPath, 'write')).toBeUndefined();

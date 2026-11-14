@@ -286,7 +286,7 @@ export function createPersonaBotDeletions(options: {
   const pathFor = (slug: string): string => {
     const record = options.registry.getHistorical(slug);
     if (record === undefined) throw new Error('PersonaBot does not exist');
-    return record.memoryDir ?? join(options.registry.rootDir, slug, 'memory');
+    return record.memoryDir ?? options.registry.defaultMemoryDirFor(slug);
   };
   const check = (
     slug: string,

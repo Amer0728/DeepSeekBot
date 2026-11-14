@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import type { OperationalDatabaseModulePort } from '../database/owner.js';
 import { memoryOwnership } from '../bots/deletion.js';
+import { canonicalPath } from './space-paths.js';
 
 const proofSchema = z.object({ path: z.string(), device: z.number(), inode: z.number() });
 const moveSchema = z.object({
@@ -19,7 +20,60 @@ export function accountMemoryPath(home: string, humanId: string, slug: string): 
   return join(home, 'spaces', humanId, 'bots', slug, 'memory');
 }
 
+export function defaultSpaceMemoryPath(
+  db: OperationalDatabaseModulePort,
+  home: string,
+  humanId: string,
+  slug: string,
+): string {
+  const owner = z
+    .object({ owner_human_id: z.string(), existing: z.string().nullable() })
+    .parse(
+      db.read((connection) =>
+        connection
+          .prepare(
+            `SELECT owner_human_id, (SELECT json_extract(body, '$.path') FROM persona_bot_memory_ownership WHERE slug = ?) AS existing FROM team_settings WHERE singleton = 1`,
+          )
+          .get(slug),
+      ),
+    );
+  const account = accountMemoryPath(home, humanId, slug);
+  if (humanId !== owner.owner_human_id || owner.existing === account) return account;
+  return join(home, 'botharness', 'bots', slug, 'memory');
+}
+
 export function relocateSpaceMemories(db: OperationalDatabaseModulePort, home: string): void {
+  const ownerMoves = z.array(moveSchema).parse(
+    db.read((connection) =>
+      connection
+        .prepare(`
+    SELECT m.* FROM workspace_memory_moves m JOIN persona_bots b USING(slug) CROSS JOIN team_settings s
+    WHERE b.owner_human_id = s.owner_human_id`)
+        .all(),
+    ),
+  );
+  for (const move of ownerMoves) {
+    if (move.source && move.target && !existsSync(move.source) && existsSync(move.target)) {
+      if (move.proof_json === null) throw new Error('space-memory-ownership-invalid');
+      const proof = proofSchema.parse(JSON.parse(move.proof_json));
+      const current = memoryOwnership(move.target);
+      if (
+        proof.path !== canonicalPath(move.source) ||
+        current.device !== proof.device ||
+        current.inode !== proof.inode
+      )
+        throw new Error('space-memory-ownership-invalid');
+      mkdirSync(dirname(proof.path), { recursive: true });
+      if (realpathSync(dirname(proof.path)) !== dirname(proof.path))
+        throw new Error('space-memory-target-unsafe');
+      renameSync(move.target, proof.path);
+    }
+    db.transaction(
+      (connection) =>
+        connection.prepare('DELETE FROM workspace_memory_moves WHERE slug = ?').run(move.slug),
+      ['workspace-spaces'],
+    );
+  }
   const moves = z
     .array(moveSchema)
     .parse(

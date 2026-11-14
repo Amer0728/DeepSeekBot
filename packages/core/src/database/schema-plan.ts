@@ -3563,7 +3563,8 @@ const WORKSPACE_SPACES_MIGRATION: SchemaMigration = {
       );
       INSERT INTO workspace_memory_moves(slug)
         SELECT b.slug FROM persona_bots b
-        WHERE NOT EXISTS (SELECT 1 FROM persona_bot_deletions d WHERE d.slug = b.slug
+        WHERE b.owner_human_id <> (SELECT owner_human_id FROM team_settings WHERE singleton = 1)
+          AND NOT EXISTS (SELECT 1 FROM persona_bot_deletions d WHERE d.slug = b.slug
           AND json_extract(d.body, '$.memory') = 'erased');
     `);
   },

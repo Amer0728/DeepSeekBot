@@ -1,4 +1,5 @@
 import { isTob, TobError } from '../tob/service.js';
+import type { DatabaseSync } from 'node:sqlite';
 import {
   existsSync,
   mkdirSync,
@@ -79,6 +80,9 @@ export interface MemoryRepositoryInitialization {
 export interface PersonaBotRegistryOptions {
   rootDir: string;
   defaultMemoryPath?: (slug: string, humanId: string) => string;
+  validateMemoryPath?: (slug: string, humanId: string, path: string) => void;
+  onCreated?: (record: PersonaBotRecord, database: DatabaseSync) => void;
+  creationTopics?: readonly string[];
   database: OperationalDatabaseOwner;
   onImport?: (event: { phase: 'complete' | 'failed'; count?: number; durationMs: number }) => void;
   now?: () => Date;
@@ -346,7 +350,7 @@ export function createPersonaBotRegistry(options: PersonaBotRegistryOptions): Pe
       return row === undefined ? undefined : decode(String(row['body']), slug);
     });
   };
-  const write = (record: PersonaBotRecord): void => {
+  const write = (record: PersonaBotRecord, creating = false): void => {
     const slug = record.slug;
     if (!isPersonaBotRecord(record, slug))
       throw new Error(`Refusing to persist an invalid PersonaBot Registry record: ${slug}`);
@@ -360,8 +364,9 @@ export function createPersonaBotRegistry(options: PersonaBotRegistryOptions): Pe
             JSON.stringify(recordSnapshot(record)),
             record.ownerHumanId ?? 'local-human',
           );
+        if (creating) options.onCreated?.(record, database);
       },
-      ['bot-registry'],
+      ['bot-registry', ...(creating ? (options.creationTopics ?? []) : [])],
     );
   };
   const deleted = (slug: string): boolean =>
@@ -531,6 +536,15 @@ export function createPersonaBotRegistry(options: PersonaBotRegistryOptions): Pe
       ...(memoryDir ? { memoryDir } : {}),
     };
     const targetMemoryDir = memoryDirOf(record);
+    try {
+      options.validateMemoryPath?.(
+        record.slug,
+        record.ownerHumanId ?? 'local-human',
+        targetMemoryDir,
+      );
+    } catch {
+      return { ok: false, reason: 'invalid-memory-dir' };
+    }
     const newMemoryDirectory = !existsSync(targetMemoryDir);
     const newBotDirectory = !existsSync(botDir(record.slug));
     try {
@@ -560,7 +574,12 @@ export function createPersonaBotRegistry(options: PersonaBotRegistryOptions): Pe
         ...(initialized.message === undefined ? {} : { detail: initialized.message }),
       };
     }
-    write(record);
+    try {
+      write(record, true);
+    } catch (error) {
+      if (newMemoryDirectory) rmSync(targetMemoryDir, { recursive: true, force: true });
+      throw error;
+    }
     if (newMemoryDirectory || memoryDir === undefined)
       recordMemoryOwnership(port, record.slug, targetMemoryDir);
     if (sync) syncDescriptor(record);
@@ -582,6 +601,7 @@ export function createPersonaBotRegistry(options: PersonaBotRegistryOptions): Pe
 
     let staging: string | undefined;
     let ownsBotDir = false;
+    let importedMemory: string | undefined;
     let created = false;
     let authorizationError: unknown;
     const checkAuthority = () => {
@@ -607,7 +627,10 @@ export function createPersonaBotRegistry(options: PersonaBotRegistryOptions): Pe
       mkdirSync(dirname(defaultMemoryDir(input.slug, input.ownerHumanId ?? 'local-human')), {
         recursive: true,
       });
-      renameSync(staging, defaultMemoryDir(input.slug, input.ownerHumanId ?? 'local-human'));
+      const target = defaultMemoryDir(input.slug, input.ownerHumanId ?? 'local-human');
+      if (existsSync(target)) return { ok: false, reason: 'invalid-memory-dir' };
+      renameSync(staging, target);
+      importedMemory = target;
       staging = undefined;
       try {
         migrateLegacySoul(defaultMemoryDir(input.slug, input.ownerHumanId ?? 'local-human'));
@@ -658,8 +681,10 @@ export function createPersonaBotRegistry(options: PersonaBotRegistryOptions): Pe
       if (staging !== undefined) rmSync(staging, { recursive: true, force: true });
       if (ownsBotDir && !created && options.database.mode === 'ready') {
         try {
-          if (read(input.slug) === undefined)
+          if (read(input.slug) === undefined) {
             rmSync(botDir(input.slug), { recursive: true, force: true });
+            if (importedMemory) rmSync(importedMemory, { recursive: true, force: true });
+          }
         } catch {}
       }
     }
@@ -740,7 +765,16 @@ export function createPersonaBotRegistry(options: PersonaBotRegistryOptions): Pe
       const record = active(slug);
       if (record === undefined) return { ok: false, reason: 'not-found' };
       const updated = { ...record };
-      if (memoryDir === undefined || memoryDir === defaultMemoryDir(slug)) delete updated.memoryDir;
+      options.validateMemoryPath?.(
+        slug,
+        record.ownerHumanId ?? 'local-human',
+        memoryDir ?? defaultMemoryDir(slug, record.ownerHumanId ?? 'local-human'),
+      );
+      if (
+        memoryDir === undefined ||
+        memoryDir === defaultMemoryDir(slug, record.ownerHumanId ?? 'local-human')
+      )
+        delete updated.memoryDir;
       else updated.memoryDir = memoryDir;
       write(updated);
       transferMemoryOwnership(port, slug, memoryDirOf(updated));

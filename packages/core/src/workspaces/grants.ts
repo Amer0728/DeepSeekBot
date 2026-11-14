@@ -112,7 +112,9 @@ export function createWorkspaceGrantStore(options: {
   validatePath?: (botSlug: string, path: string, grant: boolean) => void;
   now?: () => Date;
   createId?: () => string;
-}): WorkspaceGrantStore {
+}): WorkspaceGrantStore & {
+  initializeAccount(botSlug: string, workspaceId: string, database: DatabaseSync): void;
+} {
   const { database, workspaces } = options;
   const now = options.now ?? (() => new Date());
   const createId = options.createId ?? randomUUID;
@@ -135,6 +137,24 @@ export function createWorkspaceGrantStore(options: {
     return row === undefined ? undefined : toRecord(row);
   };
   return {
+    initializeAccount(botSlug, workspaceId, connection) {
+      const workspace = lookup().get(workspaceId);
+      if (!workspace || !isCurrentDirectory(workspace.path))
+        throw new WorkspaceGrantError('unavailable-workspace', 'unavailable-workspace');
+      options.validatePath?.(botSlug, workspace.path, true);
+      connection
+        .prepare(`INSERT INTO workspace_grants
+        (id, bot_slug, workspace_id, workspace_path, workspace_title, created_at, orchestrator_write, write_revision)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 1)`)
+        .run(
+          createId(),
+          botSlug,
+          workspaceId,
+          workspace.path,
+          workspace.title,
+          now().toISOString(),
+        );
+    },
     ...(options.validateTree ? { validateTree: options.validateTree } : {}),
     validatePath: (slug, path, grant = false) => options.validatePath?.(slug, path, grant),
     list(botSlug) {

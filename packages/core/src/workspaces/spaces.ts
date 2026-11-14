@@ -6,15 +6,28 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  type Stats,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import type { OperationalDatabaseModulePort } from '../database/owner.js';
-import type { HumanContext } from '../humans/context.js';
+import { humanContext, type HumanContext } from '../humans/context.js';
 import type { TeamRoles } from '../team/roles.js';
 import { TeamError } from '../team/error.js';
 import { WorkspaceGrantError, type DshWorkspace, type DshWorkspaceLookup } from './grants.js';
 import { canonicalPath, within } from './space-paths.js';
+import { accountMemoryPath } from './space-memory.js';
+
+function containsFile(root: string, identity: Pick<Stats, 'dev' | 'ino'>): boolean {
+  if (!existsSync(root)) return false;
+  const entry = lstatSync(root);
+  if (entry.isSymbolicLink()) return false;
+  if (entry.isFile()) return entry.dev === identity.dev && entry.ino === identity.ino;
+  return (
+    entry.isDirectory() &&
+    readdirSync(root).some((name) => containsFile(join(root, name), identity))
+  );
+}
 
 export const spaceAudienceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('everyone') }).strict(),
@@ -35,7 +48,13 @@ const rowSchema = z.object({
   audience_json: z.string().nullable(),
 });
 type SpaceRow = z.infer<typeof rowSchema>;
-const botSchema = z.object({ owner: z.string(), memory: z.string().nullable(), slug: z.string() });
+const botSchema = z.object({
+  owner: z.string(),
+  memory: z.string().nullable(),
+  slug: z.string(),
+  hostOwner: z.coerce.boolean(),
+  retained: z.string().nullable(),
+});
 
 export class WorkspaceSpaces {
   readonly home: string;
@@ -283,15 +302,19 @@ export class WorkspaceSpaces {
       .parse(
         this.db.read((connection) =>
           connection
-            .prepare(`SELECT slug, owner_human_id AS owner,
-      json_extract(body, '$.memoryDir') AS memory FROM persona_bots`)
+            .prepare(`SELECT slug, b.owner_human_id AS owner,
+      json_extract(body, '$.memoryDir') AS memory, b.owner_human_id = s.owner_human_id AS hostOwner,
+      (SELECT json_extract(p.body, '$.path') FROM persona_bot_memory_ownership p WHERE p.slug = b.slug) AS retained FROM persona_bots b CROSS JOIN team_settings s`)
             .all(),
         ),
       )
       .map((bot) => ({
         ...bot,
         memory: canonicalPath(
-          bot.memory ?? join(this.home, 'botharness', 'bots', bot.slug, 'memory'),
+          bot.memory ??
+            (!bot.hostOwner || bot.retained === accountMemoryPath(this.home, bot.owner, bot.slug)
+              ? accountMemoryPath(this.home, bot.owner, bot.slug)
+              : join(this.home, 'botharness', 'bots', bot.slug, 'memory')),
         ),
       }));
   }
@@ -307,6 +330,14 @@ export class WorkspaceSpaces {
   }
   assertPath(botSlug: string, input: string, grant = false): void {
     this.pathCheck(botSlug, grant)(input);
+  }
+  assertMemoryPath(humanId: string, slug: string, input: string): void {
+    if (this.roles.isOwner(humanContext(humanId))) return;
+    const root = this.ensureAccount(humanId);
+    const path = canonicalPath(input);
+    if (!within(root, path)) this.refuse('grant-foreign-space', path);
+    if (path !== accountMemoryPath(this.home, humanId, slug))
+      this.refuse('grant-protected-path', path, 'spaces/' + humanId);
   }
   assertTree(botSlug: string, input: string): void {
     const check = this.pathCheck(botSlug, false);
@@ -328,6 +359,7 @@ export class WorkspaceSpaces {
     const bots = this.memories();
     const bot = bots.find((entry) => entry.slug === botSlug);
     const owner = bot?.owner ?? this.roles.ownerContext().humanId;
+    const hostOwner = this.roles.isOwner(humanContext(owner));
     const rows = this.rows();
     const roleIds = this.roleIds(owner);
     return (input) => {
@@ -337,6 +369,7 @@ export class WorkspaceSpaces {
       } catch {
         return this.refuse('grant-protected-path', resolve(input));
       }
+      if (!bot) this.refuse('grant-protected-path', path);
       for (const memory of bots)
         if ((grant || memory.slug !== botSlug) && within(memory.memory, path))
           this.refuse(
@@ -344,6 +377,15 @@ export class WorkspaceSpaces {
             path,
             rows.find((row) => within(this.path(row.space_id), memory.memory))?.space_id,
           );
+      if (hostOwner) {
+        if (existsSync(path) && statSync(path).isFile() && statSync(path).nlink > 1) {
+          const identity = statSync(path);
+          for (const memory of bots)
+            if ((grant || memory.slug !== botSlug) && containsFile(memory.memory, identity))
+              this.refuse('grant-protected-path', path);
+        }
+        return;
+      }
       for (const row of rows) {
         const root = this.path(row.space_id);
         if (!within(root, path) && !within(path, root)) continue;
@@ -373,15 +415,22 @@ export class WorkspaceSpaces {
       const managed = rows.some((row) => within(this.path(row.space_id), path));
       if (!ownMemory && !managed && (within(this.home, path) || within(path, this.home)))
         this.refuse('grant-protected-path', path);
+      if (
+        !ownMemory &&
+        !rows.some((row) =>
+          row.kind === 'account'
+            ? row.owner_human_id === owner && within(join(this.path(row.space_id), 'files'), path)
+            : within(this.path(row.space_id), path),
+        )
+      )
+        this.refuse(
+          'grant-protected-path',
+          path,
+          rows.find((row) => within(this.path(row.space_id), path))?.space_id,
+        );
       if (existsSync(path) && statSync(path).isFile() && statSync(path).nlink > 1) {
         const identity = statSync(path);
-        const scan = (root: string): boolean => {
-          if (!existsSync(root)) return false;
-          const entry = lstatSync(root);
-          if (entry.isSymbolicLink()) return false;
-          if (entry.isFile()) return entry.dev === identity.dev && entry.ino === identity.ino;
-          return entry.isDirectory() && readdirSync(root).some((name) => scan(join(root, name)));
-        };
+        const scan = (root: string): boolean => containsFile(root, identity);
         for (const row of rows) {
           if (
             row.kind === 'account' &&
