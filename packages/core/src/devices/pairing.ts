@@ -570,7 +570,7 @@ export function createDevicePairing(options: DevicePairingOptions): DevicePairin
       for (const close of open) close();
       const revoked = Number(changed) !== 0 || open.length !== 0;
       if (revoked) record({ phase: 'device-revoked', deviceId, closedStreams: open.length });
-      if (known) options.onRevoked?.(deviceId);
+      if (known || revoked) options.onRevoked?.(deviceId);
       return { revoked, closedStreams: open.length };
     },
 
