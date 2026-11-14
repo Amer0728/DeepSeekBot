@@ -25,6 +25,7 @@ async function host(
   },
   policyFailure?: { code: string; message: string },
   failure?: { code: string; details: Record<string, string> },
+  memberValue?: object,
 ) {
   const calls: Array<{ path: string; input: Record<string, unknown> }> = [];
   const server = createServer(async (request, response) => {
@@ -82,8 +83,9 @@ async function host(
     } else if (request.url === '/api/botharness/team-as')
       response.end(
         JSON.stringify({
-          ok: false,
-          error: memberFailure,
+          ...(memberValue === undefined
+            ? { ok: false, error: memberFailure }
+            : { ok: true, value: memberValue }),
         }),
       );
     else
@@ -716,11 +718,19 @@ describe('M9 lifecycle CLI', () => {
 });
 
 describe('M2 CLI member Bot and Activity dispatch', () => {
+  it('reports no Tob as an available:false success under --as without Owner fallback', async () => {
+    const f = await host(undefined, undefined, undefined, { available: false });
+    const result = await run(f.url, ['--as', 'bob', 'tob-home']);
+    expect(result.status).toBe(0);
+    expect(result.output).toEqual({ available: false });
+    expect(f.calls.filter((call) => call.path === '/api/botharness/team-as')).toHaveLength(1);
+    expect(f.calls.at(-1)?.input).toMatchObject({ method: 'tobHome', args: {} });
+  });
   it.each([
     {
       code: 'permission-required',
       message: 'permission-required',
-      details: { permission: 'bots.create' },
+      details: { permission: 'bots.createPrivate' },
     },
     { code: 'member-suspended', message: 'member-suspended' },
   ])('preserves $code from bots create --as without Owner fallback', async (failure) => {

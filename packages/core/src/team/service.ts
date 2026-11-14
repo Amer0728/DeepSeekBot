@@ -503,7 +503,7 @@ export class TeamService {
     if (this.credential(member.humanId)?.hash.hash !== credential?.hash.hash)
       throw new TeamError('credentials-invalid');
     this.active(this.member(member.humanId));
-    await this.ensureTob?.(humanContext(member.humanId));
+    if (member.owner) await this.ensureTob?.(humanContext(member.humanId));
     if (this.credential(member.humanId)?.hash.hash !== credential?.hash.hash)
       throw new TeamError('credentials-invalid');
     this.active(this.member(member.humanId));
@@ -855,7 +855,7 @@ export class TeamService {
         db
           .prepare(`SELECT b.slug, json_extract(b.body, '$.displayName') AS displayName FROM persona_bots b
         WHERE b.owner_human_id = ?
-        ${transferable ? 'AND NOT EXISTS (SELECT 1 FROM persona_bot_deletions d WHERE d.slug = b.slug) AND NOT EXISTS (SELECT 1 FROM tob_identity t WHERE t.bot_slug = b.slug)' : ''}
+        ${transferable ? 'AND NOT EXISTS (SELECT 1 FROM persona_bot_deletions d WHERE d.slug = b.slug) AND NOT EXISTS (SELECT 1 FROM tob_identity t JOIN team_settings s ON s.owner_human_id = t.human_id WHERE t.bot_slug = b.slug)' : ''}
         ORDER BY b.slug`)
           .all(humanId),
       ),

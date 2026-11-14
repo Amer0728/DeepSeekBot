@@ -1,3 +1,15 @@
+export const MEMBER_BOT_IMPORT_METHODS = [
+  'createFromGit',
+  'botImportPreview',
+  'botImportLookup',
+  'zipUploadBegin',
+  'zipUploadChunk',
+  'zipUploadPreview',
+  'zipImport',
+  'zipImportLookup',
+  'marketplaceInstall',
+] as const;
+
 export const MEMBER_GLOBAL_METHODS = [
   'teamMode',
   'modelsAllowed',
@@ -52,6 +64,7 @@ export const MEMBER_GLOBAL_METHODS = [
   'onboarding',
   'create',
   'createLookup',
+  ...MEMBER_BOT_IMPORT_METHODS,
   'modelPresets',
   'humanAttention',
   'humanAttentionStatus',
