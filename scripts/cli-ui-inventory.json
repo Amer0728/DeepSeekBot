@@ -1096,7 +1096,10 @@
         "setting:packages/client/src/client/team-roles.tsx:{name}",
         "setting:packages/client/src/client/team-roles.tsx:{roleLabel(t, role)}",
         "setting:packages/client/src/client/team-roles.tsx:{t('team.roles.title')}",
-        "setting:packages/client/src/client/team-settings.tsx:{t('team.devices.mine')}"
+        "setting:packages/client/src/client/team-settings.tsx:{t('team.devices.mine')}",
+        "setting:packages/client/src/client/team-audit.tsx:{object.name}",
+        "setting:packages/client/src/client/team-audit.tsx:{label}",
+        "setting:packages/client/src/client/team-audit.tsx:{t('team.audit.integrity')}"
       ],
       "commands": ["team-mode", "members", "channels", "roles", "devices", "dm"]
     },

@@ -28,6 +28,8 @@ import {
   type TeamRole,
 } from './team-roles-bridge.js';
 import { MemberActions } from './team-offboarding.js';
+import { PrivateContentEntry } from './team-audit.js';
+import { PRIVATE_VIEW } from './team-audit-bridge.js';
 import { teamErrorText } from './team-settings.js';
 
 const styles = stylex.create({
@@ -430,6 +432,9 @@ export function MemberSheet({
           self={self}
           onRevoked={() => refresh()}
         />
+        {(viewer.owner || viewer.permissions.includes(PRIVATE_VIEW)) && !self ? (
+          <PrivateContentEntry call={call} t={t} member={member} />
+        ) : null}
         {canOffboard && !self && !member.owner ? (
           <MemberActions
             call={call}

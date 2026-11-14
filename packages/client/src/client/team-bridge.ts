@@ -68,6 +68,8 @@ export const TEAM_REFUSALS = [
   'channel-post-restricted',
   'channel-mention-restricted',
   'stale-channel-policy',
+  'object-not-found',
+  'own-content',
 ] as const;
 export type TeamRefusal = (typeof TEAM_REFUSALS)[number];
 

@@ -12,6 +12,8 @@ import { SettingsRow, SettingsRows, SettingsSection } from './ds/settings-row.js
 import { color, radius, space, text } from './ds/tokens.stylex.js';
 import type { BotHarnessKey, BotHarnessTranslate } from './locale.js';
 import { useMountedResource } from './mounted-resource.js';
+import { AuditLogSection } from './team-audit.js';
+import { AUDIT_VIEW } from './team-audit-bridge.js';
 import {
   TEAM_ENTRY_PATH,
   TEAM_PASSWORD_MIN_LENGTH,
@@ -121,6 +123,8 @@ const REFUSAL_COPY: Record<TeamRefusal, BotHarnessKey> = {
   'channel-post-restricted': 'team.error.channelPostRestricted',
   'channel-mention-restricted': 'team.error.channelMentionRestricted',
   'stale-channel-policy': 'team.error.staleChannelPolicy',
+  'object-not-found': 'team.error.objectNotFound',
+  'own-content': 'team.error.ownContent',
 };
 
 export function teamErrorText(t: BotHarnessTranslate, error: unknown): string {
@@ -225,6 +229,8 @@ export function TeamSection({ call, t }: TeamSectionProps): ReactElement {
   const viewer = view.viewer;
   const manageMembers = canManage(viewer, MANAGE_MEMBERS);
   const manageRoles = canManage(viewer, MANAGE_ROLES);
+  const auditView =
+    view.enabled && canManage(viewer, AUDIT_VIEW) ? <AuditLogSection call={call} t={t} /> : null;
   const sheetMember =
     dialog?.kind === 'member' ? members?.find((row) => row.humanId === dialog.humanId) : undefined;
   const admin =
@@ -321,6 +327,7 @@ export function TeamSection({ call, t }: TeamSectionProps): ReactElement {
       <SettingsRows rootRef={mount}>
         <SettingsSection title={t('team.account.title')}>
           <SettingsRow title={view.viewer.displayName} description={t('team.account.memberOf')} />
+          {view.enabled ? <Note>{t('team.private.memberNotice')}</Note> : null}
           <SettingsRow
             title={t('team.account.password')}
             control={
@@ -361,6 +368,7 @@ export function TeamSection({ call, t }: TeamSectionProps): ReactElement {
           {rowError === undefined ? null : <Note tone="danger">{rowError}</Note>}
         </SettingsSection>
         {admin}
+        {auditView}
         {dialog?.kind === 'my-devices' ? (
           <MyDevicesDialog
             call={call}
@@ -456,6 +464,7 @@ export function TeamSection({ call, t }: TeamSectionProps): ReactElement {
       ) : null}
 
       {admin}
+      {auditView}
 
       {dialog?.kind === 'owner-password' ? (
         <OwnerPasswordDialog
