@@ -68,6 +68,76 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it.each(['enroll', 'route'] as const)(
+  'renews %s cooldowns at capacity and releases retired relationship slots',
+  async (mode) => {
+    vi.useFakeTimers();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
+    const fresh = 'https://hcccccccccccc.deepseekbot.dev';
+    const make = (index: number) => ({
+      ...relationship(),
+      id: index.toString(16).padStart(32, '0'),
+      peer: { ...relationship().peer, id: `peer-${index}`, routes: [fresh] },
+      state: 'active',
+      direction: 'incoming',
+      expiresAt: 600_000,
+      peerRevocationPending: false,
+      accountOrigin: {
+        accountId: 'account',
+        localRegistrationId: 'haaaaaaaaaaaa',
+        peerRegistrationId: 'hcccccccccccc',
+        officialOrigin: fresh,
+      },
+    });
+    let relationships = Array.from({ length: 32 }, (_, index) => make(index));
+    const storage = memoryStorage();
+    if (mode === 'route')
+      storage.setItem(
+        REMOTE_HOSTS_STORAGE_KEY,
+        JSON.stringify(
+          relationships.map((item) => {
+            const { relationshipEnrollment: _pending, ...saved } = grant(item.peer.id).host;
+            return { ...saved, relationshipId: item.id };
+          }),
+        ),
+      );
+    const source = createRemoteHosts({ storage, carrier });
+    const attempts: string[] = [];
+    vi.spyOn(source, 'enrollRelationship').mockImplementation(async (item) => {
+      attempts.push(item.peer.id);
+      return { ok: false, code: 'unreachable' };
+    });
+    vi.spyOn(source, 'learnRelationshipRoutes').mockImplementation(async (peer) => {
+      attempts.push(peer.id);
+      throw new Error('route-update-refused');
+    });
+    const stop = startAccountEnvironments({
+      sources: source,
+      clientName: 'Desktop',
+      request: async () => ({ state: 'complete', generation: 'account', relationships }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(attempts).toEqual(relationships.map((item) => item.peer.id));
+      clock.mockReturnValue(30_000);
+      await vi.advanceTimersByTimeAsync(2500);
+      expect(attempts.slice(-2)).toEqual(['peer-0', 'peer-1']);
+      await vi.advanceTimersByTimeAsync(2500);
+      expect(attempts.slice(-2)).toEqual(['peer-2', 'peer-3']);
+      relationships = [make(33)];
+      await vi.advanceTimersByTimeAsync(2500);
+      expect(attempts.at(-1)).toBe('peer-33');
+      const count = attempts.length;
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(attempts).toHaveLength(count);
+    } finally {
+      stop();
+      clock.mockRestore();
+      vi.useRealTimers();
+    }
+  },
+);
+
 it('keeps other enrollment work moving around an unavailable Host and cancels pending work on sign-out', async () => {
   vi.useFakeTimers();
   const source = createRemoteHosts({ storage: memoryStorage(), carrier });
@@ -184,24 +254,28 @@ it('refuses a queued route update after another writer replaces the saved Client
   expect(storage.getItem(REMOTE_HOSTS_STORAGE_KEY)).toBe(changed);
 });
 
-it('refuses additive official-route overflow without dropping existing routes, preference or credential', async () => {
-  const storage = memoryStorage();
-  const { relationshipEnrollment: _pending, ...saved } = grant().host;
-  const routes = Array.from({ length: 8 }, (_, index) => `https://independent-${index}.ts.net`);
-  const host = { ...saved, routes, routePreference: routes[0] };
-  const original = JSON.stringify([host]);
-  storage.setItem(REMOTE_HOSTS_STORAGE_KEY, original);
-  const source = createRemoteHosts({ storage, carrier });
-  await expect(
-    source.learnRelationshipRoutes(
-      { ...relationship().peer, routes: ['https://hcccccccccccc.deepseekbot.dev'] },
-      undefined,
-      'merge-existing',
-    ),
-  ).rejects.toThrow('relationship-route-limit');
-  expect(storage.getItem(REMOTE_HOSTS_STORAGE_KEY)).toBe(original);
-  expect(source.getSnapshot().hosts[0]?.host).toEqual(host);
-});
+it.each(['independent', 'official-looking'] as const)(
+  'refuses additive official-route overflow without guessing the provenance of %s routes',
+  async (mode) => {
+    const storage = memoryStorage();
+    const { relationshipEnrollment: _pending, ...saved } = grant().host;
+    const routes = Array.from({ length: 8 }, (_, index) => `https://independent-${index}.ts.net`);
+    if (mode === 'official-looking') routes[0] = saved.routes[0]!;
+    const host = { ...saved, routes, routePreference: routes[0] };
+    const original = JSON.stringify([host]);
+    storage.setItem(REMOTE_HOSTS_STORAGE_KEY, original);
+    const source = createRemoteHosts({ storage, carrier });
+    await expect(
+      source.learnRelationshipRoutes(
+        { ...relationship().peer, routes: ['https://hcccccccccccc.deepseekbot.dev'] },
+        undefined,
+        'merge-existing',
+      ),
+    ).rejects.toThrow('relationship-route-limit');
+    expect(storage.getItem(REMOTE_HOSTS_STORAGE_KEY)).toBe(original);
+    expect(source.getSnapshot().hosts[0]?.host).toEqual(host);
+  },
+);
 
 it.each(['public', 'private', 'wrong-pin'] as const)(
   'learns a verified fresh official route without minting over an existing %s Client',
@@ -415,7 +489,8 @@ it('retries the same persisted confirmation after a Client restart before starti
   const storage = memoryStorage();
   storage.setItem(REMOTE_HOSTS_STORAGE_KEY, JSON.stringify([grant().host]));
   const request = vi.fn(carrier.request);
-  const source = createRemoteHosts({ storage, carrier: { ...carrier, request } });
+  const openSocket = vi.fn(carrier.openSocket);
+  const source = createRemoteHosts({ storage, carrier: { ...carrier, request, openSocket } });
   const item = {
     ...relationship(),
     direction: 'outgoing',
@@ -427,13 +502,24 @@ it('retries the same persisted confirmation after a Client restart before starti
     'fetch',
     vi.fn(async () => Response.json({ relationships: [item] })),
   );
-  vi.spyOn(enrollment, 'commitRelationshipEnrollment').mockResolvedValue('committed');
+  let confirm: (state: 'committed') => void = () => {};
+  const commit = vi.spyOn(enrollment, 'commitRelationshipEnrollment').mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        confirm = resolve;
+      }),
+  );
   expect(request).not.toHaveBeenCalled();
   releases.push(source.subscribe(() => {}));
+  await vi.waitFor(() => expect(commit).toHaveBeenCalled());
+  expect(request).not.toHaveBeenCalled();
+  expect(openSocket).not.toHaveBeenCalled();
+  confirm('committed');
   await vi.waitFor(() =>
     expect(
       JSON.parse(storage.values.get(REMOTE_HOSTS_STORAGE_KEY) ?? '[]')[0]?.relationshipEnrollment,
     ).toBeUndefined(),
   );
   expect(source.getSnapshot().hosts[0]?.host.deviceId).toBe('device-b');
+  await vi.waitFor(() => expect(openSocket).toHaveBeenCalled());
 });

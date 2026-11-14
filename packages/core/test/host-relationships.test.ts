@@ -15,7 +15,7 @@ const peer = {
   routes: ['http://127.0.0.1:31002'],
 };
 const client = { publicKey: 'cd'.repeat(32), name: 'Desktop A' };
-function fixture() {
+function fixture(onRevoked?: (deviceId: string) => void) {
   const home = createTempRoot('relationship-');
   let clock = Date.now();
   let ownerHumanId = 'local-human';
@@ -28,6 +28,7 @@ function fixture() {
       hostName: 'A',
       ownerHumanId: () => ownerHumanId,
       now: () => clock,
+      ...(onRevoked === undefined ? {} : { onRevoked }),
     });
     const relationships = createHostRelationships({
       database: attachOperationalModule(owner, 'host-relationships'),
@@ -53,6 +54,37 @@ function fixture() {
 }
 
 describe('Host relationship authorization', () => {
+  it('tears down a cancelled canonical grant without a Feed stream and preserves independent devices', () => {
+    const activeResources = new Set<string>();
+    const revoked: string[] = [];
+    const host = fixture((deviceId) => {
+      activeResources.delete(deviceId);
+      revoked.push(deviceId);
+    }).open();
+    const relationship = host.relationships.propose({ peer, direction: 'incoming' });
+    host.relationships.approve(relationship.id, peer.publicKey);
+    host.relationships.activate(relationship.id, peer.publicKey);
+    const offer = host.relationships.enrollment(relationship.id, peer.publicKey, client);
+    const issued = host.pairing.redeem({ offer: offer.offer, publicKey: client.publicKey });
+    const independent = host.pairing.redeem({ offer: host.pairing.createOffer().offer });
+    if (!issued.ok || !independent.ok) throw new Error('fixture pairing refused');
+    activeResources.add(issued.device.id);
+    activeResources.add(independent.device.id);
+    host.relationships.enrollments.cancelIncoming(
+      relationship.id,
+      client.publicKey,
+      relationship.expiresAt,
+    );
+    expect(activeResources.has(issued.device.id)).toBe(false);
+    expect(activeResources.has(independent.device.id)).toBe(true);
+    expect(revoked).toEqual([issued.device.id]);
+    expect(host.pairing.revoke(issued.device.id)).toEqual({ revoked: false, closedStreams: 0 });
+    expect(revoked).toEqual([issued.device.id, issued.device.id]);
+    host.pairing.revoke('unknown-device');
+    expect(revoked).toHaveLength(2);
+    expect(host.pairing.admit(`Device ${independent.credential}`).ok).toBe(true);
+  });
+
   it('keeps accepting a Client after more than 1,024 expired and revoked enrollment cycles', () => {
     const test = fixture();
     const host = test.open();

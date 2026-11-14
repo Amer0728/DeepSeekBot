@@ -16,6 +16,14 @@ export function startAccountEnvironments(options: {
   let generation: string | undefined;
   let nextDiscovery = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const renewCooldown = (id: string) => {
+    retryAt.delete(id);
+    if (retryAt.size >= 32) {
+      const oldest = retryAt.keys().next().value;
+      if (oldest !== undefined) retryAt.delete(oldest);
+    }
+    retryAt.set(id, Date.now() + 30_000);
+  };
   const poll = async () => {
     try {
       const discover = Date.now() >= nextDiscovery;
@@ -35,6 +43,7 @@ export function startAccountEnvironments(options: {
       }
       if (status.state !== 'signed-out') {
         const activeIds = new Set(status.relationships.map((item) => item.id));
+        for (const id of retryAt.keys()) if (!activeIds.has(id)) retryAt.delete(id);
         for (const [id, abort] of pending)
           if (!activeIds.has(id)) abort.abort('relationship-retired');
         for (const relationship of status.relationships) {
@@ -97,12 +106,8 @@ export function startAccountEnvironments(options: {
                 })
                 .finally(() => {
                   learning.delete(relationship.id);
-                  if (
-                    !lifetime.signal.aborted &&
-                    generation === learnedGeneration &&
-                    retryAt.size < 32
-                  )
-                    retryAt.set(relationship.id, Date.now() + 30_000);
+                  if (!lifetime.signal.aborted && generation === learnedGeneration)
+                    renewCooldown(relationship.id);
                 });
             }
             continue;
@@ -117,12 +122,8 @@ export function startAccountEnvironments(options: {
             .catch(() => undefined)
             .finally(() => {
               if (pending.get(relationship.id) === abort) pending.delete(relationship.id);
-              if (
-                !lifetime.signal.aborted &&
-                generation === enrollmentGeneration &&
-                retryAt.size < 32
-              )
-                retryAt.set(relationship.id, Date.now() + 30_000);
+              if (!lifetime.signal.aborted && generation === enrollmentGeneration)
+                renewCooldown(relationship.id);
             });
         }
       }

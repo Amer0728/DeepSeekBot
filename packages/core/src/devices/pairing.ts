@@ -555,6 +555,7 @@ export function createDevicePairing(options: DevicePairingOptions): DevicePairin
     },
 
     revoke(deviceId) {
+      const known = row(deviceId) !== undefined;
       const changed = database.transaction(
         (connection) =>
           connection
@@ -567,10 +568,10 @@ export function createDevicePairing(options: DevicePairingOptions): DevicePairin
       const open = [...(streams.get(deviceId) ?? [])];
       streams.delete(deviceId);
       for (const close of open) close();
-      if (Number(changed) === 0 && open.length === 0) return { revoked: false, closedStreams: 0 };
-      record({ phase: 'device-revoked', deviceId, closedStreams: open.length });
-      options.onRevoked?.(deviceId);
-      return { revoked: true, closedStreams: open.length };
+      const revoked = Number(changed) !== 0 || open.length !== 0;
+      if (revoked) record({ phase: 'device-revoked', deviceId, closedStreams: open.length });
+      if (known) options.onRevoked?.(deviceId);
+      return { revoked, closedStreams: open.length };
     },
 
     closeStreams() {

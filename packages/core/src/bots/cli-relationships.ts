@@ -205,9 +205,22 @@ export async function runRelationshipCommand(
     }
     if (confirmation === 'committed') {
       const { relationshipEnrollment: _pending, ...committed } = result.host;
-      writeFileSync(values.out!, `${JSON.stringify(serializeSavedHost(committed))}\n`, {
-        mode: 0o600,
-      });
+      const temporary = `${values.out!}.commit-${randomUUID()}.tmp`;
+      try {
+        writeFileSync(temporary, `${JSON.stringify(serializeSavedHost(committed))}\n`, {
+          flag: 'wx',
+          mode: 0o600,
+        });
+        renameSync(temporary, values.out!);
+      } catch {
+        try {
+          unlinkSync(temporary);
+        } catch {}
+        throw new CliLiveError(
+          'output-unavailable',
+          'The original private file was preserved. Read enrollment status before retrying.',
+        );
+      }
     }
     return {
       hostId: result.host.hostId,

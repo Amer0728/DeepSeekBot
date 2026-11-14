@@ -74,6 +74,53 @@ const link = (hostId = 'host-b') =>
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   });
 
+it('applies another tab saved routes and preference to the existing Client without writing them back', async () => {
+  const host = new FakeHost();
+  const first = 'https://first.example.ts.net';
+  const second = 'https://second.example.ts.net';
+  const saved = {
+    hostId: 'host-b',
+    hostName: 'Studio B',
+    deviceId: 'device-1',
+    credential: host.credential,
+    routes: [first],
+  };
+  const storage = memoryStorage({ [REMOTE_HOSTS_STORAGE_KEY]: JSON.stringify([saved]) });
+  const events = new EventTarget();
+  vi.stubGlobal('addEventListener', events.addEventListener.bind(events));
+  vi.stubGlobal('removeEventListener', events.removeEventListener.bind(events));
+  const source = createRemoteHosts({ storage, carrier: host.carrier });
+  const release = source.subscribe(() => {});
+  try {
+    const client = source.client('host-b');
+    assert(client);
+    await vi.waitFor(() => expect(client.getSnapshot().connection.status).toBe('connected'));
+    const updated = JSON.stringify([
+      { ...saved, routes: [first, second], routePreference: second },
+    ]);
+    storage.setItem(REMOTE_HOSTS_STORAGE_KEY, updated);
+    const write = vi.spyOn(storage, 'setItem');
+    const changed = new Event('storage');
+    Object.defineProperties(changed, {
+      key: { value: REMOTE_HOSTS_STORAGE_KEY },
+      storageArea: { value: storage },
+    });
+    events.dispatchEvent(changed);
+    await vi.waitFor(() =>
+      expect(client.getSnapshot()).toMatchObject({
+        routes: [{ url: first }, { url: second }],
+        routePreference: second,
+        connection: { status: 'connected', route: second },
+      }),
+    );
+    expect(source.client('host-b')).toBe(client);
+    expect(storage.getItem(REMOTE_HOSTS_STORAGE_KEY)).toBe(updated);
+    expect(write).not.toHaveBeenCalled();
+  } finally {
+    release();
+  }
+});
+
 describe('remote hosts', () => {
   it.each(['cancel', 'new-forget'] as const)(
     'preserves Human intent when manual pairing waits for storage and receives %s',
@@ -483,7 +530,7 @@ describe('remote hosts', () => {
     },
   );
 
-  it('keeps encrypted loopback runtime routes while projecting stored execution history', async () => {
+  it('keeps execution history while applying another tab’s encrypted loopback routes and preference', async () => {
     const host: SavedHost = {
       hostId: 'loopback-host',
       hostName: 'This computer',
@@ -500,6 +547,9 @@ describe('remote hosts', () => {
     const storage = memoryStorage({
       [REMOTE_HOSTS_STORAGE_KEY]: JSON.stringify([serializeSavedHost(host)]),
     });
+    const events = new EventTarget();
+    vi.stubGlobal('addEventListener', events.addEventListener.bind(events));
+    vi.stubGlobal('removeEventListener', events.removeEventListener.bind(events));
     const sources = createRemoteHosts({ storage, carrier: fakeCarrier().carrier });
     expect(sources.getSnapshot().hosts[0]?.host.routes).toEqual(host.routes);
     const pending = {
@@ -520,6 +570,28 @@ describe('remote hosts', () => {
     expect(persisted).not.toHaveProperty('pendingConnection');
     expect(persisted).not.toHaveProperty('connectionOwnerChanged');
     expect(persisted).not.toHaveProperty('connectionOperationUnavailable');
+    const release = sources.subscribe(() => {});
+    const changedRoute = 'http://127.0.0.1:47002';
+    const updated = JSON.stringify([
+      serializeSavedHost({
+        ...host,
+        routes: [changedRoute],
+        routePreference: changedRoute,
+      }),
+    ]);
+    storage.setItem(REMOTE_HOSTS_STORAGE_KEY, updated);
+    const write = vi.spyOn(storage, 'setItem');
+    const changed = new Event('storage');
+    Object.defineProperties(changed, {
+      key: { value: REMOTE_HOSTS_STORAGE_KEY },
+      storageArea: { value: storage },
+    });
+    events.dispatchEvent(changed);
+    expect(sources.client(host.hostId)?.getSnapshot().routePreference).toBe(changedRoute);
+    expect(sources.getSnapshot().hosts[0]?.host.pendingConnection).toEqual(pending);
+    expect(storage.getItem(REMOTE_HOSTS_STORAGE_KEY)).toBe(updated);
+    expect(write).not.toHaveBeenCalled();
+    release();
     sources.close();
   });
 
