@@ -326,10 +326,30 @@ export function createConnectAccount(options: {
   let canResumeSession = true;
   let queue: Promise<unknown> = Promise.resolve();
 
-  const serial = <T>(work: () => Promise<T>): Promise<T> => {
-    const next = queue.then(work, work);
+  const serial = <T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> => {
+    const run = () => {
+      signal?.throwIfAborted();
+      return work();
+    };
+    const next = queue.then(run, run);
     queue = next.catch(() => undefined);
-    return next;
+    if (signal === undefined) return next;
+    return new Promise<T>((resolve, reject) => {
+      const cancel = () => reject(signal.reason);
+      if (signal.aborted) cancel();
+      else signal.addEventListener('abort', cancel, { once: true });
+      next.then(
+        (value) => {
+          signal.removeEventListener('abort', cancel);
+          if (signal.aborted) cancel();
+          else resolve(value);
+        },
+        (error: unknown) => {
+          signal.removeEventListener('abort', cancel);
+          reject(error);
+        },
+      );
+    });
   };
 
   const native = (): Credentials => {
@@ -457,13 +477,9 @@ export function createConnectAccount(options: {
     return parsed.data;
   };
 
-  const refresh = async (current: AccountRecord, signal?: AbortSignal): Promise<string> => {
+  const refresh = async (current: AccountRecord): Promise<string> => {
     const generation = attempt;
-    const refreshSignal = AbortSignal.any([
-      relationshipAbort.signal,
-      AbortSignal.timeout(10_000),
-      ...(signal === undefined ? [] : [signal]),
-    ]);
+    const refreshSignal = AbortSignal.any([relationshipAbort.signal, AbortSignal.timeout(10_000)]);
     const guard = () => {
       if (refreshSignal.aborted || generation !== attempt)
         throw new AccountError('relay-unavailable');
@@ -895,14 +911,19 @@ export function createConnectAccount(options: {
     };
   };
 
-  const activityCall = (body?: Record<string, unknown>, signal?: AbortSignal) =>
+  const activityCall = (
+    body?: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<{ status: number; body: Record<string, unknown> }> =>
     serial(async () => {
       if (signal?.aborted || status.state !== 'signed-in') return { status: 503, body: {} };
       try {
         const current = await read();
+        signal?.throwIfAborted();
         if (!current?.hostId) return { status: 503, body: {} };
-        const call = (access: string) =>
-          relayCall(
+        const call = (access: string) => {
+          signal?.throwIfAborted();
+          return relayCall(
             'live-activity',
             body ? 'POST' : 'GET',
             `/v1/hosts/${current.hostId}/live-activity`,
@@ -911,16 +932,18 @@ export function createConnectAccount(options: {
             35_000,
             signal,
           );
+        };
         try {
-          return await call(cached ?? (await refresh(current, signal)));
+          return await call(cached ?? (await refresh(current)));
         } catch (error) {
           if (!(error instanceof AccountError) || error.issue !== 'session-expired') throw error;
-          return await call(await refresh(current, signal));
+          signal?.throwIfAborted();
+          return await call(await refresh(current));
         }
       } catch {
         return { status: 503, body: {} };
       }
-    });
+    }, signal).catch(() => ({ status: 503, body: {} }));
   const botNetwork = createConnectBotNetwork({
     fetch: fetcher,
     revoked: () =>
@@ -1003,7 +1026,7 @@ export function createConnectAccount(options: {
           current = await read();
           signal?.throwIfAborted();
           if (current === undefined) return { ok: false, code: 'signed-out' };
-          const access = await refresh(current, signal);
+          const access = await refresh(current);
           signal?.throwIfAborted();
           const reply = await relayCall(
             'list-hosts',
@@ -1041,7 +1064,7 @@ export function createConnectAccount(options: {
             code: error instanceof AccountError ? error.issue : 'relay-unavailable',
           };
         }
-      }),
+      }, signal).catch((): ConnectedHostsResult => ({ ok: false, code: 'relay-unavailable' })),
     async revokeConnectedHost(hostId) {
       let retryLink = false;
       const result = await serial(async (): Promise<AccountResult> => {
@@ -1139,8 +1162,9 @@ export function createConnectAccount(options: {
               const latest = await read();
               if (!latest || latest.account !== accountId || latest.hostId !== registrationId)
                 throw new AccountError('session-expired');
-              return refresh(latest, signal);
-            });
+              guard();
+              return refresh(latest);
+            }, signal);
             guard();
             reply = await relayCall(operation, method, path, token, body, 10_000, signal);
           }
