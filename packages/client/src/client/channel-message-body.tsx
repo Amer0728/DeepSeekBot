@@ -524,7 +524,14 @@ export function ChannelMessageBody({
   const format =
     message.format ?? (message.author.kind === 'human' && !humanMarkdown ? 'text' : 'markdown');
   if (message.contentPurged) return <div className="bh-bubble-body">{t('purge.purged')}</div>;
-  if (requestCard !== undefined) return <>{requestCard}</>;
+  if (requestCard !== undefined)
+    return (
+      <>
+        <OpaqueToolWarning approval={message.approval} t={t} />
+        {requestCard}
+        <ApprovalDecider approval={message.approval} t={t} />
+      </>
+    );
   if (message.onboardingWelcome?.kind === 'tob')
     return (
       <div className="bh-bubble-body">
