@@ -1,5 +1,6 @@
 import { useTeamMember } from './team-state.js';
 import { AnnouncementGate } from './announcement-gate.js';
+import { ReadFailure } from './ds/read-failure.js';
 import { humanIdOf, useSelfHumanId, SelfHumanContext } from './self-human.js';
 import { CONVERSATION_STATE_KEYS, type ConversationStateView } from './store.js';
 import { PendingDelivery } from './message-delivery.js';
@@ -320,8 +321,12 @@ function authorLabel(
       return message.author.displayName ?? humanLabel(humanName, t);
     case 'system':
       return t('main.author.system');
-    case 'bot':
-      return memberName(bots, message.author.slug);
+    case 'bot': {
+      const { slug, displayName } = message.author;
+      return bots.some((bot) => bot.slug === slug)
+        ? memberName(bots, slug)
+        : (displayName ?? t('team.someBot'));
+    }
     case 'remote-bot':
       return remoteBot?.hostId === message.author.hostId &&
         remoteBot.botSlug === message.author.slug
@@ -742,6 +747,10 @@ const MessageGroupView = memo(function MessageGroupView({
   const nameColor =
     nameSource === undefined ? undefined : botNameColor(nameSource, surface.background);
   const dm = currentDmBotSlug !== undefined;
+  const foreignBot =
+    author.kind === 'bot' && displayBot === undefined && !dm
+      ? { slug: author.slug, name: author.displayName ?? t('team.someBot') }
+      : undefined;
   const avatar =
     dm || displayBot === undefined ? undefined : (
       <PersonaBotAvatar
@@ -808,6 +817,18 @@ const MessageGroupView = memo(function MessageGroupView({
       style={bubbleStyle}
       ref={surface.probe}
     >
+      {foreignBot === undefined ? null : (
+        <span className="bh-message-group-avatar" aria-hidden="true">
+          <PersonaBotAvatar
+            t={t}
+            personaBotId={foreignBot.slug}
+            name={foreignBot.name}
+            size={28}
+            indicator={false}
+            nativeTitle={false}
+          />
+        </span>
+      )}
       {otherHuman && channelType === 'group' ? (
         <span ref={follow} className="bh-message-group-avatar">
           {withAuthorCard(
@@ -3166,14 +3187,19 @@ function ConversationView({
               <LoadingSkeleton kind="messages" label={t('messages.loading')} />
             ) : null}
             {conversation.status === 'error' && conversation.error !== undefined ? (
-              <div className="bh-error">
-                {t('messages.error', { error: conversation.error })}{' '}
-                {onRetryConversation === undefined ? null : (
-                  <button type="button" onClick={onRetryConversation}>
-                    {t('messages.retry')}
-                  </button>
-                )}
-              </div>
+              <>
+                <ReadFailure
+                  retryLabel={t('messages.retry')}
+                  onRetry={() => onRetryConversation?.()}
+                  disabled={onRetryConversation === undefined}
+                >
+                  {t('messages.loadFailed')}
+                </ReadFailure>
+                <details className="bh-session-failure-details">
+                  <summary>{t('failure.details')}</summary>
+                  <div>{conversation.error}</div>
+                </details>
+              </>
             ) : null}
             {conversation.draftNotice !== undefined ? (
               <div className="bh-note" role="status">

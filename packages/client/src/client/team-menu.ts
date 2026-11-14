@@ -10,7 +10,7 @@ const NEEDS: Readonly<Record<string, string>> = {
   'message-person': 'dm.humans',
 };
 
-const MEMBER_ITEMS: ReadonlySet<string> = new Set([
+export const MEMBER_MENU_ITEMS: ReadonlySet<string> = new Set([
   'bot',
   'channel',
   'section',
@@ -20,7 +20,7 @@ const MEMBER_ITEMS: ReadonlySet<string> = new Set([
 
 export function menuItemAllowed(id: string, viewer: MenuViewer | undefined): boolean {
   if (viewer === undefined || viewer.owner) return true;
-  if (viewer.kind === 'member' && !MEMBER_ITEMS.has(id)) return false;
+  if (viewer.kind === 'member' && !MEMBER_MENU_ITEMS.has(id)) return false;
   const needed = NEEDS[id];
   return needed === undefined || viewer.permissions.includes(needed);
 }
