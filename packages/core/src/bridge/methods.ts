@@ -1,3 +1,4 @@
+import type { ApprovalCard } from '../team/approval-contract.js';
 import { requireBotModel, botModelAllowed } from '../team/models.js';
 import { TeamError } from '../team/error.js';
 import type { UsageByMemberResult } from '../usage/overview.js';
@@ -953,6 +954,7 @@ export interface BridgeMethods extends TeamBridgeMethods {
     payload: unknown,
   ): BridgeResult<{ entries: ToolApprovalHistoryEntry[]; nextCursor?: string }>;
   toolApprovalStatus(payload: unknown): BridgeResult<{
+    approval?: ApprovalCard;
     status: 'pending' | 'expired' | 'stopped';
     expiresAt?: string;
     execution?: 'waiting-human' | 'waiting-capacity' | 'running' | 'settled' | 'needs-repair';
@@ -961,9 +963,10 @@ export interface BridgeMethods extends TeamBridgeMethods {
   toolAutoRejectionOverride(
     payload: unknown,
   ): Promise<BridgeResult<{ accepted: true; channelId: string; messageId: string }>>;
-  userQuestionStatus(
-    payload: unknown,
-  ): BridgeResult<{ status: 'pending' | 'submitted' | 'answered' | 'expired' }>;
+  userQuestionStatus(payload: unknown): BridgeResult<{
+    status: 'pending' | 'submitted' | 'answered' | 'expired';
+    approval?: ApprovalCard;
+  }>;
   userQuestionAnswer(payload: unknown): Promise<BridgeResult<{ accepted: boolean }>>;
   sessions(payload: unknown): BridgeResult<{ sessions: OwnedSessionSummary[] }>;
   botToolTrace(
@@ -2260,9 +2263,10 @@ function buildBridgeMethods(
   const askingBot = (channelId: string, messageId: string): string | undefined => {
     const channel = deps.channels.get(channelId);
     if (channel === undefined) return undefined;
-    if (channel.type === 'dm') return channel.botSlug;
+    if (channel.type === 'dm' && !channel.humanParticipants) return channel.botSlug;
     const author = deps.channels.message(channelId, messageId)?.author;
-    return author?.kind === 'bot' && channel.members.includes(author.slug)
+    return author?.kind === 'bot' &&
+      (channel.humanParticipants !== undefined || channel.members.includes(author.slug))
       ? author.slug
       : undefined;
   };
@@ -7536,6 +7540,7 @@ function buildBridgeMethods(
               source['messageId'],
               outcome,
               takeoverSurface(source['surface']),
+              human,
             ),
           },
         };
@@ -7566,6 +7571,8 @@ function buildBridgeMethods(
                     source['messageId'],
                     'human',
                     takeoverSurface(source['surface']),
+                    undefined,
+                    human,
                   ),
           },
         };
@@ -8752,7 +8759,7 @@ function buildBridgeMethods(
         return invalidInput('scope must be chat or assignments');
       return {
         ok: true,
-        value: { preset: deps.assignmentAccess.set(slug, mode, scope) },
+        value: { preset: deps.assignmentAccess.set(slug, mode, scope, human) },
       };
     },
     toolApprovalRules(payload) {

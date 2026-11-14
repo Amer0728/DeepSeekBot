@@ -1,4 +1,5 @@
 import { TeamError } from '../team/error.js';
+import { acceptedQuestionAnswer } from './accepted-question-answer.js';
 import { channelAudienceSql } from '../team/channel-contract.js';
 import { OWNER_HUMAN_CONTEXT, type HumanContext } from '../humans/context.js';
 import { allBotPreview, assertAllBotPreview, type AllBotPreview } from './all-bot-mention.js';
@@ -238,9 +239,13 @@ function noticeOrigin(
 }
 
 function sameIntent(left: ChannelMessage, right: ChannelMessage): boolean {
+  const author = (message: ChannelMessage) =>
+    message.author.kind === 'human'
+      ? { kind: 'human', humanId: message.author.humanId ?? OWNER_HUMAN_CONTEXT.humanId }
+      : message.author;
   return (
     JSON.stringify({
-      author: left.author,
+      author: author(left),
       body: left.body,
       attachments: attachmentIntent(left.attachments ?? []),
       replyTo: left.replyTo,
@@ -257,7 +262,7 @@ function sameIntent(left: ChannelMessage, right: ChannelMessage): boolean {
       genuiReplyContext: left.genuiReplyContext,
     }) ===
     JSON.stringify({
-      author: right.author,
+      author: author(right),
       body: right.body,
       attachments: attachmentIntent(right.attachments ?? []),
       replyTo: right.replyTo,
@@ -275,6 +280,20 @@ function sameIntent(left: ChannelMessage, right: ChannelMessage): boolean {
     })
   );
 }
+
+const approvalContentSql = (payload: string) =>
+  [
+    'toolApprovalRequest',
+    'userQuestionRequest',
+    'privateInputRequest',
+    'toolApprovalDecision',
+    'userQuestionResolution',
+    'privateInputResolution',
+  ]
+    .map((key) => `json_type(${payload}, '$.${key}') IS NOT NULL`)
+    .join(' OR ');
+const humanSearchTextSql = (text: string) =>
+  `CASE WHEN ${approvalContentSql('e.payload_json')} THEN botharness_channel_search_text(?, p.channel_id, p.message_id, ${text}) ELSE ${text} END`;
 
 function sourceKind(message: ChannelMessage): string {
   return message.author.kind === 'human'
@@ -363,6 +382,19 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
     if (lowerRegistered) return;
     db.function('botharness_unicode_lower', { deterministic: true }, (value: unknown) =>
       typeof value === 'string' ? value.toLowerCase() : '',
+    );
+    db.function(
+      'botharness_channel_search_text',
+      (humanId: unknown, channelId: unknown, messageId: unknown, text: unknown) => {
+        if (
+          typeof humanId !== 'string' ||
+          typeof channelId !== 'string' ||
+          typeof messageId !== 'string' ||
+          typeof text !== 'string'
+        )
+          return '';
+        return humanAccess?.searchText?.({ humanId }, channelId, messageId, text) ?? text;
+      },
     );
     lowerRegistered = true;
   };
@@ -549,14 +581,17 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
   const humanIdentity = (human: HumanContext): LocalHumanIdentity => {
     const row = database.read((db) =>
       db
-        .prepare('SELECT default_display_name FROM local_human_names WHERE human_id = ?')
+        .prepare(`SELECT n.default_display_name${sourceHumanIdentity() ? ', h.display_name' : ''}
+          FROM (SELECT ? AS human_id) actor
+          LEFT JOIN local_human_names n ON n.human_id = actor.human_id
+          ${sourceHumanIdentity() ? 'LEFT JOIN humans h ON h.human_id = actor.human_id' : ''}`)
         .get(human.humanId),
-    ) as { default_display_name: string | null } | undefined;
+    ) as { default_display_name: string | null; display_name?: string | null } | undefined;
     const defaultDisplayName = row?.default_display_name ?? null;
     return {
       humanId: human.humanId,
       defaultDisplayName,
-      displayName: defaultDisplayName ?? 'Human',
+      displayName: defaultDisplayName ?? row?.display_name ?? 'Human',
     };
   };
 
@@ -1072,12 +1107,21 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
   const append = (
     human: HumanContext,
     id: string,
-    message: ChannelMessage,
+    inputMessage: ChannelMessage,
     once: boolean,
     preview?: AllBotPreview,
     origin?: ChannelMessageOrigin,
     canCommit?: (database?: DatabaseSync) => boolean,
+    acceptedQuestion = false,
   ) => {
+    const identity = inputMessage.author.kind === 'human' ? humanIdentity(human) : undefined;
+    const message =
+      identity === undefined
+        ? inputMessage
+        : ({
+            ...inputMessage,
+            author: { kind: 'human', humanId: identity.humanId, displayName: identity.displayName },
+          } satisfies ChannelMessage);
     if (
       !sourceHumanIdentity() &&
       message.author.kind === 'human' &&
@@ -1086,7 +1130,7 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
       throw new Error('Source Event Human identity requires a current database schema');
     const channel = readRecord(id);
     if (message.author.kind === 'human') {
-      humanAccess?.requirePost(human, id, preview !== undefined);
+      if (!acceptedQuestion) humanAccess?.requirePost(human, id, preview !== undefined, message);
       for (const ref of message.channelRefs ?? [])
         if (humanAccess && !humanAccess.canRead(human, ref.channelId))
           throw new TeamError('channel-not-found');
@@ -3274,6 +3318,29 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
       if (!channel.members.includes(botSlug)) return undefined;
       return setReaction(id, 'bot', botSlug, messageId, emoji, active);
     },
+    async reconcileQuestionAnswer(human, id, reference, answer) {
+      const request = projectRows(id, placementsById(id, [reference.messageId]))[0];
+      const message = acceptedQuestionAnswer(
+        request,
+        reference,
+        answer,
+        human ? humanIdentity(human) : undefined,
+      );
+      if (!message) return undefined;
+      const result = append(
+        human ?? OWNER_HUMAN_CONTEXT,
+        id,
+        message,
+        true,
+        undefined,
+        undefined,
+        undefined,
+        true,
+      );
+      return result?.status === 'appended' || result?.status === 'existing'
+        ? result.message
+        : undefined;
+    },
     async appendMessage(human: HumanContext, id, message, origin) {
       const result = append(human, id, message, false, undefined, origin);
       return result?.status === 'appended' ? result.message : undefined;
@@ -3425,7 +3492,10 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
         values.push(query.visibleFrom);
       }
       if (query.text !== undefined && query.text.length > 0) {
-        where.push('instr(botharness_unicode_lower(e.body), ?) > 0');
+        where.push(
+          `instr(botharness_unicode_lower(${humanAccess && queryOptions?.searchHuman ? humanSearchTextSql('e.body') : 'e.body'}), ?) > 0`,
+        );
+        if (humanAccess && queryOptions?.searchHuman) values.push(queryOptions.searchHuman.humanId);
         values.push(query.text);
       }
       if (query.authorBotId !== undefined) {
@@ -3555,6 +3625,7 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
       if (channel.type === 'group' && member === undefined && !humanAccess) return undefined;
       return this.queryMessages(id, {
         ...request,
+        searchHuman: human,
         visibleFrom: member?.visible_from_revision ?? 0,
       });
     },
@@ -3588,11 +3659,23 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
         values.push(cursor.at, cursor.at, cursor.channelId, cursor.channelId, cursor.messageId);
       }
       if (indexed) {
-        where.push('inbox_history_fts MATCH ?');
+        where.push(
+          `(e.rowid IN (SELECT rowid FROM inbox_history_fts WHERE inbox_history_fts MATCH ?) ${humanAccess ? `OR ((${approvalContentSql('e.payload_json')}) AND instr(botharness_unicode_lower(botharness_channel_search_text(?, p.channel_id, p.message_id, '')), ?) > 0)` : ''})`,
+        );
         values.push('"' + text.replaceAll('"', '""') + '"');
+        if (humanAccess) values.push(human.humanId, needle);
       } else {
-        where.push('instr(botharness_unicode_lower(d.search_text), ?) > 0');
+        where.push(
+          `instr(botharness_unicode_lower(${humanAccess ? humanSearchTextSql('d.search_text') : 'd.search_text'}), ?) > 0`,
+        );
+        if (humanAccess) values.push(human.humanId);
         values.push(needle);
+      }
+      if (humanAccess && indexed) {
+        where.push(
+          `instr(botharness_unicode_lower(${humanSearchTextSql('d.search_text')}), ?) > 0`,
+        );
+        values.push(human.humanId, needle);
       }
       const rows =
         limit <= 0
@@ -3606,7 +3689,6 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
             FROM channel_placements p
             JOIN source_events e ON e.source_event_id = p.source_event_id
             JOIN inbox_history_documents d ON d.rowid = e.rowid
-            ${indexed ? 'JOIN inbox_history_fts ON inbox_history_fts.rowid = e.rowid' : ''}
             JOIN channel_records c ON c.channel_id = p.channel_id
             ${humanAccess ? "JOIN humans viewer ON viewer.human_id = ? AND viewer.status = 'active'" : ''}
         LEFT JOIN channel_human_members m ON m.channel_id = p.channel_id

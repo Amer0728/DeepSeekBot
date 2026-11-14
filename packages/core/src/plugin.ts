@@ -2,6 +2,7 @@ import { currentRoots } from './workspaces/grant-native-tools.js';
 import { recoverSpaceTransfers } from './workspaces/space-lifecycle.js';
 import { WorkspaceSpaces } from './workspaces/spaces.js';
 import { defaultSpaceMemoryPath, relocateSpaceMemories } from './workspaces/space-memory.js';
+import { questionAnswerReceipts } from './channels/question-answer-receipts.js';
 import { TeamError } from './team/error.js';
 import { requireBotModel } from './team/models.js';
 import { createMemberTobOperations } from './tob/member-operations.js';
@@ -1002,6 +1003,17 @@ function initializeCore(
     attachOperationalModule(operationalDatabase, 'messaging'),
     channels,
   );
+  const team = new TeamService(attachOperationalModule(operationalDatabase, 'team'), channels, {
+    purge: contentPurge,
+    spaces: () => spaces,
+    stopBots: async (slugs) => {
+      if (!slugs.length) return;
+      if (!runtime?.stopBot) throw new Error('member-bot-stop-unavailable');
+      for (const slug of slugs) await runtime.stopBot(slug);
+    },
+    ensureTob: (human) => tob.ensure(human),
+    log: (phase, facts) => options.startupDiagnostic?.record('team', phase, facts),
+  });
   startup.enter('human-attention', 'initialize');
   const humanAttentionDatabase = attachOperationalModule(operationalDatabase, 'human-attention');
   const humanAttention = createHumanAttentionQuery(
@@ -1016,6 +1028,8 @@ function initializeCore(
         return [];
       }
     },
+    () => new Date(),
+    (human, value) => team.approvals.project(human, value),
   );
   startup.enter('human-attention', 'decisions');
   const humanAttentionDecisions = createHumanAttentionDecisions(humanAttentionDatabase);
@@ -1065,17 +1079,6 @@ function initializeCore(
         durableAttention.schedule();
     });
   }
-  const team = new TeamService(attachOperationalModule(operationalDatabase, 'team'), channels, {
-    purge: contentPurge,
-    spaces: () => spaces,
-    stopBots: async (slugs) => {
-      if (!slugs.length) return;
-      if (!runtime?.stopBot) throw new Error('member-bot-stop-unavailable');
-      for (const slug of slugs) await runtime.stopBot(slug);
-    },
-    ensureTob: (human) => tob.ensure(human),
-    log: (phase, facts) => options.startupDiagnostic?.record('team', phase, facts),
-  });
   const spaces = new WorkspaceSpaces(
     attachOperationalModule(operationalDatabase, 'workspace-spaces'),
     dshHome,
@@ -1108,6 +1111,7 @@ function initializeCore(
     (human, slug) => ownsBot(human, registry.getHistorical(slug)),
     (human, id) => team.channelAccess.canRead(human, id, true),
     (human, id) => team.channelAccess.canKnow(human, id),
+    (human, value, channelId) => team.approvals.project(human, value, channelId),
   );
   team.onAccessChanged(() => live?.refreshAccess());
   startup.enter('messaging', 'reconcile-paused-invitations');
@@ -2559,6 +2563,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     (sessionId) => core.runtime.askChannel?.(sessionId),
     autoApproval,
     (sessionId) => sessionHasFullAccess(core, sessionId),
+    core.team.approvals,
   );
   ctx.effect(
     () => core.externalMessaging.approvals.attach(toolApproval, core.channels),
@@ -2578,8 +2583,13 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
       ctx,
       core.runtime,
       (ctx as unknown as { sessions: DshSessionStore }).sessions,
+      questionAnswerReceipts(
+        attachOperationalModule(core.operationalDatabase, 'messaging'),
+        (sessionId) => core.ownership.resolve(sessionId)?.botSlug,
+      ),
     ),
     (sessionId) => core.runtime.askChannel?.(sessionId),
+    core.team.approvals,
   );
   ctx.effect(() => () => userQuestions.close(), 'botharness: Channel user questions');
   ctx.inject(['sessionProjections', 'sessionQuery', 'userQuestions'], () => {
@@ -2592,6 +2602,17 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     'botharness: companion question observation',
   );
   registerChannelUserQuestions(ctx, userQuestions);
+  ctx.effect(
+    () =>
+      core.team.approvals.bindStatus((kind, botSlug, channelId, messageId) =>
+        kind === 'tool-approval'
+          ? toolApproval.status(botSlug, messageId)
+          : kind === 'user-question'
+            ? userQuestions.status(botSlug, messageId, channelId, false)
+            : (privateInputs?.status(channelId, messageId) ?? 'expired'),
+      ),
+    'botharness: approval projection status',
+  );
   if (core.operationalDatabase.mode === 'ready')
     ctx.effect(
       () => core.externalMessaging.questions.attach(userQuestions, core.channels),
