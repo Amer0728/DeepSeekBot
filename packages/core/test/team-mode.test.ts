@@ -32,6 +32,7 @@ import {
   MEMBER_GLOBAL_METHODS,
   MEMBER_BOT_METHODS,
   MEMBER_CHANNEL_METHODS,
+  MEMBER_APPROVAL_METHODS,
   MEMBER_METHODS,
 } from '../src/team/member-methods.js';
 import { createSqliteChannelStore } from '../src/channels/sqlite-store.js';
@@ -630,6 +631,7 @@ describe('member confidentiality', { timeout: 60_000 }, () => {
     expect([...MEMBER_METHODS]).toEqual([
       ...MEMBER_GLOBAL_METHODS,
       ...MEMBER_CHANNEL_METHODS,
+      ...MEMBER_APPROVAL_METHODS,
       ...MEMBER_BOT_METHODS,
     ]);
     expect(MEMBER_METHODS.has('composerIdentity')).toBe(true);
