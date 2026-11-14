@@ -1,3 +1,11 @@
+import { questionAnswerReceipts } from '../src/channels/question-answer-receipts.js';
+import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { createTeamHttp, TEAM_PATH, MEMBER_COOKIE } from '../src/team/http.js';
+import { hashPassword } from '../src/team/password.js';
+import { nativeTimedQuestions } from '../src/channels/native-timed-questions.js';
+import type { TimedQuestionPort } from '../src/channels/user-questions.js';
 import { maskedApprovalCardSchema } from '../src/team/approvals.js';
 import { createPushDelivery, type ExpoMessage } from '../src/push/delivery.js';
 import { createDevicePairing } from '../src/devices/pairing.js';
@@ -50,7 +58,13 @@ afterEach(async () => {
   for (const close of closes.splice(0).reverse()) await close();
 });
 
-function fixture() {
+function fixture(
+  timed?: (
+    ctx: Context,
+    database: ReturnType<typeof attachOperationalModule>,
+    ownership: ReturnType<typeof createTestOwnership>,
+  ) => TimedQuestionPort,
+) {
   const root = createTempRoot('team-m5-');
   const registry = createTestRegistry({ rootDir: root });
   const db = registryDatabase(root);
@@ -107,13 +121,14 @@ function fixture() {
     undefined,
     team.approvals,
   );
+  const ctx = new Context();
   const userQuestions = new ChannelUserQuestions(
     channels,
     ownership,
     undefined,
     undefined,
     undefined,
-    undefined,
+    timed?.(ctx, database, ownership),
     () => group.id,
     team.approvals,
   );
@@ -130,7 +145,6 @@ function fixture() {
     states: createBotStateTracker(),
     roster,
   });
-  const ctx = new Context();
   const off = team.bindRuntime({
     createPeer: (principal) => new Peer(ctx, { principal }),
     invalidate() {},
@@ -1109,6 +1123,137 @@ describe('M5 approval projections and decisions', () => {
     });
     masked(await f.invoke(bob, 'channelMessages', { channelId: f.group.id }));
   });
+
+  it.each([alice, owner])(
+    'persists a native timed answer through the authenticated $humanId path across SDK copies',
+    async (human) => {
+      const local = createRequire(import.meta.url);
+      const foreign: typeof import('@deepseek-ai/dsh-session') = await import(
+        pathToFileURL(local.resolve('@deepseek-ai/dsh-session')).href + '?m5-carrier'
+      );
+      const session = foreign.Session.create(SessionId('m5-native-answer'));
+      expect(session).not.toBeInstanceOf(Session);
+      let nativeAnswered = false;
+      let timed: TimedQuestionPort | undefined;
+      const f = fixture((ctx, database, ownership) => {
+        timed = nativeTimedQuestions(
+          ctx,
+          Object.assign(Object.create(null), {}),
+          {
+            get: () => session,
+            list: () => [session],
+          },
+          questionAnswerReceipts(database, (id) => ownership.resolve(id)?.botSlug),
+        );
+        return timed;
+      });
+      const botSlug = human === owner ? 'owner-bot' : 'alice-bot';
+      const agent: Agent = Object.assign(Object.create(null), { session });
+      f.ownership.claim({
+        sessionId: session.id,
+        botSlug,
+        rootRole: 'orchestrator',
+        at: new Date().toISOString(),
+      });
+      f.ctx.provide('agents');
+      f.ctx.set('agents', Object.assign(Object.create(null), { get: () => agent }));
+      f.ctx.provide('sessionProjections');
+      f.ctx.set(
+        'sessionProjections',
+        Object.assign(Object.create(null), {
+          stateOf: () => ({
+            questions: nativeAnswered
+              ? {
+                  active: [],
+                  settled: [
+                    { callId: 'pick-plan', answers: [{ id: 'plan', selected: ['Plan A'] }] },
+                  ],
+                }
+              : { active: [{ callId: 'pick-plan', state: 'open' }], settled: [] },
+          }),
+        }),
+      );
+      const pending = f.userQuestions.ask({
+        agent,
+        questions: [
+          {
+            id: 'plan',
+            question: 'PRIVATE_QUESTION',
+            options: [{ label: 'Plan A' }, { label: 'Plan B' }],
+          },
+        ],
+        wait: { callId: ToolCallId('pick-plan'), timed: true },
+      });
+      void pending.catch(() => {});
+      await vi.waitFor(() => expect(f.userQuestions.requests(botSlug)).toHaveLength(1));
+      const request = f.userQuestions.requests(botSlug)[0]!;
+      const payload = {
+        channelId: f.group.id,
+        messageId: request.messageId,
+        answer: { answers: [{ id: 'plan', selected: ['Plan A'] }] },
+      };
+      if (human === owner)
+        expect(await f.invoke(owner, 'userQuestionAnswer', payload)).toEqual({ accepted: true });
+      else {
+        const password = 'member-answer-password-1';
+        const hash = await hashPassword(password);
+        f.database.transaction((db) =>
+          db
+            .prepare('UPDATE member_credentials SET password_json = ? WHERE human_id = ?')
+            .run(JSON.stringify(hash), human.humanId),
+        );
+        const login = await f.team.signIn(human.humanId, password, '127.0.0.1');
+        const handler = createTeamHttp({
+          team: f.team,
+          gateway: f.gateway,
+          hostName: () => 'Test',
+          tls: () => false,
+          readResource: async () => new Response(),
+          fetchBundle: async () => new Response(),
+        });
+        const server = createServer((request, response) => void handler.handle(request, response));
+        await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+        closes.push(async () => {
+          await handler.close();
+          server.closeAllConnections();
+          await new Promise<void>((resolve, reject) =>
+            server.close((error) => (error ? reject(error) : resolve())),
+          );
+        });
+        const address = server.address();
+        if (!address || typeof address === 'string') throw new Error('Missing test address');
+        const response = await fetch(`http://127.0.0.1:${address.port}${TEAM_PATH}/__share/rpc`, {
+          method: 'POST',
+          headers: {
+            cookie: `${MEMBER_COOKIE}=${login.token}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            op: 'call',
+            path: '/api/botharness/userQuestionAnswer',
+            body: {
+              type: 'client-request',
+              rpcId: 'answer-test',
+              method: 'botharness/userQuestionAnswer',
+              payload: { args: payload },
+            },
+          }),
+        });
+        expect(await response.json()).toMatchObject({
+          result: { ok: true, value: { accepted: true } },
+        });
+      }
+      expect(await pending).toEqual(payload.answer);
+      const snapshot = vi.spyOn(session, 'snapshotEvents');
+      nativeAnswered = true;
+      await f.userQuestions.reconcileSession(session.id);
+      const resolution = f.channels.readMessages(f.group.id).find((m) => m.userQuestionResolution);
+      expect(resolution?.userQuestionResolution?.decidedBy?.humanId).toBe(human.humanId);
+      expect(resolution?.author).toMatchObject({ kind: 'human', humanId: human.humanId });
+      expect(timed?.answeringHuman?.(session.id, 'pick-plan', payload.answer)).toEqual(human);
+      expect(snapshot).not.toHaveBeenCalled();
+    },
+  );
 
   it('commits a real question answer and retains its decider', async () => {
     const f = fixture();

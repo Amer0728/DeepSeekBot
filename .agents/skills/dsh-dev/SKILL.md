@@ -5,6 +5,20 @@ description: Use when developing, running, or debugging BotHarness against a loc
 
 # DSH development & debugging
 
+### Native Session identity across an isolated CLI and a worktree Plugin (#4144)
+
+An AX Profile can load DSH from its isolated `ax-cli` while the linked Plugin resolves its own
+SDK copy. On DSH `0.2.2-rc.1`, the live Agent's Session then has constructor name `Session` and
+working public methods but fails the Plugin's `instanceof Session`. The exported
+`appendPluginRecord` helper is also class-bound: removing the `instanceof` guard does not make
+its private-field access safe across copies. Source-tree tests with one SDK instance miss this.
+Use structural public capabilities for native reads; keep application-owned answer-submission
+receipts in the application Source Event owner. Do not resolve native modules through process
+entry paths or bypass Session internals. Regressions must use a second SDK module instance and
+the authenticated member carrier; qualify the packaged/isolated Host separately. Unexpected
+answer failures are available as `botharness.channel_question.answer_failed` in Host diagnostic
+logs, with phases and function frames but no request/answer text or exception messages.
+
 ### Empty native credential writer lock after interrupted startup (#4114)
 
 On Windows with DSH 0.2.2-rc.1, an interrupted task-Host startup was followed by a zero-byte

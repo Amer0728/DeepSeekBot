@@ -1,3 +1,4 @@
+import { TeamError } from '../team/error.js';
 import type { ApprovalAuthority, ApprovalDecider } from '../team/approval-contract.js';
 import { OWNER_HUMAN_CONTEXT, type HumanContext } from '../humans/context.js';
 import type { Context } from '@deepseek-ai/cordis';
@@ -405,6 +406,7 @@ export class ChannelUserQuestions {
     )
       return false;
     pending.deciding = true;
+    let phase = 'channel-commit';
     try {
       if (pending.deferred && pending.callId !== undefined) {
         const timed = this.#timed;
@@ -424,8 +426,10 @@ export class ChannelUserQuestions {
             )
               return false;
             this.approvals?.requireRequest(human, pending.channelId, messageId);
+            phase = 'native-receipt';
             timed.recordAnswer?.(pending.sessionId, callId, answer, human);
             try {
+              phase = 'native-submit';
               const accepted = timed.answer(pending.sessionId, callId, answer);
               if (!accepted) timed.discardAnswer?.(pending.sessionId, callId);
               else pending.answeringHuman = human;
@@ -447,13 +451,16 @@ export class ChannelUserQuestions {
                 : false
               : await deliver(submit);
           return pending.submitted;
-        } catch {
+        } catch (error) {
+          if (error instanceof TeamError) throw error;
+          this.#answerFailure(messageId, pending, phase, error);
           this.#warn(`botharness.channel_question.late_answer_refused request=${messageId}`);
           return false;
         }
       }
       if (pending.callId !== undefined) {
         this.approvals?.requireRequest(human, pending.channelId, messageId);
+        phase = 'native-receipt';
         this.#timed?.recordAnswer?.(pending.sessionId, pending.callId, answer, human);
         pending.answeringHuman = human;
         pending.deferred = true;
@@ -491,6 +498,9 @@ export class ChannelUserQuestions {
       pending.resolve(answer);
       this.#observe(messageId, pending, 'answered');
       return true;
+    } catch (error) {
+      if (!(error instanceof TeamError)) this.#answerFailure(messageId, pending, phase, error);
+      throw error;
     } finally {
       pending.deciding = false;
       if (pending.deferred && pending.submitted)
@@ -606,10 +616,10 @@ export class ChannelUserQuestions {
       if (native === undefined) this.#cancel(id);
       else if (native.state === 'answered' && validAnswer(pending.questions, native.answer)) {
         pending.deciding = true;
-        const answeringHuman =
-          this.#timed?.answeringHuman?.(pending.sessionId, pending.callId, native.answer) ??
-          pending.answeringHuman;
         try {
+          const answeringHuman =
+            this.#timed?.answeringHuman?.(pending.sessionId, pending.callId, native.answer) ??
+            pending.answeringHuman;
           const saved = await this.#channels.appendMessage(
             answeringHuman ?? OWNER_HUMAN_CONTEXT,
             pending.channelId,
@@ -649,6 +659,31 @@ export class ChannelUserQuestions {
   discardReply(sessionId: string, callId: string): void {
     for (const pending of this.#pending.values())
       if (pending.sessionId === sessionId && pending.callId === callId) pending.submitted = false;
+  }
+
+  #answerFailure(messageId: string, pending: Pending, phase: string, error: unknown): void {
+    const kind =
+      error instanceof TypeError
+        ? 'type'
+        : error instanceof RangeError
+          ? 'range'
+          : error instanceof Error
+            ? 'error'
+            : 'non-error';
+    const frames =
+      error instanceof Error
+        ? (error.stack ?? '')
+            .split('\n')
+            .slice(1, 7)
+            .flatMap((line) => {
+              const name = /^\s*at\s+([\w.$<>]+)(?:\s|$)/u.exec(line)?.[1];
+              return name ? [name] : [];
+            })
+            .join(',')
+        : '';
+    this.#warn(
+      `botharness.channel_question.answer_failed method=userQuestionAnswer phase=${phase} kind=${kind} request=${messageId} session=${pending.sessionId} frames=${frames}`,
+    );
   }
 
   #publishAttention(slug: string): void {

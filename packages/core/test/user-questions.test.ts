@@ -1,3 +1,4 @@
+import { ToolCallId } from '@deepseek-ai/dsh-llm';
 import { humanContext, OWNER_HUMAN_CONTEXT } from '../src/humans/context.js';
 import { Context } from '@deepseek-ai/cordis';
 import { join } from 'node:path';
@@ -436,6 +437,39 @@ describe('native DSH questions in a PersonaBot DM', () => {
 });
 
 describe('native timed question card continuation', () => {
+  it('logs unexpected answer failures without prompt or answer text and leaves the card retryable', async () => {
+    const port = {
+      read: () => ({ state: 'open' as const }),
+      answer: vi.fn(() => true),
+      recordAnswer: vi.fn(),
+    };
+    port.recordAnswer.mockImplementationOnce(() => {
+      throw new TypeError('CONFIDENTIAL_PROMPT CONFIDENTIAL_ANSWER');
+    });
+    const state = fixture('orchestrator', port);
+    const pending = state.answerer.ask({
+      agent: state.agent,
+      questions,
+      wait: { callId: ToolCallId('log-failure'), timed: true },
+    });
+    void pending.catch(() => {});
+    await vi.waitFor(() => expect(state.answerer.activeMessageIds()).toHaveLength(1));
+    const id = state.answerer.activeMessageIds()[0]!;
+    const answer = { answers: [{ id: questions[0]!.id, selected: ['main'] }] };
+    await expect(state.answerer.answer('ada', id, answer, OWNER_HUMAN_CONTEXT)).rejects.toThrow(
+      TypeError,
+    );
+    const log = state.warn.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(log).toContain(
+      'botharness.channel_question.answer_failed method=userQuestionAnswer phase=native-receipt kind=type',
+    );
+    expect(log).not.toContain('CONFIDENTIAL');
+    expect(state.answerer.status('ada', id)).toBe('pending');
+    expect(await state.answerer.answer('ada', id, answer, OWNER_HUMAN_CONTEXT)).toBe(true);
+    expect(await pending).toEqual(answer);
+    state.answerer.close();
+  });
+
   it('also waits for native settlement when the answer arrives before the deadline', async () => {
     const answer = { answers: [{ id: 'memory-branch', selected: ['main'] }] };
     let native: ReturnType<TimedQuestionPort['read']> = { state: 'open' };

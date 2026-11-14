@@ -1,4 +1,4 @@
-import { Session, SessionId } from '@deepseek-ai/dsh-session';
+import { questionAnswerHash } from '../src/channels/question-answer-receipts.js';
 import { OWNER_HUMAN_CONTEXT } from '../src/humans/context.js';
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -267,16 +267,20 @@ describe('the native timed question port', () => {
     settled: [],
   });
 
-  it('persists the answer actor as an ignorable Session record and restores it without a live Agent', async () => {
-    const session = Session.create(SessionId(sessionId));
-    const root = { session };
-    const before = nativeTimedQuestions(context({ agents: { get: () => root } }), runtime, {
-      get: () => undefined,
-      list: () => [],
-    });
-    before.recordAnswer?.(sessionId, 'call-1', answer, { humanId: 'bob' });
+  it('restores legacy ignorable Session receipts without a live Agent', async () => {
     const file = join(createTempRoot('question-actor-'), 'events.json');
-    writeFileSync(file, JSON.stringify(session.snapshotEvents()));
+    writeFileSync(
+      file,
+      JSON.stringify([
+        {
+          type: 'plugin:botharness/question-answer',
+          seq: 0,
+          time: Date.now(),
+          ignorable: true,
+          data: { callId: 'call-1', humanId: 'bob', answerHash: questionAnswerHash(answer) },
+        },
+      ]),
+    );
     const events: unknown = JSON.parse(readFileSync(file, 'utf8'));
     expect(JSON.stringify(events)).not.toContain('Stable');
     const after = nativeTimedQuestions(

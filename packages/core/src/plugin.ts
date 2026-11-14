@@ -1,3 +1,4 @@
+import { questionAnswerReceipts } from './channels/question-answer-receipts.js';
 import { TeamError } from './team/error.js';
 import { requireBotModel } from './team/models.js';
 import { createMemberTobOperations } from './tob/member-operations.js';
@@ -2540,6 +2541,10 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
       ctx,
       core.runtime,
       (ctx as unknown as { sessions: DshSessionStore }).sessions,
+      questionAnswerReceipts(
+        attachOperationalModule(core.operationalDatabase, 'messaging'),
+        (sessionId) => core.ownership.resolve(sessionId)?.botSlug,
+      ),
     ),
     (sessionId) => core.runtime.askChannel?.(sessionId),
     core.team.approvals,

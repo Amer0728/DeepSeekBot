@@ -1,6 +1,5 @@
-import { createHash } from 'node:crypto';
+import { questionAnswerHash, type QuestionAnswerReceipts } from './question-answer-receipts.js';
 import { z } from 'zod';
-import { Session, appendPluginRecord } from '@deepseek-ai/dsh-session';
 import type { Context } from '@deepseek-ai/cordis';
 import type { TimedQuestionPort } from './user-questions.js';
 import type { BotRuntime } from '../runtime/bot-runtime.js';
@@ -13,13 +12,6 @@ const submissionSchema = z.object({
   answerHash: z.string(),
 });
 type Submission = z.infer<typeof submissionSchema>;
-declare module '@deepseek-ai/dsh-session/types' {
-  interface PluginRecordMap {
-    'plugin:botharness/question-answer': Submission;
-  }
-}
-const answerHash = (answer: Parameters<TimedQuestionPort['answer']>[2]) =>
-  createHash('sha256').update(JSON.stringify(answer.answers)).digest('hex');
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null
@@ -31,6 +23,7 @@ export function nativeTimedQuestions(
   ctx: Context,
   runtime: BotRuntime,
   sessions: DshSessionStore,
+  receipts?: QuestionAnswerReceipts,
 ): TimedQuestionPort {
   const submissions = new Map<string, Submission>();
   const remember = (sessionId: string, events: unknown) => {
@@ -62,28 +55,22 @@ export function nativeTimedQuestions(
   };
   return {
     recordAnswer(sessionId, callId, answer, human) {
-      const session = record(liveRoot(sessionId))?.['session'];
-      if (!(session instanceof Session)) throw new Error('Native question Session unavailable');
-      const receipt = { callId, humanId: human.humanId, answerHash: answerHash(answer) };
-      appendPluginRecord(session, submissionType, receipt);
-      submissions.set(sessionId + ':' + callId, receipt);
+      if (!receipts) throw new Error('question-answer-receipts-unavailable');
+      receipts.save(sessionId, callId, answer, human);
     },
     discardAnswer(sessionId, callId) {
-      const session = record(liveRoot(sessionId))?.['session'];
-      if (!(session instanceof Session)) throw new Error('Native question Session unavailable');
-      const receipt = { callId, humanId: null, answerHash: '' };
-      appendPluginRecord(session, submissionType, receipt);
-      submissions.set(sessionId + ':' + callId, receipt);
+      if (!receipts) throw new Error('question-answer-receipts-unavailable');
+      receipts.discard(sessionId, callId);
     },
     answeringHuman(sessionId, callId, answer) {
-      const session = record(liveRoot(sessionId))?.['session'] ?? sessions.get(sessionId);
-      if (session instanceof Session) remember(sessionId, session.snapshotEvents());
-      else {
-        const stored = sessions.get(sessionId);
-        if (stored) remember(sessionId, stored.snapshotEvents());
+      let receipt: Submission | undefined = receipts?.read(sessionId, callId);
+      if (receipt === undefined) {
+        const session = record(liveRoot(sessionId))?.['session'] ?? sessions.get(sessionId);
+        const snapshot = record(session)?.['snapshotEvents'];
+        if (typeof snapshot === 'function') remember(sessionId, snapshot.call(session));
+        receipt = submissions.get(sessionId + ':' + callId);
       }
-      const receipt = submissions.get(sessionId + ':' + callId);
-      return receipt?.humanId && receipt.answerHash === answerHash(answer)
+      return receipt?.humanId && receipt.answerHash === questionAnswerHash(answer)
         ? { humanId: receipt.humanId }
         : undefined;
     },
