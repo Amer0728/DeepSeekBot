@@ -185,6 +185,8 @@ export class TeamService {
     );
     this.approvals = new TeamApprovals(db, channels, this.roles);
     channels.bindHumanAccess?.({
+      searchText: (human, channelId, messageId, text) =>
+        this.approvals.searchText(human, channelId, messageId, text),
       canRead: (human, id) => this.channelAccess.canRead(human, id),
       requirePolicy: (human, id, key) => this.channelAccess.requirePolicy(human, id, key),
       requirePost: (human, id, all, message) => {

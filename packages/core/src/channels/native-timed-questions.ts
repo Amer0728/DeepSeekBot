@@ -1,7 +1,25 @@
+import { createHash } from 'node:crypto';
+import { z } from 'zod';
+import { Session, appendPluginRecord } from '@deepseek-ai/dsh-session';
 import type { Context } from '@deepseek-ai/cordis';
 import type { TimedQuestionPort } from './user-questions.js';
 import type { BotRuntime } from '../runtime/bot-runtime.js';
 import type { DshSessionStore } from '../sessions/source.js';
+
+const submissionType = 'plugin:botharness/question-answer';
+const submissionSchema = z.object({
+  callId: z.string(),
+  humanId: z.string().nullable(),
+  answerHash: z.string(),
+});
+type Submission = z.infer<typeof submissionSchema>;
+declare module '@deepseek-ai/dsh-session/types' {
+  interface PluginRecordMap {
+    'plugin:botharness/question-answer': Submission;
+  }
+}
+const answerHash = (answer: Parameters<TimedQuestionPort['answer']>[2]) =>
+  createHash('sha256').update(JSON.stringify(answer.answers)).digest('hex');
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null
@@ -14,6 +32,16 @@ export function nativeTimedQuestions(
   runtime: BotRuntime,
   sessions: DshSessionStore,
 ): TimedQuestionPort {
+  const submissions = new Map<string, Submission>();
+  const remember = (sessionId: string, events: unknown) => {
+    if (!Array.isArray(events)) return;
+    for (const event of events) {
+      const row = record(event);
+      if (row?.['type'] !== submissionType || row['ignorable'] !== true) continue;
+      const receipt = submissionSchema.safeParse(row['data']);
+      if (receipt.success) submissions.set(sessionId + ':' + receipt.data.callId, receipt.data);
+    }
+  };
   const views = new Map<string, Record<string, unknown>>();
   const liveRoot = (sessionId: string): unknown => {
     const agents = record(ctx.get('agents'));
@@ -33,6 +61,32 @@ export function nativeTimedQuestions(
     return questions;
   };
   return {
+    recordAnswer(sessionId, callId, answer, human) {
+      const session = record(liveRoot(sessionId))?.['session'];
+      if (!(session instanceof Session)) throw new Error('Native question Session unavailable');
+      const receipt = { callId, humanId: human.humanId, answerHash: answerHash(answer) };
+      appendPluginRecord(session, submissionType, receipt);
+      submissions.set(sessionId + ':' + callId, receipt);
+    },
+    discardAnswer(sessionId, callId) {
+      const session = record(liveRoot(sessionId))?.['session'];
+      if (!(session instanceof Session)) throw new Error('Native question Session unavailable');
+      const receipt = { callId, humanId: null, answerHash: '' };
+      appendPluginRecord(session, submissionType, receipt);
+      submissions.set(sessionId + ':' + callId, receipt);
+    },
+    answeringHuman(sessionId, callId, answer) {
+      const session = record(liveRoot(sessionId))?.['session'] ?? sessions.get(sessionId);
+      if (session instanceof Session) remember(sessionId, session.snapshotEvents());
+      else {
+        const stored = sessions.get(sessionId);
+        if (stored) remember(sessionId, stored.snapshotEvents());
+      }
+      const receipt = submissions.get(sessionId + ':' + callId);
+      return receipt?.humanId && receipt.answerHash === answerHash(answer)
+        ? { humanId: receipt.humanId }
+        : undefined;
+    },
     bind: (sessionId, channelId, question) =>
       runtime.bindNativeQuestionInput?.(sessionId, channelId, question),
     recover: (sessionId, channelId, requestMessageId) =>
@@ -51,6 +105,7 @@ export function nativeTimedQuestions(
         if (liveRoot(sessionId) !== undefined || sessions.get(sessionId) !== undefined) continue;
         try {
           const snapshot = record(await query['readSession'].call(query, sessionId));
+          remember(sessionId, snapshot?.['events']);
           const restored: unknown = projections['restore'].call(
             projections,
             {},

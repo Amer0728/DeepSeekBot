@@ -29,6 +29,18 @@ export type ChannelQuestionStatus = 'pending' | 'submitted' | 'answered' | 'expi
 type NativeDelivery = (deliver: () => boolean) => Promise<boolean>;
 
 export interface TimedQuestionPort {
+  recordAnswer?(
+    sessionId: string,
+    callId: string,
+    answer: AskUserQuestionAnswer,
+    human: HumanContext,
+  ): void;
+  discardAnswer?(sessionId: string, callId: string): void;
+  answeringHuman?(
+    sessionId: string,
+    callId: string,
+    answer: AskUserQuestionAnswer,
+  ): HumanContext | undefined;
   bind?(
     sessionId: string,
     channelId: string,
@@ -72,7 +84,7 @@ export interface ChannelQuestionNotice extends ChannelQuestionRequest {
 }
 
 type Pending = {
-  answeringHuman: HumanContext;
+  answeringHuman: HumanContext | undefined;
   agent: Agent | undefined;
   sessionId: string;
   botSlug: string;
@@ -204,7 +216,7 @@ export class ChannelUserQuestions {
 
     void answer.catch(() => undefined);
     const pending: Pending = {
-      answeringHuman: OWNER_HUMAN_CONTEXT,
+      answeringHuman: undefined,
       agent,
       sessionId: agent.session.id,
       botSlug: owner.botSlug,
@@ -393,7 +405,6 @@ export class ChannelUserQuestions {
     )
       return false;
     pending.deciding = true;
-    pending.answeringHuman = human;
     try {
       if (pending.deferred && pending.callId !== undefined) {
         const timed = this.#timed;
@@ -413,7 +424,16 @@ export class ChannelUserQuestions {
             )
               return false;
             this.approvals?.requireRequest(human, pending.channelId, messageId);
-            return timed.answer(pending.sessionId, callId, answer);
+            timed.recordAnswer?.(pending.sessionId, callId, answer, human);
+            try {
+              const accepted = timed.answer(pending.sessionId, callId, answer);
+              if (!accepted) timed.discardAnswer?.(pending.sessionId, callId);
+              else pending.answeringHuman = human;
+              return accepted;
+            } catch (error) {
+              timed.discardAnswer?.(pending.sessionId, callId);
+              throw error;
+            }
           };
           const deliver =
             pending.deliverNative ??
@@ -434,6 +454,8 @@ export class ChannelUserQuestions {
       }
       if (pending.callId !== undefined) {
         this.approvals?.requireRequest(human, pending.channelId, messageId);
+        this.#timed?.recordAnswer?.(pending.sessionId, pending.callId, answer, human);
+        pending.answeringHuman = human;
         pending.deferred = true;
         pending.submitted = true;
         pending.resolve(answer);
@@ -547,7 +569,7 @@ export class ChannelUserQuestions {
       )
         continue;
       this.#pending.set(card.messageId, {
-        answeringHuman: OWNER_HUMAN_CONTEXT,
+        answeringHuman: undefined,
         agent: undefined,
         sessionId: request.sessionId,
         botSlug,
@@ -584,14 +606,17 @@ export class ChannelUserQuestions {
       if (native === undefined) this.#cancel(id);
       else if (native.state === 'answered' && validAnswer(pending.questions, native.answer)) {
         pending.deciding = true;
+        const answeringHuman =
+          this.#timed?.answeringHuman?.(pending.sessionId, pending.callId, native.answer) ??
+          pending.answeringHuman;
         try {
           const saved = await this.#channels.appendMessage(
-            pending.answeringHuman,
+            answeringHuman ?? OWNER_HUMAN_CONTEXT,
             pending.channelId,
             {
               id: randomUUID(),
               at: new Date().toISOString(),
-              author: { kind: 'human' },
+              author: answeringHuman ? { kind: 'human' } : { kind: 'system' },
               body: native.answer.answers
                 .map((item) => item.custom ?? item.selected.join(', '))
                 .join('\n'),
@@ -600,9 +625,13 @@ export class ChannelUserQuestions {
                 requestMessageId: id,
                 state: 'answered',
                 answers: native.answer.answers,
-                decidedBy: this.approvals?.decider(pending.answeringHuman) ?? {
-                  humanId: pending.answeringHuman.humanId,
-                },
+                ...(answeringHuman
+                  ? {
+                      decidedBy: this.approvals?.decider(answeringHuman) ?? {
+                        humanId: answeringHuman.humanId,
+                      },
+                    }
+                  : {}),
               },
             },
           );

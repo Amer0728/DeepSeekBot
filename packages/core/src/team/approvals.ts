@@ -9,7 +9,12 @@ import { isDshGovernedTool } from '../workspaces/grant-execution.js';
 import type { TeamRoles } from './roles.js';
 import { TeamError } from './error.js';
 
-import type { ApprovalKind, ApprovalCard, ApprovalDecider } from './approval-contract.js';
+import {
+  isMaskedApprovalCard,
+  type ApprovalKind,
+  type ApprovalCard,
+  type ApprovalDecider,
+} from './approval-contract.js';
 export { maskedApprovalCardSchema, isMaskedApprovalCard } from './approval-contract.js';
 export type {
   ApprovalKind,
@@ -29,6 +34,24 @@ const resolutions = [
   'userQuestionResolution',
   'privateInputResolution',
 ] as const;
+
+const envelopeFields = new Set([
+  'approval',
+  'id',
+  'at',
+  'author',
+  'replyTo',
+  'channelId',
+  'messageId',
+  'category',
+  'kind',
+  'botSlug',
+  'createdAt',
+  'sourceEventId',
+  'status',
+  'revision',
+  'isUnread',
+]);
 
 type ApprovalStatusReader = (
   kind: ApprovalKind,
@@ -192,7 +215,8 @@ export class TeamApprovals {
       requestedAt: message.at,
       ...(typeof row?.created_at === 'string' ? { decidedAt: row.created_at } : {}),
     };
-    if (!this.canApprove(human, message.author.slug, opaque)) return { masked: true, ...base };
+    if (!this.canApprove(human, message.author.slug, opaque) || !this.audience(human, channelId))
+      return { masked: true, ...base };
     const decidedBy = z
       .object({ humanId: z.string(), displayName: z.string().optional() })
       .safeParse(decision?.['decidedBy']);
@@ -202,6 +226,16 @@ export class TeamApprovals {
       opaque,
       ...(decidedBy.success ? { decidedBy: decidedBy.data } : {}),
     };
+  }
+
+  searchText(human: HumanContext, channelId: string, messageId: string, text: string): string {
+    const projected = this.project(human, { channelId, messageId, body: text });
+    const card = object(Reflect.get(projected, 'approval'));
+    return card?.['masked'] === true
+      ? [card['kind'], card['botSlug'], card['state'], card['requestedAt'], card['decidedAt']]
+          .filter((value) => typeof value === 'string')
+          .join(' ')
+      : projected.body;
   }
 
   project<T>(human: HumanContext, input: T, channelId?: string): T {
@@ -260,6 +294,11 @@ export class TeamApprovals {
       if (!messages.has(key)) messages.set(key, this.channels.message(channel, id));
       return messages.get(key);
     };
+    const cardOf = (channel: string, message: ChannelMessage) => {
+      const key = channel + ':' + message.id;
+      if (!cards.has(key)) cards.set(key, this.card(human, channel, message));
+      return cards.get(key);
+    };
     const opaqueReaders = new Map<string, boolean>();
     const visit = (entry: unknown, inherited?: string, inheritedBot?: string): void => {
       if (Array.isArray(entry)) {
@@ -299,7 +338,7 @@ export class TeamApprovals {
           ? read(channel, messageId)
           : undefined;
       const reference = resolutions
-        .map((key) => object(record[key])?.['requestMessageId'])
+        .map((key) => object(record[key] ?? message?.[key])?.['requestMessageId'])
         .find((id) => typeof id === 'string');
       if (channel && typeof reference === 'string') message = read(channel, reference);
       const author = object(record['author']) ?? message?.author;
@@ -326,6 +365,16 @@ export class TeamApprovals {
         const attributed = humanAuthorOf(channel, record['replyTo']);
         if (attributed) Reflect.set(Reflect.get(entry, 'replyToPreview'), 'author', attributed);
       }
+      if (channel && typeof record['replyTo'] === 'string' && preview) {
+        const target = read(channel, record['replyTo']);
+        const targetCard = target && cardOf(channel, target);
+        if (
+          !target ||
+          Reflect.get(target, 'contentPurge') !== undefined ||
+          (targetCard && isMaskedApprovalCard(targetCard))
+        )
+          Reflect.set(entry, 'replyToPreview', null);
+      }
       if (channel && author?.kind === 'bot' && typeof author.slug === 'string')
         Reflect.set(
           entry,
@@ -335,34 +384,22 @@ export class TeamApprovals {
             typeof author.displayName === 'string' ? author.displayName : undefined,
           ),
         );
-      const key = channel && message ? channel + ':' + message.id : undefined;
-      if (key && channel && message && !cards.has(key))
-        cards.set(key, this.card(human, channel, message));
-      const card = key ? cards.get(key) : undefined;
+      const card = channel && message ? cardOf(channel, message) : undefined;
+      if (
+        !card &&
+        (kinds.some((key) => record[key] !== undefined) || typeof reference === 'string')
+      ) {
+        for (const key of Object.keys(record))
+          if (!envelopeFields.has(key) || key === 'approval') Reflect.deleteProperty(entry, key);
+        if (record['body'] !== undefined) Reflect.set(entry, 'body', '');
+        if (record['summary'] !== undefined) Reflect.set(entry, 'summary', '');
+        return;
+      }
       if (card) {
         Reflect.set(entry, 'approval', card);
         if (card.masked) {
           for (const key of Object.keys(record))
-            if (
-              ![
-                'approval',
-                'id',
-                'at',
-                'author',
-                'replyTo',
-                'channelId',
-                'messageId',
-                'category',
-                'kind',
-                'botSlug',
-                'createdAt',
-                'sourceEventId',
-                'status',
-                'revision',
-                'isUnread',
-              ].includes(key)
-            )
-              Reflect.deleteProperty(entry, key);
+            if (!envelopeFields.has(key)) Reflect.deleteProperty(entry, key);
           for (const field of kinds)
             if (record[field] !== undefined) Reflect.set(entry, field, card);
           if (record['body'] !== undefined) Reflect.set(entry, 'body', '');

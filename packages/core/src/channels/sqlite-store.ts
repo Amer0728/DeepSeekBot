@@ -280,6 +280,20 @@ function sameIntent(left: ChannelMessage, right: ChannelMessage): boolean {
   );
 }
 
+const approvalContentSql = (payload: string) =>
+  [
+    'toolApprovalRequest',
+    'userQuestionRequest',
+    'privateInputRequest',
+    'toolApprovalDecision',
+    'userQuestionResolution',
+    'privateInputResolution',
+  ]
+    .map((key) => `json_type(${payload}, '$.${key}') IS NOT NULL`)
+    .join(' OR ');
+const humanSearchTextSql = (text: string) =>
+  `CASE WHEN ${approvalContentSql('e.payload_json')} THEN botharness_channel_search_text(?, p.channel_id, p.message_id, ${text}) ELSE ${text} END`;
+
 function sourceKind(message: ChannelMessage): string {
   return message.author.kind === 'human'
     ? 'human-message'
@@ -367,6 +381,19 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
     if (lowerRegistered) return;
     db.function('botharness_unicode_lower', { deterministic: true }, (value: unknown) =>
       typeof value === 'string' ? value.toLowerCase() : '',
+    );
+    db.function(
+      'botharness_channel_search_text',
+      (humanId: unknown, channelId: unknown, messageId: unknown, text: unknown) => {
+        if (
+          typeof humanId !== 'string' ||
+          typeof channelId !== 'string' ||
+          typeof messageId !== 'string' ||
+          typeof text !== 'string'
+        )
+          return '';
+        return humanAccess?.searchText?.({ humanId }, channelId, messageId, text) ?? text;
+      },
     );
     lowerRegistered = true;
   };
@@ -3440,7 +3467,10 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
         values.push(query.visibleFrom);
       }
       if (query.text !== undefined && query.text.length > 0) {
-        where.push('instr(botharness_unicode_lower(e.body), ?) > 0');
+        where.push(
+          `instr(botharness_unicode_lower(${humanAccess && queryOptions?.searchHuman ? humanSearchTextSql('e.body') : 'e.body'}), ?) > 0`,
+        );
+        if (humanAccess && queryOptions?.searchHuman) values.push(queryOptions.searchHuman.humanId);
         values.push(query.text);
       }
       if (query.authorBotId !== undefined) {
@@ -3570,6 +3600,7 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
       if (channel.type === 'group' && member === undefined && !humanAccess) return undefined;
       return this.queryMessages(id, {
         ...request,
+        searchHuman: human,
         visibleFrom: member?.visible_from_revision ?? 0,
       });
     },
@@ -3603,11 +3634,23 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
         values.push(cursor.at, cursor.at, cursor.channelId, cursor.channelId, cursor.messageId);
       }
       if (indexed) {
-        where.push('inbox_history_fts MATCH ?');
+        where.push(
+          `(e.rowid IN (SELECT rowid FROM inbox_history_fts WHERE inbox_history_fts MATCH ?) ${humanAccess ? `OR ((${approvalContentSql('e.payload_json')}) AND instr(botharness_unicode_lower(botharness_channel_search_text(?, p.channel_id, p.message_id, '')), ?) > 0)` : ''})`,
+        );
         values.push('"' + text.replaceAll('"', '""') + '"');
+        if (humanAccess) values.push(human.humanId, needle);
       } else {
-        where.push('instr(botharness_unicode_lower(d.search_text), ?) > 0');
+        where.push(
+          `instr(botharness_unicode_lower(${humanAccess ? humanSearchTextSql('d.search_text') : 'd.search_text'}), ?) > 0`,
+        );
+        if (humanAccess) values.push(human.humanId);
         values.push(needle);
+      }
+      if (humanAccess && indexed) {
+        where.push(
+          `instr(botharness_unicode_lower(${humanSearchTextSql('d.search_text')}), ?) > 0`,
+        );
+        values.push(human.humanId, needle);
       }
       const rows =
         limit <= 0
@@ -3621,7 +3664,6 @@ export function createSqliteChannelStore(options: SqliteChannelStoreOptions): Ch
             FROM channel_placements p
             JOIN source_events e ON e.source_event_id = p.source_event_id
             JOIN inbox_history_documents d ON d.rowid = e.rowid
-            ${indexed ? 'JOIN inbox_history_fts ON inbox_history_fts.rowid = e.rowid' : ''}
             JOIN channel_records c ON c.channel_id = p.channel_id
             ${humanAccess ? "JOIN humans viewer ON viewer.human_id = ? AND viewer.status = 'active'" : ''}
         LEFT JOIN channel_human_members m ON m.channel_id = p.channel_id

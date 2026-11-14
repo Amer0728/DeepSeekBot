@@ -135,6 +135,7 @@ export interface ChannelReadOptions {
 }
 
 export interface ChannelMessageQueryOptions {
+  searchHuman?: HumanContext;
   text?: string;
   authorBotId?: string;
   authorKind?: 'human' | 'bot' | 'bridged' | 'system';
@@ -393,6 +394,7 @@ export interface CreateChannelGroupInput {
 export interface ChannelStore {
   requireHumanPolicy?(human: HumanContext, id: string, key: keyof ChannelPolicy): void;
   bindHumanAccess?(access: {
+    searchText?(human: HumanContext, channelId: string, messageId: string, text: string): string;
     canRead(human: HumanContext, id: string): boolean;
     requirePost(human: HumanContext, id: string, all: boolean, message?: ChannelMessage): void;
     requirePolicy(human: HumanContext, id: string, key: keyof ChannelPolicy): void;

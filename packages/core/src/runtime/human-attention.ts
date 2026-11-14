@@ -1,5 +1,5 @@
 import { channelRoleEligibleSql } from '../team/channel-contract.js';
-import type { ApprovalCard } from '../team/approval-contract.js';
+import { isMaskedApprovalCard, type ApprovalCard } from '../team/approval-contract.js';
 import type { ChannelMessageAuthor } from '../channels/message-author.js';
 import { type HumanContext } from '../humans/context.js';
 import { createHash } from 'node:crypto';
@@ -395,11 +395,13 @@ const ACTION_ATTENTION_CTE = `WITH all_attention AS (
         ), attention AS (
           SELECT * FROM all_attention candidate
           WHERE (candidate.kind NOT IN ('tool-approval', 'user-question', 'private-input')
+            OR ${attentionBotOwner('candidate.bot_slug')}
             OR EXISTS (SELECT 1 FROM channel_records approval_channel WHERE approval_channel.channel_id = candidate.channel_id
               AND ${approvalAudience('approval_channel', '$humanId')})) AND (
 (candidate.kind IN ('tool-approval', 'user-question', 'private-input') AND (
             EXISTS (SELECT 1 FROM channel_human_members m JOIN humans h USING(human_id)
-              WHERE m.channel_id = candidate.channel_id AND m.human_id = $humanId AND m.left_at IS NULL AND h.status = 'active')
+              WHERE m.channel_id = candidate.channel_id AND m.human_id = $humanId AND m.left_at IS NULL AND h.status = 'active'
+                AND EXISTS (SELECT 1 FROM channel_records ac WHERE ac.channel_id = candidate.channel_id AND ${approvalAudience('ac', '$humanId')}))
             OR (${attentionBotOwner('candidate.bot_slug')} AND NOT EXISTS (
               SELECT 1 FROM channel_human_members m JOIN humans h USING(human_id)
               WHERE m.channel_id = candidate.channel_id AND m.left_at IS NULL AND h.status = 'active'
@@ -688,11 +690,44 @@ export function createHumanAttentionQuery(
         );
         lowerRegistered = true;
       }
+      if (search !== '') {
+        const texts = new Map<string, string>();
+        database.read((db) =>
+          db.function(
+            'botharness_activity_search_text',
+            (channel: unknown, id: unknown, body: unknown) => {
+              if (typeof channel !== 'string' || typeof id !== 'string' || typeof body !== 'string')
+                return typeof body === 'string' ? body : '';
+              const key = channel + ':' + id + ':' + body;
+              if (!texts.has(key)) {
+                const item = project(human, { channelId: channel, messageId: id, summary: body });
+                const card: unknown = Reflect.get(item, 'approval');
+                if (texts.size >= 64) texts.clear();
+                texts.set(
+                  key,
+                  isMaskedApprovalCard(card)
+                    ? [card.kind, card.botSlug, card.state, card.requestedAt, card.decidedAt]
+                        .filter(Boolean)
+                        .join(' ')
+                    : item.summary,
+                );
+              }
+              return texts.get(key)!;
+            },
+          ),
+        );
+      }
       const searchCte = 'WITH activity_search AS (SELECT ? AS term), ';
-      const match = (body: string, channel: string, bot: string) =>
+      const match = (
+        body: string,
+        channel: string,
+        bot: string,
+        channelId = 'channel_id',
+        messageId = 'message_id',
+      ) =>
         search === ''
           ? ''
-          : `AND instr(botharness_activity_lower(coalesce(${body}, '') || ' ' || coalesce(${channel}, '') || ' ' || coalesce(${bot}, '')), (SELECT term FROM activity_search)) > 0`;
+          : `AND instr(botharness_activity_lower(botharness_activity_search_text(${channelId}, ${messageId}, coalesce(${body}, '') || ' ' || coalesce(${channel}, '') || ' ' || coalesce(${bot}, ''))), (SELECT term FROM activity_search)) > 0`;
       const channelCte = (
         category === 'unread' ? INBOX_CHANNEL_UNREAD_CTE : INBOX_CHANNEL_REPLIES_CTE
       ).replace('WITH ', searchCte);
@@ -792,7 +827,7 @@ SELECT 'handled:' || request.source_event_id AS id,
                   OR json_extract(request.payload_json, '$.grantRequest') = 1)
 
 
-             ${match('request.body', "json_extract(c.record_json, '$.name')", 'request.bot_slug')}
+             ${match('request.body', "json_extract(c.record_json, '$.name')", 'request.bot_slug', 'c.channel_id', 'request.message_id')}
              AND (? IS NULL OR ('handled:' || request.source_event_id) = ?)
              ${dismissFilter("'handled:' || request.source_event_id", 'request.source_event_id')}
              AND (? IS NULL OR request.bot_slug = ?) AND (? IS NULL OR c.channel_id = ?)
@@ -828,7 +863,7 @@ SELECT 'handled:' || request.source_event_id AS id,
                  AND earlier.rowid < response.rowid)
              AND json_extract(request.payload_json, '$.assignmentReport.state') IN ('blocked', 'waiting-human')
 
-             ${match('request.body', "json_extract(c.record_json, '$.name')", 'request.bot_slug')}
+             ${match('request.body', "json_extract(c.record_json, '$.name')", 'request.bot_slug', 'c.channel_id', 'request.message_id')}
              AND (? IS NULL OR ('handled:' || request.source_event_id) = ?)
              ${dismissFilter("'handled:' || request.source_event_id", 'request.source_event_id')}
              AND (? IS NULL OR a.bot_slug = ?) AND (? IS NULL OR c.channel_id = ?)
