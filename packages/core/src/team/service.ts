@@ -892,12 +892,16 @@ export class TeamService {
   }
 
   async transfer(human: HumanContext, humanId: string, toHumanId: string): Promise<null> {
+    if (human.caller === 'bot')
+      throw new TeamError('permission-required', undefined, { permission: 'members.manage' });
     this.manageTarget(human, humanId);
     const target = this.member(toHumanId);
     if (!target) throw new TeamError('member-not-found');
     if (target.humanId === humanId || (!target.owner && target.status !== 'active'))
       throw new TeamError('transfer-target-invalid');
     const preview = this.transferPreview(human, humanId);
+    for (const bot of preview.bots)
+      this.privateAccess.recordBotAction(human, { ...bot, ownerHumanId: humanId }, 'transfer');
     const transferred = JSON.stringify(preview.channels.map((channel) => channel.channelId));
     this.db.transaction(
       (db) => {
@@ -952,6 +956,8 @@ export class TeamService {
     token: string,
     username: string,
   ): Promise<null> {
+    if (human.caller === 'bot')
+      throw new TeamError('permission-required', undefined, { permission: 'members.manage' });
     this.roles.requireManagementTarget(human, humanId);
     if (
       !this.member(humanId) &&
@@ -962,6 +968,12 @@ export class TeamService {
       throw new TeamError('purge-token-invalid');
     const member = this.purgeTarget(human, humanId);
     if (username !== member.username) throw new TeamError('purge-token-invalid');
+    for (const bot of this.ownedBots(humanId))
+      this.privateAccess.recordBotAction(
+        human,
+        { ...bot, ownerHumanId: humanId },
+        'memberPurgeConfirm',
+      );
     this.purge!.memberConfirm(human, humanId, token);
     await this.purge!.memberSettled(humanId);
     this.invalidate();

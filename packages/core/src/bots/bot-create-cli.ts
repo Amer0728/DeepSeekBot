@@ -1,3 +1,6 @@
+import { botMetadata, type BotMetadataResult } from '../team/bot-administration.js';
+import { privateBotRegistry, ownsBot } from '../team/bot-access.js';
+import { TeamRoles } from '../team/roles.js';
 import { OWNER_HUMAN_CONTEXT } from '../humans/context.js';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -94,6 +97,14 @@ import {
   ONLINE_MANAGEMENT_COMMANDS,
   runOnlineManagement,
 } from './cli-management.js';
+
+const LOCAL_MEMORY_COMMANDS: ReadonlySet<string> = new Set([
+  'memory-snapshot',
+  'memory-file',
+  'memory-history',
+  'memory-diff',
+  'memory-save',
+]);
 
 export interface BotCreateCliIo {
   env: NodeJS.ProcessEnv;
@@ -744,7 +755,10 @@ function resolveHome(values: CreateValues, io: BotCreateCliIo): string {
   return trimmed(values.home) ?? trimmed(io.env['DSH_HOME']) ?? resolveDshHome(io.env);
 }
 
-function openRegistry(dshHome: string): {
+function openRegistry(
+  dshHome: string,
+  administration = false,
+): {
   owner: OperationalDatabaseOwner;
   registry: PersonaBotRegistry;
 } {
@@ -786,7 +800,8 @@ function openRegistry(dshHome: string): {
       } catch {}
     },
   });
-  return { owner, registry };
+  const human = new TeamRoles(attachOperationalModule(owner, 'team'), () => {}).ownerContext();
+  return { owner, registry: administration ? registry : privateBotRegistry(registry, human) };
 }
 
 function failureOf(reason: string, detail?: string): CliFailure {
@@ -1260,7 +1275,7 @@ function runList(
   io: BotCreateCliIo,
 ): { bots: Array<{ id: string; name: string; createdAt: string }> } {
   const dshHome = resolveHome(values, io);
-  const { owner, registry } = openRegistry(dshHome);
+  const { owner, registry } = openRegistry(dshHome, true);
   try {
     return {
       bots: registry.list().map((record) => ({
@@ -1274,16 +1289,22 @@ function runList(
   }
 }
 
-function runShow(id: string, values: CreateValues, io: BotCreateCliIo): BotCreateResult {
+function runShow(
+  id: string,
+  values: CreateValues,
+  io: BotCreateCliIo,
+): BotCreateResult | BotMetadataResult {
   const slug = id.trim();
   if (slug.length === 0) throw usageError('show needs a bot id.');
   const dshHome = resolveHome(values, io);
-  const { owner, registry } = openRegistry(dshHome);
+  const { owner, registry } = openRegistry(dshHome, true);
   try {
     const record = registry.get(slug);
     if (record === undefined) {
       throw new CliFailure('unknown-bot', `Unknown bot: ${slug}`, 1);
     }
+    const human = new TeamRoles(attachOperationalModule(owner, 'team'), () => {}).ownerContext();
+    if (!ownsBot(human, record)) return { metadataOnly: true, bot: botMetadata(human, record) };
     const channelId = dmChannelId(slug);
     return {
       bot: { id: slug, name: record.displayName },
@@ -2677,6 +2698,7 @@ export async function runBotCreateCli(
           !ONLINE_MANAGEMENT_COMMANDS.some((entry) => entry === command) &&
           !LIFECYCLE_COMMANDS.some((entry) => entry.command === command) &&
           !DIAGNOSTIC_COMMANDS.some((entry) => entry.command === command) &&
+          !LOCAL_MEMORY_COMMANDS.has(command) &&
           !LIVE_COMMANDS.some((entry) => entry.command === command)))
     )
       throw usageError('as-online-required');
@@ -2769,11 +2791,7 @@ export async function runBotCreateCli(
       (([
         'channel-messages',
         'grants',
-        'memory-snapshot',
-        'memory-file',
-        'memory-history',
-        'memory-diff',
-        'memory-save',
+        ...LOCAL_MEMORY_COMMANDS,
         ...PROFILE_ONLINE_COMMANDS,
       ].includes(command) ||
         isScheduleCommand(command)) &&

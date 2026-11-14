@@ -1,3 +1,4 @@
+import { botAdminActionSchema } from './bot-administration.js';
 import { z } from 'zod';
 
 export const privateKindSchema = z.enum(['bot', 'channel', 'dm', 'bot-dm']);
@@ -36,6 +37,7 @@ export const auditRecordSchema = z
     objectName: z.string(),
     ownerHumanIds: z.array(z.string()),
     reason: z.string().optional(),
+    action: botAdminActionSchema.optional(),
     prevHash: z.string(),
     hash: z.string(),
   })

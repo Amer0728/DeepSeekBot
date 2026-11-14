@@ -1,4 +1,11 @@
 import {
+  BOT_ADMIN_READS,
+  botAdminActionSchema,
+  botMetadata,
+  administrativeResult,
+} from './bot-administration.js';
+import type { PersonaBotRecord } from '../bots/persona-bot.js';
+import {
   resolveBotMentionText,
   AmbiguousBotMentionError,
   botMentionLabel,
@@ -10,25 +17,10 @@ import { ownsBot } from './bot-access.js';
 import { TeamError } from './error.js';
 
 const adminSettings = new Set([
-  'get',
-  'update',
-  'pause',
-  'resume',
-  'deletionPreview',
-  'deletionConfirm',
-  'deletionRetry',
-  'deletionMemoryFolder',
-  'botAvatarSet',
-  'botAppearanceSet',
-  'botBannerSet',
-  'botPrimaryColorSet',
-  'modelPlan',
-  'modelPlanSet',
-  'modelPresetApply',
-  'modelPlanCustomize',
-  'modelPlanAssignmentsSet',
-  'standingLimitsSet',
-  'modelPlanInherit',
+  ...BOT_ADMIN_READS,
+  ...botAdminActionSchema.options.filter(
+    (action) => action !== 'transfer' && action !== 'memberPurgeConfirm',
+  ),
 ]);
 const object = (input: unknown): Record<string, unknown> =>
   typeof input === 'object' && input !== null && !Array.isArray(input)
@@ -49,6 +41,38 @@ export function guardHumanBridge(
   administration: () => BridgeMethods,
 ): BridgeMethods {
   let admin: BridgeMethods | undefined;
+  const administrate = (
+    method: string,
+    bot: PersonaBotRecord,
+    payload: unknown,
+    args: unknown[],
+  ) => {
+    if (human.caller === 'bot')
+      return refuse('permission-required', { permission: 'privateContent.view' });
+    if (BOT_ADMIN_READS.has(method) && method !== 'deletionPreview') {
+      const metadata = { ok: true, value: { metadataOnly: true, bot: botMetadata(human, bot) } };
+      return method === 'modelPlan' ? Promise.resolve(metadata) : metadata;
+    }
+    try {
+      const action = botAdminActionSchema.safeParse(method);
+      if (action.success) {
+        if (!deps.team) return refuse('unavailable');
+        deps.team.privateAccess.recordBotAction(human, bot, action.data);
+      }
+      admin ??= administration();
+      const run: unknown = Reflect.get(admin, method);
+      if (typeof run !== 'function') return refuse('unavailable');
+      const redact = (raw: unknown) =>
+        administrativeResult(human, deps.registry.getHistorical(bot.slug) ?? bot, method, raw);
+      const result: unknown = Reflect.apply(run, admin, [payload, ...args]);
+      return result instanceof Promise
+        ? result.then(redact).catch(() => refuse('internal'))
+        : redact(result);
+    } catch (error) {
+      if (error instanceof TeamError) return refuse(error.code, error.details);
+      return refuse('internal');
+    }
+  };
   const wrappers = new Map<PropertyKey, { operation: unknown; guarded: unknown }>();
   return new Proxy(methods, {
     get(target, property, receiver) {
@@ -74,9 +98,29 @@ export function guardHumanBridge(
         }
         const input = object(payload);
         if (property === 'list' && input['administration'] === true) {
-          if (!owner) return refuse('permission-required');
-          admin ??= administration();
-          return admin.list(payload);
+          if (!owner || human.caller === 'bot') return refuse('permission-required');
+          const own = target.list(payload);
+          if (!own.ok) return own;
+          const query =
+            typeof input['query'] === 'string' ? input['query'].trim().toLowerCase() : '';
+          return {
+            ok: true,
+            value: {
+              bots: [
+                ...own.value.bots,
+                ...deps.registry
+                  .listHistorical()
+                  .filter(
+                    (bot) =>
+                      !ownsBot(human, bot) &&
+                      (!query ||
+                        bot.displayName.toLowerCase().includes(query) ||
+                        bot.slug.includes(query)),
+                  )
+                  .map((bot) => botMetadata(human, bot)),
+              ],
+            },
+          };
         }
         if (!owner && ['channelCreate', 'channelGroupInvite'].includes(property)) {
           const refs = Array.isArray(input['members']) ? input['members'] : [input['botSlug']];
@@ -95,9 +139,7 @@ export function guardHumanBridge(
             return refuse('bot-not-found');
           if (bot && !ownsBot(human, bot)) {
             if (!owner || !adminSettings.has(property)) return refuse('bot-not-found');
-            admin ??= administration();
-            const run: unknown = Reflect.get(admin, property);
-            if (typeof run === 'function') return Reflect.apply(run, admin, [payload, ...args]);
+            return administrate(property, bot, payload, args);
           }
         }
         const channelId = input['channelId'];
@@ -121,9 +163,10 @@ export function guardHumanBridge(
             })
           ) {
             if (owner && adminSettings.has(property)) {
-              admin ??= administration();
-              const run: unknown = Reflect.get(admin, property);
-              if (typeof run === 'function') return Reflect.apply(run, admin, [payload, ...args]);
+              const foreign = channel.members
+                .map((id) => deps.registry.getHistorical(id))
+                .find((bot) => bot && !ownsBot(human, bot));
+              if (foreign) return administrate(property, foreign, payload, args);
             }
             return refuse('bot-not-found');
           }

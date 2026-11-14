@@ -843,6 +843,14 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
     const preview = f.core.team.purgePreview(owner, 'bob');
     expect(preview.counts).toMatchObject({ bots: 2, channels: 2, messages: 2, files: 1 });
     await f.core.team.purgeConfirm(owner, 'bob', preview.token, 'bob');
+    expect(f.core.team.privateAccess.log(owner, {}).records).toEqual(
+      expect.arrayContaining(
+        ['bob-bot', tob.botSlug].map((objectId) =>
+          expect.objectContaining({ kind: 'bot', objectId, action: 'memberPurgeConfirm' }),
+        ),
+      ),
+    );
+    expect(f.core.team.privateAccess.verify(owner)).toEqual({ ok: true });
     for (const slug of ['bob-bot', tob.botSlug]) {
       expect(f.core.registry.get(slug)).toBeUndefined();
       expect(f.core.deletions.get(slug)).toMatchObject({ phase: 'complete', memory: 'erased' });
@@ -852,7 +860,7 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
     if (!inventory.ok) throw new Error('inventory unavailable');
     for (const slug of ['bob-bot', tob.botSlug])
       expect(inventory.value.bots.find((bot) => bot.slug === slug)).toMatchObject({
-        deleted: true,
+        owner: false,
         displayName: '',
       });
     expect(f.core.attachments.has(file)).toBe(false);

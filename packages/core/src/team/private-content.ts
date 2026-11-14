@@ -1,3 +1,6 @@
+import { botProfileFingerprint } from '../bots/profile-snapshot.js';
+import type { BotAdminAction } from './bot-administration.js';
+import type { PersonaBotRecord } from '../bots/persona-bot.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { OperationalDatabaseModulePort } from '../database/owner.js';
@@ -261,20 +264,21 @@ export class TeamPrivateContent {
     if (object.kind !== 'bot' || !provider)
       return { viewId, object, messages: this.messages(object) };
     const bot = provider.registry.get(object.objectId);
-    const profile = bot && {
-      slug: bot.slug,
-      displayName: bot.displayName,
-      description: bot.description,
-      tag: bot.tag,
-      roles: bot.roles,
-      createdAt: bot.createdAt,
-      paused: bot.paused,
-    };
+    const profile = bot && { ...bot };
     const memoryFiles = provider.memory
       .snapshot(object.objectId)
       .files.map((path) => provider.memory.readAccepted(object.objectId, path))
       .filter((file) => file !== undefined);
-    return { viewId, object: { ...object, profile }, messages: this.messages(object), memoryFiles };
+    return {
+      viewId,
+      object: {
+        ...object,
+        profile,
+        ...(bot ? { profileFingerprint: botProfileFingerprint(bot) } : {}),
+      },
+      messages: this.messages(object),
+      memoryFiles,
+    };
   }
 
   page(human: HumanContext, payload: unknown) {
@@ -291,6 +295,36 @@ export class TeamPrivateContent {
       throw new TeamError('object-not-found');
     }
     return { messages: this.messages(object, before) };
+  }
+
+  recordBotAction(
+    human: HumanContext,
+    bot: Pick<PersonaBotRecord, 'slug' | 'displayName' | 'ownerHumanId'>,
+    action: BotAdminAction,
+  ): void {
+    if (human.caller === 'bot')
+      throw new TeamError('permission-required', undefined, { permission: 'owner' });
+    if (action === 'transfer' || action === 'memberPurgeConfirm')
+      this.roles.requireManagementTarget(human, botOwner(bot));
+    else if (!this.roles.isOwner(human))
+      throw new TeamError('permission-required', undefined, { permission: 'owner' });
+    if (botOwner(bot) === human.humanId) return;
+    this.audit.append({
+      at: new Date(this.now()).toISOString(),
+      viewerHumanId: human.humanId,
+      viewerName: z
+        .object({ display_name: z.string() })
+        .parse(
+          this.db.read((db) =>
+            db.prepare('SELECT display_name FROM humans WHERE human_id = ?').get(human.humanId),
+          ),
+        ).display_name,
+      kind: 'bot',
+      objectId: bot.slug,
+      objectName: bot.displayName,
+      ownerHumanIds: [botOwner(bot)],
+      action,
+    });
   }
 
   log(human: HumanContext, payload: unknown) {
