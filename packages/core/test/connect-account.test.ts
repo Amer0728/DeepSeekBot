@@ -260,23 +260,126 @@ function setup(
 }
 
 describe('linked account computers', () => {
+  it.each(['hosts', 'relationship', 'activity'] as const)(
+    'persists a consumed %s rotation after caller cancellation while retaining the owner queue',
+    async (entry) => {
+      const services = fakeServices({
+        pending: 0,
+        hostId: 'haaaaaaaaaaaa',
+        offer: async () => Response.json({}, { status: 401 }),
+      });
+      const { account, credentials } = setup(services);
+      const received = deferred();
+      const release = deferred();
+      const saving = deferred();
+      const persist = deferred();
+      let signal: AbortSignal | null | undefined;
+      let exchanges = 0;
+      let relayRequests = 0;
+      const tokens: string[] = [];
+      try {
+        await account.signIn();
+        await settle(account);
+        const session = await account.relationshipSession();
+        const modify = credentials.provider.modifyRecord;
+        credentials.provider.modifyRecord = async (key, mutate) =>
+          modify(key, async (current) => {
+            const next = await mutate(current);
+            if (JSON.stringify(next).includes('rotated-refresh')) {
+              saving.resolve();
+              await persist.promise;
+            }
+            return next;
+          });
+        const original = services.fetcher.getMockImplementation()!;
+        services.fetcher.mockImplementation(async (input, init) => {
+          if (String(input).startsWith(RELAY)) relayRequests++;
+          if (String(init?.body).includes('grant_type=refresh_token')) {
+            const token = new URLSearchParams(String(init?.body)).get('refresh_token')!;
+            tokens.push(token);
+            exchanges++;
+            if (exchanges === 1) {
+              signal = init?.signal;
+              received.resolve();
+              await release.promise;
+              return Response.json({
+                access_token: 'rotated-access',
+                refresh_token: 'rotated-refresh',
+              });
+            }
+            if (token !== 'rotated-refresh')
+              return Response.json({ error: 'invalid_grant' }, { status: 400 });
+            return Response.json({ access_token: 'next-access', refresh_token: 'next-refresh' });
+          }
+          if (entry === 'activity' && String(input).endsWith('/live-activity'))
+            return Response.json({}, { status: 401 });
+          return original(input, init);
+        });
+        const caller = new AbortController();
+        const first =
+          entry === 'hosts'
+            ? account.connectedHosts(caller.signal)
+            : entry === 'activity'
+              ? account.activity.call({}, caller.signal)
+              : session!
+                  .offer(session!.registrationId, 'a'.repeat(43), caller.signal)
+                  .catch(() => 'refused');
+        await received.promise;
+        caller.abort();
+        expect(signal?.aborted).toBe(false);
+        expect(await first).toEqual(
+          entry === 'hosts'
+            ? { ok: false, code: 'relay-unavailable' }
+            : entry === 'activity'
+              ? { status: 503, body: {} }
+              : 'refused',
+        );
+        expect(signal?.aborted).toBe(false);
+        const queued = new AbortController();
+        const cancelled = account.connectedHosts(queued.signal);
+        queued.abort();
+        expect(await cancelled).toEqual({ ok: false, code: 'relay-unavailable' });
+        const next = account.accessToken({ fresh: true });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(exchanges).toBe(1);
+        release.resolve();
+        await saving.promise;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(exchanges).toBe(1);
+        persist.resolve();
+        expect(await next).toBe('next-access');
+        expect(tokens).toHaveLength(2);
+        expect(tokens[1]).toBe('rotated-refresh');
+        expect(relayRequests).toBe(entry === 'hosts' ? 0 : 1);
+        expect(JSON.stringify([...credentials.records.values()])).toContain('next-refresh');
+        expect(JSON.stringify([...credentials.records.values()])).not.toContain('rotated-refresh');
+      } finally {
+        release.resolve();
+        persist.resolve();
+        await account.close();
+      }
+    },
+  );
+
   it.each([
-    'caller',
     'sign-out',
     'close',
     'deadline',
     'late-success',
     'access-token-close',
+    'account-change',
   ] as const)('cancels the serialized relationship token refresh on %s', async (mode) => {
     let expire = false;
-    const services = fakeServices({
+    const serviceOptions = {
       pending: 0,
       hostId: 'haaaaaaaaaaaa',
+      userId: 'user_alice',
       offer: async () => {
         expire = true;
         return Response.json({ error: { code: 'session-expired' } }, { status: 401 });
       },
-    });
+    };
+    const services = fakeServices(serviceOptions);
     const original = services.fetcher.getMockImplementation()!;
     const started = deferred();
     let release = () => {};
@@ -291,7 +394,10 @@ describe('linked account computers', () => {
             resolve(Response.json({ access_token: 'late-access', refresh_token: 'late-refresh' }));
           refreshSignal?.addEventListener(
             'abort',
-            () => (mode === 'late-success' ? release() : reject(refreshSignal?.reason)),
+            () =>
+              mode === 'late-success' || mode === 'account-change'
+                ? release()
+                : reject(refreshSignal?.reason),
             { once: true },
           );
           started.resolve();
@@ -323,7 +429,10 @@ describe('linked account computers', () => {
               () => 'refused',
             );
       await started.promise;
-      if (mode === 'sign-out') teardown = account.signOut();
+      if (mode === 'account-change') {
+        serviceOptions.userId = 'user_bob';
+        teardown = account.signIn().then(() => settle(account));
+      } else if (mode === 'sign-out') teardown = account.signOut();
       else if (mode === 'close' || mode === 'late-success' || mode === 'access-token-close')
         teardown = account.close();
       else if (mode === 'deadline') deadline.abort();
@@ -334,6 +443,9 @@ describe('linked account computers', () => {
       if (mode === 'sign-out') {
         expect(account.status().state).toBe('signed-out');
         expect(credentials.records.size).toBe(0);
+      } else if (mode === 'account-change') {
+        expect(JSON.stringify([...credentials.records.values()])).toContain('user_bob');
+        expect(JSON.stringify([...credentials.records.values()])).not.toContain('late-refresh');
       } else expect(JSON.stringify([...credentials.records.values()])).toBe(before);
       expect(services.calls.filter((call) => call.path.endsWith('/offer'))).toHaveLength(
         mode === 'access-token-close' ? 0 : 1,
@@ -362,6 +474,7 @@ describe('linked account computers', () => {
           started = resolve;
         });
         let blocked = 0;
+        let release = () => {};
         services.fetcher.mockImplementation(async (input, init) => {
           const url = String(input);
           const selected =
@@ -369,7 +482,11 @@ describe('linked account computers', () => {
           if (!selected) return original(input, init);
           blocked++;
           started();
-          return new Promise<Response>((_resolve, reject) => {
+          return new Promise<Response>((resolve, reject) => {
+            release = () =>
+              resolve(
+                Response.json({ access_token: 'health-access', refresh_token: 'health-refresh' }),
+              );
             const signal = init?.signal;
             if (!signal) {
               reject(new Error('missing-cancellation'));
@@ -392,6 +509,7 @@ describe('linked account computers', () => {
         expect(await first).toEqual({ ok: false, code: 'relay-unavailable' });
         expect(await second).toEqual({ ok: false, code: 'relay-unavailable' });
         expect(blocked).toBe(1);
+        release();
         services.fetcher.mockImplementation(original);
         expect(await account.signOut()).toMatchObject({ ok: true });
       } finally {
