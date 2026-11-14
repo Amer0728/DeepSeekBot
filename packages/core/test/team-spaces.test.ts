@@ -84,6 +84,51 @@ function fixture(home = realpathSync(createTempRoot('m6-spaces-'))) {
 }
 
 describe('M6 spaces and current authority', () => {
+  it.each([false, true])(
+    'keeps native Workspaces available to the Owner with Team mode enabled=%s',
+    async (enabled) => {
+      const f = fixture();
+      f.db.transaction((db) =>
+        db.prepare('UPDATE team_settings SET enabled = ?').run(Number(enabled)),
+      );
+      const nativePath = createTempRoot('m6-native-project-');
+      f.workspace(nativePath, 'native-workspace');
+      const options = await f.bridge(owner).workspaceOptions({});
+      expect(options).toMatchObject({
+        ok: true,
+        value: {
+          workspaces: expect.arrayContaining([
+            { id: 'native-workspace', path: nativePath, title: 'native-workspace' },
+          ]),
+        },
+      });
+      if (!options.ok) throw new Error(options.error.code);
+      expect(options.value.workspaces.some((entry) => entry.id === 'spaces/' + owner.humanId)).toBe(
+        true,
+      );
+      expect(options.value.workspaces.some((entry) => entry.id === 'spaces/bob')).toBe(false);
+      f.createBot(owner, 'owner-bot');
+      const grant = await f.core.grants.create('owner-bot', 'native-workspace');
+      expect(f.core.grants.requireActive('owner-bot', grant.id).workspacePath).toBe(nativePath);
+      await expect(
+        f.core.grants.create('owner-bot', f.workspace(join(f.home, 'botharness'), 'host-data')),
+      ).rejects.toMatchObject({ code: 'grant-protected-path' });
+      await expect(
+        f.core.grants.create('owner-bot', f.workspace(f.home, 'host-directory')),
+      ).rejects.toMatchObject({ code: 'grant-foreign-space' });
+      if (enabled) {
+        expect(await f.bridge(alice).workspaceOptions({})).toMatchObject({
+          ok: true,
+          value: {
+            workspaces: [
+              { id: 'spaces/alice', path: join(f.home, 'spaces/alice/files'), title: 'alice' },
+            ],
+          },
+        });
+      }
+    },
+  );
+
   it('creates only the caller account and audience-visible shared spaces, with manager access to shared spaces only', async () => {
     const f = fixture();
     const member = f.core.spaces.create(owner, 'Members', { kind: 'members', humanIds: ['alice'] });
@@ -368,7 +413,13 @@ describe('M6 path-addressed tools', () => {
         id: 'alice-session',
         header: { cwd: f.core.registry.memoryDirFor('alice-bot')! },
       } as Session;
-      for (const path of [secret, join(project, 'link/secret'), join(project, 'hardlink')])
+      for (const path of [
+        secret,
+        join(project, 'link/secret'),
+        join(project, 'hardlink'),
+        join(project, 'dangling'),
+        project + '/link/../bob/secret',
+      ])
         expect(
           grantToolExecutionDenial(
             f.core,
@@ -450,6 +501,22 @@ describe('M6 path-addressed tools', () => {
 });
 
 describe('M6 Memory migration and offboarding', () => {
+  it('clears a member default Memory override without losing account-space ownership', () => {
+    const f = fixture();
+    f.createBot(alice);
+    const path = accountMemoryPath(f.home, 'alice', 'alice-bot');
+    const proof = memoryOwnership(path);
+    const result = f.core.registry.setMemoryDir('alice-bot', path);
+    expect(result.ok).toBe(true);
+    expect(f.core.registry.get('alice-bot')?.memoryDir).toBeUndefined();
+    expect(f.core.registry.memoryDirFor('alice-bot')).toBe(path);
+    expect(f.core.deletions.preview('alice-bot')).toMatchObject({
+      memoryDir: path,
+      eraseAvailable: true,
+    });
+    expect(memoryOwnership(path)).toEqual(proof);
+  });
+
   it.each([147, 149])(
     'upgrades generation %s through the required migrations, preserving Channel access and Memory ownership',
     async (generation) => {

@@ -740,7 +740,11 @@ export function createPersonaBotRegistry(options: PersonaBotRegistryOptions): Pe
       const record = active(slug);
       if (record === undefined) return { ok: false, reason: 'not-found' };
       const updated = { ...record };
-      if (memoryDir === undefined || memoryDir === defaultMemoryDir(slug)) delete updated.memoryDir;
+      if (
+        memoryDir === undefined ||
+        memoryDir === defaultMemoryDir(slug, record.ownerHumanId ?? 'local-human')
+      )
+        delete updated.memoryDir;
       else updated.memoryDir = memoryDir;
       write(updated);
       transferMemoryOwnership(port, slug, memoryDirOf(updated));

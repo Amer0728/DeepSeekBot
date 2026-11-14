@@ -184,6 +184,21 @@ function validateSpacePath(
   }
 }
 
+function originalAttachmentRoot(
+  core: GrantCore,
+  session: Session,
+  path: string,
+  kind: AccessKind,
+  shell = false,
+): string | undefined {
+  if (core.ownership.resolve(session.id)?.rootRole !== 'orchestrator') return undefined;
+  try {
+    const stat = statSync(path);
+    if (stat.isFile() && stat.nlink !== 1) return undefined;
+  } catch {}
+  return core.runtime.originalAttachmentRoot?.(session.id, path, kind, shell);
+}
+
 export function nativeFileSpaceDenial(
   core: GrantCore,
   session: Session,
@@ -195,10 +210,12 @@ export function nativeFileSpaceDenial(
   if (!requests.length || session.header.cwd === undefined) return 'grant-protected-path';
   for (const request of requests) {
     const path = isAbsolute(request.path) ? request.path : session.header.cwd + sep + request.path;
+    const target = canonicalTarget(path);
+    if (target === undefined)
+      return validateSpacePath(core, session, path) ?? 'grant-protected-path';
+    if (originalAttachmentRoot(core, session, target, request.kind) !== undefined) continue;
     const denial = validateSpacePath(core, session, path, name === 'glob' || name === 'grep');
     if (denial) return denial;
-    const target = canonicalTarget(path);
-    if (target === undefined) return 'grant-protected-path';
   }
   return undefined;
 }
@@ -215,15 +232,14 @@ export function nativeFileToolDenial(
   if (cwd === undefined) return 'BotHarness Session working directory is unavailable';
   for (const request of requests) {
     const path = isAbsolute(request.path) ? request.path : cwd + sep + request.path;
+    const target = canonicalTarget(path);
+    if (target === undefined)
+      return (
+        validateSpacePath(core, session, path) ?? 'BotHarness Session file path cannot be resolved'
+      );
+    if (originalAttachmentRoot(core, session, target, request.kind) !== undefined) continue;
     const spaceDenial = validateSpacePath(core, session, path, name === 'glob' || name === 'grep');
     if (spaceDenial) return spaceDenial;
-    const target = canonicalTarget(path);
-    if (target === undefined) return 'BotHarness Session file path cannot be resolved';
-    if (
-      core.ownership.resolve(session.id)?.rootRole === 'orchestrator' &&
-      core.runtime.originalAttachmentRoot?.(session.id, target, request.kind) !== undefined
-    )
-      continue;
     const roots = currentRoots(core, session, request.kind);
     if (
       !roots.some((root) => {
@@ -249,27 +265,22 @@ export function nativeExecutionRoot(
     : nativePaths(name, args)[0];
   if (request === undefined || session.header.cwd === undefined)
     throw new Error('BotHarness requires an authorized execution path');
-  const spacePathDenial = validateSpacePath(
-    core,
-    session,
-    resolve(session.header.cwd, request.path),
-  );
-  if (spacePathDenial) throw new Error(spacePathDenial);
   const target = canonicalTarget(resolve(session.header.cwd, request.path));
   if (target !== undefined) {
     if (!shell) {
       const denial = nativeFileToolDenial(core, session, name, args);
       if (denial) throw new Error(denial);
     }
-    if (core.ownership.resolve(session.id)?.rootRole === 'orchestrator') {
-      const original = core.runtime.originalAttachmentRoot?.(
-        session.id,
-        target,
-        request.kind,
-        shell,
-      );
-      if (original !== undefined) return original;
-    }
+    const original = originalAttachmentRoot(core, session, target, request.kind, shell);
+    if (original !== undefined) return original;
+  }
+  const spacePathDenial = validateSpacePath(
+    core,
+    session,
+    resolve(session.header.cwd, request.path),
+  );
+  if (spacePathDenial) throw new Error(spacePathDenial);
+  if (target !== undefined) {
     for (const root of currentRoots(core, session, request.kind)) {
       const canonical = canonicalRoot(root);
       if (

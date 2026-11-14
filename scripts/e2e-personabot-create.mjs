@@ -11,8 +11,10 @@ import { prepareZipImportProof } from './e2e-zip-import-proof.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const helper = join(root, 'scripts', 'dev-instance.mjs');
 const withDm = process.argv.includes('--with-dm');
-const home = mkdtempSync(join(tmpdir(), 'bh-e2e-web-'));
-const workspacePath = join(home, 'workspace');
+const fixtureRoot = mkdtempSync(join(tmpdir(), 'bh-e2e-web-'));
+const home = join(fixtureRoot, basename(fixtureRoot) + '-profile');
+mkdirSync(home);
+const workspacePath = join(fixtureRoot, 'workspace');
 const env = {
   ...process.env,
   PATH: [join(root, 'node_modules', '.bin'), process.env.PATH ?? ''].join(delimiter),
@@ -223,7 +225,7 @@ const version = dshVersion();
 const port = await availablePort();
 try {
   mkdirSync(workspacePath);
-  const gitSource = join(home, 'git-source');
+  const gitSource = join(fixtureRoot, 'git-source');
   mkdirSync(gitSource);
   const git = (...args) =>
     execFileSync('git', ['-C', gitSource, ...args], { encoding: 'utf8', windowsHide: true }).trim();

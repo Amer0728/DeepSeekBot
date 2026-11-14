@@ -8324,16 +8324,24 @@ function buildBridgeMethods(
     },
     workspaceOptions() {
       try {
+        const team = deps.team;
+        const spaces = team
+          ? team.spaces.list(human).map((space) => ({
+              id: space.spaceId,
+              title: space.name,
+              path: join(team.spaces.path(space.spaceId), 'files'),
+            }))
+          : [];
+        const native =
+          !deps.team || isHostOwner()
+            ? (deps.grants?.availableWorkspaces() ?? []).filter(
+                ({ id }) => !deps.team || !/^(spaces|shared)\//u.test(id),
+              )
+            : [];
         return {
           ok: true,
           value: {
-            workspaces: deps.team
-              ? deps.team.spaces.list(human).map((space) => ({
-                  id: space.spaceId,
-                  title: space.name,
-                  path: join(deps.team!.spaces.path(space.spaceId), 'files'),
-                }))
-              : (deps.grants?.availableWorkspaces() ?? []),
+            workspaces: [...native, ...spaces],
           },
         };
       } catch (error) {

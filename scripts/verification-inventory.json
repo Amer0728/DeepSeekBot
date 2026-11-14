@@ -2048,7 +2048,7 @@
       ],
       "reason": "Own isolated Host with shared DSH API-floor admission instead of SDK equality; Workspace/Memory/DM restart persistence, blank lookup and CLI retry, pinned Git preview/create/readback, changed-source refusal, Zip upload and import restart recovery with the same Bot/DM. The smoke discards accepted replies; native UI and injected disconnects require separate qualification. Optional DM commits Human message only, not Bot response. Restart now waits for both HTTP shutdown and actual process exit; Linux zombie state is treated as exited (#2713).",
       "task": 2713,
-      "sha256": "d4a34ec8a567c8bf1fb3c9be0d8adb1f2c6e98bcec266c8cbf5082f4b85f4e05"
+      "sha256": "33a888ef49433910d2dfeb8fadb25090e147a637af25930abc3ab5dcfefb147b"
     },
     {
       "path": "scripts/e2e-profile-heatmap-tooltip.mjs",
