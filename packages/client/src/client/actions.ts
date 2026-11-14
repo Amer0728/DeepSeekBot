@@ -1,4 +1,5 @@
 import { replyPreviewOf } from '../../../core/src/channels/reply-preview.js';
+import { gitImportSource } from '../../../../apps/mobile/src/host/bot-creation.js';
 import { approveWorkspaceGrantRequest } from './bridge.js';
 import {
   loadGenuiView,
@@ -1087,7 +1088,12 @@ export interface BridgeActions {
     sectionId?: string,
     source?: MarketplaceInstallSource,
   ): Promise<BotSummary>;
-  createGroup(name: string, sectionId?: string): Promise<ChannelSummary | undefined>;
+  createGroup(
+    name: string,
+    sectionId?: string,
+    operationKey?: string,
+  ): Promise<ChannelSummary | undefined>;
+  previewBotImport(gitUrl: string): Promise<{ gitUrl: string; commit: string }>;
   renameChannel(channelId: string, name: string): Promise<boolean>;
   setHumanNickname(channelId: string, nickname: string | null): Promise<boolean>;
   setGroupAvatar(channelId: string, avatar: string | null): Promise<boolean>;
@@ -1260,6 +1266,7 @@ export function createActions(
     fileOpenPreferences?: FileOpenPreferences;
     submissions?: ComposerSubmissionStore;
   },
+  resources?: { download(path: string, name: string): Promise<void> },
 ): BridgeActions {
   clientStore.setComposerIdentity(undefined);
   let openingFile = false;
@@ -1282,10 +1289,16 @@ export function createActions(
       ? undefined
       : JSON.stringify([identity.hostId, identity.profileId, identity.humanId, channelId]);
   };
+  const currentHumanAuthor = (): ChannelMessage['author'] => {
+    const identity = clientStore.getSnapshot().composerIdentity;
+    return identity === undefined
+      ? { kind: 'human' }
+      : { kind: 'human', humanId: identity.humanId };
+  };
   const submissionEcho = (attempt: SubmissionAttempt): ChannelMessage => ({
     id: attempt.id,
     at: attempt.at,
-    author: { kind: 'human' },
+    author: currentHumanAuthor(),
     body: attempt.text,
     ...(attempt.mentions.length === 0 ? {} : { mentions: attempt.mentions }),
     ...(attempt.channelRefs.length === 0 ? {} : { channelRefs: attempt.channelRefs }),
@@ -1967,7 +1980,7 @@ export function createActions(
         route,
         globalDefault,
       });
-      if (globalDefault) invalidateInheritedModelPlans();
+      if (globalDefault) invalidateInheritedModelPlans(actions);
       return result;
     },
     inheritModel: (slug, expectedRevision) =>
@@ -2691,7 +2704,7 @@ export function createActions(
             messageId,
             workspace.workspaceId,
           );
-          publishWorkspaceGrantChange(slug);
+          publishWorkspaceGrantChange(slug, actions);
         },
         async () => ((await readRequest())?.grantRequestResolved === true ? 'expired' : 'pending'),
       );
@@ -2814,7 +2827,7 @@ export function createActions(
       clientStore.setConversation({
         timeline: { ...timeline, loadingOlder: true, olderError: undefined },
       });
-      const viaJournal = prependChannelJournal(channelId);
+      const viaJournal = prependChannelJournal(channelId, clientStore);
       if (viaJournal !== undefined) {
         let olderError: string | undefined;
         try {
@@ -3093,6 +3106,9 @@ export function createActions(
     },
     async messageAttachmentDownload(channelId, messageId, fileId) {
       const target = await loadMessageAttachmentTarget(call, channelId, messageId, fileId);
+      const path =
+        '/api/botharness/attachment?' + new URLSearchParams({ channelId, messageId, fileId });
+      if (resources !== undefined) return resources.download(path, target.relativePath);
       const anchor = document.createElement('a');
       anchor.href =
         './api/botharness/attachment?' + new URLSearchParams({ channelId, messageId, fileId });
@@ -3149,6 +3165,11 @@ export function createActions(
     async memoryFileDownload(slug, path) {
       const target = await loadMemoryFileTarget(call, slug, path);
       if (target.kind !== 'file') throw new Error('Only files can be downloaded');
+      if (resources !== undefined)
+        return resources.download(
+          '/api/botharness/memory/file?' + new URLSearchParams({ slug, path }),
+          path.split('/').at(-1) ?? '',
+        );
       const anchor = document.createElement('a');
       anchor.href = memoryDownloadUrl(slug, path);
       anchor.download = path.split('/').at(-1) ?? '';
@@ -3372,7 +3393,7 @@ export function createActions(
           {
             id: localId,
             at: new Date().toISOString(),
-            author: { kind: 'human' },
+            author: currentHumanAuthor(),
             body: text,
             ...(attachments === undefined ? {} : { attachments }),
             ...(mentions === undefined ? {} : { mentions }),
@@ -3633,12 +3654,15 @@ export function createActions(
       await openCreatedBot(bot, sectionId);
     },
     async importBotZip(file, sectionId) {
+      if (resources !== undefined) throw new Error('remote-bot-import-unavailable');
       return openCreatedBot(await importBotZip(file), sectionId);
     },
     botZipFiles(slug) {
+      if (resources !== undefined) throw new Error('remote-bot-export-unavailable');
       return loadBotZipFiles(slug);
     },
     async exportBotZip(slug, displayName, choice) {
+      if (resources !== undefined) throw new Error('remote-bot-export-unavailable');
       const { blob, name } = await downloadBotZip(slug, displayName, choice);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
@@ -3649,8 +3673,16 @@ export function createActions(
       anchor.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     },
-    async createGroup(name, sectionId) {
-      const channel = await createGroupChannel(call, name);
+    async previewBotImport(gitUrl) {
+      const result = await call('botImportPreview', { gitUrl });
+      if (!result.ok) throw new BridgeCallError(result.error.code, result.error.message);
+      const value = result.value;
+      if (typeof value !== 'object' || value === null || !('source' in value))
+        throw new Error('Invalid Git preview');
+      return gitImportSource(value.source);
+    },
+    async createGroup(name, sectionId, operationKey) {
+      const channel = await createGroupChannel(call, name, undefined, operationKey);
       clientStore.upsertChannel(channel);
       await placeCreatedChannelFirst(channel.id, sectionId);
       await openChannelById(channel.id);
