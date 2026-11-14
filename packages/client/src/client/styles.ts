@@ -4385,6 +4385,12 @@ ${STAMP_ME_SPACERS} {
 .bh-delivery-legend-human-unread {
   color: var(--dsw-alias-label-secondary);
 }
+.bh-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: ${space.x2};
+}
 .bh-delivery-human-avatar {
   display: grid;
   place-items: center;

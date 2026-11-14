@@ -5514,6 +5514,11 @@ export const zh = {
   'failure.refused.modelNotAllowed': '你的角色不能使用这个 Bot 的模型',
   'failure.refused.modelNotAllowedHint':
     '在 Bot 设置的「模型」里换一个允许的模型，或请管理员调整角色。',
+  'team.firstRun.empty': '你还没有加入任何频道。',
+  'team.firstRun.browse': '浏览频道',
+  'team.permission.bots.createPrivate': '创建私有 Bot',
+  'team.permission.bots.createPublic': '创建公开 Bot',
+  'team.permission.bots.createPublic.hint': '公开 Bot 可以被其他人私聊、拉进频道。',
 } as const satisfies Record<string, string>;
 
 export type BotHarnessKey = keyof typeof zh;
@@ -11397,6 +11402,12 @@ My relationship with you, established lore and topics to avoid: [fill in].
   'failure.refused.modelNotAllowed': 'Your role can’t use this Bot’s model',
   'failure.refused.modelNotAllowedHint':
     'Choose an allowed model in the Bot’s Models settings, or ask an admin to change your role.',
+  'team.firstRun.empty': 'You’re not in any channels yet.',
+  'team.firstRun.browse': 'Browse channels',
+  'team.permission.bots.createPrivate': 'Create private Bots',
+  'team.permission.bots.createPublic': 'Create public Bots',
+  'team.permission.bots.createPublic.hint':
+    'Others can message public Bots and add them to channels.',
 } satisfies Record<BotHarnessKey, string>;
 
 export type BotHarnessTranslate = TranslateNS<typeof LOCALE_NS>;

@@ -135,6 +135,7 @@ export function Workspace({
       const openTob = async () => {
         registry.open(CHANNEL_BODY_PANEL);
         const tob = await options.actions.tobHome();
+        if (typeof tob.channelId !== 'string') throw new Error('No Tob on this Host');
         await options.actions.openChannel(tob.channelId);
         return tob;
       };

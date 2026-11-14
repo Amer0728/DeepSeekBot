@@ -1,4 +1,5 @@
 import { MessagePersonDialog } from './message-person-dialog.js';
+import { menuItemAllowed } from './team-menu.js';
 import { PublicChannelsDialog } from './public-channels-dialog.js';
 import { isHumanDmChannel } from './channel-kind.js';
 import { humanIdOf, selfHumanId } from './self-human.js';
@@ -2297,12 +2298,8 @@ export function BotSidebar({
                 remoteHostsState.hosts.some((remote) => remote.host.hostId === remoteHostsState.tab)
               ),
             teamMode?.viewer.kind === 'member',
-          ).filter(
-            (item) =>
-              (teamMode?.viewer.kind !== 'member' || MEMBER_MENU_ITEMS.has(item.id)) &&
-              (item.id !== 'message-person' ||
-                teamMode?.viewer.owner === true ||
-                teamMode?.viewer.permissions.includes('dm.humans') === true),
+          ).filter((item) =>
+            menuItemAllowed(item.id, teamMode?.enabled === true ? teamMode.viewer : undefined),
           )}
           onSelect={selectMenu}
           onClose={() => {
@@ -2406,7 +2403,39 @@ export function BotSidebar({
         <div className="bh-error">{t('roster.error', { error: state.error })}</div>
       ) : null}
       {state.roster.readOnly ? <div className="bh-note">{t('roster.readOnly')}</div> : null}
-      {state.status === 'ready' && state.bots.length === 0 ? (
+      {state.status === 'ready' &&
+      teamMode?.enabled === true &&
+      teamMode.viewer.kind === 'member' &&
+      state.channels.length === 0 ? (
+        <PanelEmptyState
+          icon="hash"
+          action={
+            <div className="bh-empty-actions">
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => setCreateRequest({ kind: 'public-channels' })}
+              >
+                {t('team.firstRun.browse')}
+              </Button>
+              {menuItemAllowed('message-person', teamMode.viewer) ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCreateRequest({ kind: 'message-person' })}
+                >
+                  {t('team.dm.menu')}
+                </Button>
+              ) : null}
+            </div>
+          }
+        >
+          {t('team.firstRun.empty')}
+        </PanelEmptyState>
+      ) : null}
+      {state.status === 'ready' &&
+      state.bots.length === 0 &&
+      !(teamMode?.enabled === true && teamMode.viewer.kind === 'member') ? (
         <PanelEmptyState
           icon="hash"
           action={
@@ -4044,14 +4073,6 @@ export function ChannelMoveMenu({
     </span>
   );
 }
-
-const MEMBER_MENU_ITEMS: ReadonlySet<string> = new Set([
-  'bot',
-  'channel',
-  'section',
-  'public-channels',
-  'message-person',
-]);
 
 function botCreateSource(id: string): 'empty' | 'git' | 'zip' | undefined {
   if (id === 'bot' || id === 'bot:empty') return 'empty';
