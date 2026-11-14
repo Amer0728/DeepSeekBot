@@ -139,6 +139,8 @@ For a blank bot, `--core-memory <text>` or `--core-memory-stdin` writes the root
 
 ### Remote Host settings
 
+The remote Bot conversation’s existing **Profile**, composer **Model**, **Workspace Grants** and approval controls bind settings to its owning Bot and Host; the Environment browsing filter cannot retarget them. Use the owning Host’s `--host` and `--token-file` with `show <bot>` then `update <bot> --name <name> --expected-profile <profileFingerprint>`. Models use `model-plan-customize` or `model-preset-apply` with the observed Bot and preset revisions. Folders use `workspace-options` / `workspace-create`, `grants`, `grant-create` and `grant-revoke --confirm`; approval templates use `approval-template list --bot <bot>` and `approval-template-set`. Read back `show`, `model-plan`, `grants` and the selected template on that same Host after changing them, including after an uncertain reply. These operations do not enable Bot collaboration or change network membership. A removed or replaced Client cannot replay an open settings draft through its new authorization; close and reopen the Bot’s settings. Remote folders use the target Host’s folder list, canonical Workspace creation and explicit grant confirmation. The local OS picker stays unavailable and never falls back to the serving Host.
+
 The browser's Environment panel → **More → Settings** opens one named settings target independently of the Chats/Activity browsing filter. Select the source Host with `--host <origin>` and its private `--token-file <file>` (or the existing environment variables); never point a remote-setting command at the serving Host by default. `model-catalog`, `home-model-set`, `model-presets`, `model-preset-create` and `model-preset-update` cover models; `overview-usage` and `overview-memory` cover usage and Memory activity; `storage-usage` and both storage cleanup preview/confirm pairs cover storage. Destructive confirmations still require `--confirmation-stdin --confirm`, using the preview from that same Host. An unavailable or refusing Host never falls back to a local profile. These commands do not read browser pairing secrets or change device-local Host looks. App preferences, Appearance and Notifications remain Client-local. Before switching a dirty settings target, choose Save and switch, Discard or Cancel; after an uncertain save, read `model-catalog` or `model-presets` from that same Host before retrying.
 
 App preferences lists Client appearance, notifications, shortcuts and companion choices through their existing device-local owners. Its navigation and search exclude Host-owned controls. **More settings** keeps the existing composition with explicit scope: Host-backed motion, Bot-mode icon and native language use This Host; window zoom uses This device. These Host controls remain bound to the serving Host.
@@ -424,6 +426,8 @@ are coded refusals, not delivery. A committed message ID proves the result; tool
 the selected reason. Human requests to wait or cancel must never be overridden.
 
 ### Bot profile, roster and Part Library
+
+The browser's [environment creation form](environment-creation.md) uses these same Host owners. For agent verification, select the owning Host explicitly with `--host` and its private `--token-file`; `create`, `group-create`, `roster-section-create`, `roster-section-rename`, `roster-section-reorder` and `channel-assign` perform the corresponding operations. Read `list`, `channels` and `roster` on both Hosts to confirm only the chosen Host changed. The Client's last creation target and browsing scope do not retarget CLI commands.
 
 These commands set a Bot's look and wake rules, arrange the sidebar and manage Custom Parts through the same Host calls as the Web UI ([#1702](https://github.com/BotHarness/DeepSeekBot/issues/1702)):
 
@@ -1187,6 +1191,8 @@ deepseekbot storage-usage
 deepseekbot storage-cleanup-preview --older-than-days 90 [--chat <channel-id> …] [--media image|video|audio|file …] \
   | deepseekbot storage-cleanup-confirm --confirmation-stdin --confirm
 ```
+
+For remote storage, use the selected owning Host’s explicit `--host` and private `--token-file` on **every** read, preview and confirmation. Keep a preview with that Host; changing Host requires a new preview. After a lost or timed-out confirmation response, run `storage-usage` on the same Host and inspect the affected Channel before requesting a fresh preview. Do not resend the old confirmation. The Environment settings UI follows the same rule: changing target or losing access discards the open preview, and an uncertain cleanup first reads that same Host again. A failed read blocks another preview until Reload succeeds. Disconnecting a relationship does not delete stored data. These authority-cookie CLI commands do not impersonate a browser’s enrolled Client.
 
 This is the CLI form of **Settings → Data & privacy → Storage space**. `storage-usage` returns `totalBytes`, `parts` (`media` is the attachment folder, `messages` the operational database, `memory` every Bot's Memory folder, `other` the rest of `$DSH_HOME/botharness`) and `chats`, largest media first, with each chat's `messages`, `oldestAt`, `mediaBytes` and per-kind `media` totals.
 
@@ -2021,6 +2027,8 @@ QQ also supports `deepseekbot messaging-defaults qq` and `messaging-defaults-set
 
 ### Team mode and Host Members
 
+`dm <username>` opens or creates the authenticated Human's canonical DM with that active person on the selected Host. Opening from either participant returns the same Channel; another Human's DM remains inaccessible. Use `channels send <channel-id> --body-stdin` and `channel-messages <channel-id>` for messages. Pure Human DMs have no Bot participant; Group messages remain readable by their eligible Bot members.
+
 The Owner CLI also accepts private LAN IPv4 HTTPS origins with normal certificate verification. Plain LAN HTTP remains refused. A private test CA can be supplied through the machine-local `NODE_EXTRA_CA_CERTS` setting.
 
 These commands use `--host <url>` and the existing private Host token input. The local Owner is the default caller.
@@ -2038,6 +2046,10 @@ deepseekbot --as bob channels browse-public
 deepseekbot --as bob channels join-public <channel-id>
 deepseekbot --as bob channels send <channel-id> --body-stdin < message.txt
 deepseekbot --as bob channel-messages <channel-id>
+
+deepseekbot dm bob
+
+deepseekbot --as bob dm owner
 deepseekbot team-mode insecure-http on --confirm
 deepseekbot team-mode insecure-http off --confirm
 deepseekbot team-mode off

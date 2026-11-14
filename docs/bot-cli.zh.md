@@ -139,6 +139,8 @@ deepseekbot search <words>
 
 ### 远程设置
 
+远端 Bot 会话复用现有 Profile、输入区「模型」「工作区授权」与审批控件，始终绑定该频道所属 Bot 与 Host，浏览环境筛选不能改变目标。对所属 Host 使用 `--host` 和 `--token-file`，先执行 `show <bot>`，再通过 `update <bot> --name <name> --expected-profile <profileFingerprint>` 改名。模型使用 `model-plan-customize` 或 `model-preset-apply`，传入已观察的 Bot 与预设修订。文件夹使用 `workspace-options`／`workspace-create`、`grants`、`grant-create` 和带 `--confirm` 的 `grant-revoke`；审批模板使用 `approval-template list --bot <bot>` 与 `approval-template-set`。修改后从同一 Host 读回 `show`、`model-plan`、`grants` 和所选模板，回执不确定时同样如此。这些操作不启用 Bot 协作或更改网络成员关系。Client 被移除或替换后，旧设置草稿不会借新授权重放，须关闭并重新打开 Bot 设置。远端文件夹使用目标 Host 的目录列表、正式 Workspace 创建和明确的授权确认。本机系统选择器保持不可用，不会回退到提供网页的 Host。
+
 本应用偏好只列出由既有设备本地所有者保存的 Client 外观、通知、快捷键和伙伴选项，导航与搜索均不包含 Host 选项。「更多设置」保留既有组合并标明范围：动效、Bot 模式图标和原生语言设置作用于本机 Host，窗口缩放作用于当前设备。这些 Host 选项始终绑定提供当前网页的 Host。
 
 创建预设的结果尚未确认时，设置草稿不会再次发送创建请求。收到成功回执后会保留预设 ID，「检查已创建的预设」只重读同一 Host。没有回执时，先检查预设列表并放弃草稿，再选择下一步；名称相同不能证明请求成功。放弃不会撤销可能已完成的 Host 写入。
@@ -408,6 +410,8 @@ Human 指定的更晚时间或条件仍须遵守。`override-already-attempted-d
 Human 要求等待或取消时不得使用 override。
 
 ### Bot 资料、侧边栏与部件库
+
+浏览器的[环境创建表单](environment-creation.zh.md)使用同一 Host 能力。Agent 核对时用 `--host` 和私有 `--token-file` 明确指定目标；`create`、`group-create`、`roster-section-create`、`roster-section-rename`、`roster-section-reorder` 和 `channel-assign` 对应界面操作。分别读取两台 Host 的 `list`、`channels` 和 `roster`，确认只有选定 Host 改变。Client 的上次创建目标和浏览范围不会替 CLI 改选 Host。
 
 这些命令设置 Bot 的外观和唤醒规则、整理侧边栏、管理自定义部件，走的是 Web 界面所用的同一组 Host 调用（[#1702](https://github.com/BotHarness/DeepSeekBot/issues/1702)）：
 
@@ -1158,6 +1162,8 @@ deepseekbot storage-usage
 deepseekbot storage-cleanup-preview --older-than-days 90 [--chat <channel-id> …] [--media image|video|audio|file …] \
   | deepseekbot storage-cleanup-confirm --confirmation-stdin --confirm
 ```
+
+远端存储的每次读取、预览和确认都要明确指定所属 Host 的 `--host` 和私密 `--token-file`。预览只用于该 Host；切换 Host 后重新预览。确认响应丢失或超时后，先从同一 Host 运行 `storage-usage` 并核对受影响频道，再创建新预览，不要重发旧确认。Environment 设置界面同样在切换目标或失去访问时丢弃当前预览；清理结果不确定时先重新读取原 Host，读取失败后必须重新加载成功才可再次预览。断开关系不会删除已有数据。这些使用 Host 授权 Cookie 的 CLI 命令不会冒用浏览器已登记的 Client。
 
 这是**设置 → 数据与隐私 → 存储空间**的 CLI 形式。`storage-usage` 返回 `totalBytes`、`parts`（`media` 是附件文件夹，`messages` 是运行数据库，`memory` 是全部 Bot 的 Memory 文件夹，`other` 是 `$DSH_HOME/botharness` 中其余内容），以及按媒体大小从大到小排列的 `chats`，其中包含每个聊天的 `messages`、`oldestAt`、`mediaBytes` 和按类型的 `media` 统计。
 
@@ -1941,6 +1947,8 @@ QQ 同样支持 `deepseekbot messaging-defaults qq` 和 `messaging-defaults-set 
 
 ### 团队模式与 Host 成员
 
+`dm <username>` 在指定 Host 上打开或创建当前 Human 与该活跃联系人的唯一私聊。双方打开会返回同一频道，其他 Human 无权读取。使用 `channels send <channel-id> --body-stdin` 和 `channel-messages <channel-id>` 收发、读取消息。纯 Human 私聊没有 Bot 参与者；群消息仍可由有权参与的 Bot 阅读。
+
 Owner CLI 也接受私有局域网 IPv4 的 HTTPS 地址，并正常验证证书；仍拒绝局域网明文 HTTP。测试用私有 CA 可通过机器本地的 `NODE_EXTRA_CA_CERTS` 指定。
 
 这些命令使用 `--host <url>` 和现有的私密 Host 令牌输入，默认以本地 Owner 身份执行。
@@ -1958,6 +1966,10 @@ deepseekbot --as bob channels browse-public
 deepseekbot --as bob channels join-public <channel-id>
 deepseekbot --as bob channels send <channel-id> --body-stdin < message.txt
 deepseekbot --as bob channel-messages <channel-id>
+
+deepseekbot dm bob
+
+deepseekbot --as bob dm owner
 deepseekbot team-mode insecure-http on --confirm
 deepseekbot team-mode insecure-http off --confirm
 deepseekbot team-mode off
