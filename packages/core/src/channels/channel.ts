@@ -1142,7 +1142,9 @@ export function isChannelMessage(value: unknown): value is ChannelMessage {
       message['replyTo'] !== resolution['requestMessageId'] ||
       (resolution['state'] !== 'answered' && resolution['state'] !== 'cancelled') ||
       (resolution['state'] === 'answered' &&
-        ((message['author'] as ChannelMessageAuthor)?.kind !== 'human' ||
+        (((message['author'] as ChannelMessageAuthor)?.kind !== 'human' &&
+          ((message['author'] as ChannelMessageAuthor)?.kind !== 'system' ||
+            resolution['decidedBy'] !== undefined)) ||
           !Array.isArray(resolution['answers']))) ||
       (resolution['state'] === 'cancelled' &&
         (message['author'] as ChannelMessageAuthor)?.kind !== 'bot')
@@ -1223,7 +1225,10 @@ export function isChannelMessage(value: unknown): value is ChannelMessage {
         pause['reason'] !== 'session')
     )
       return false;
-  } else if (message['takeoverResolution'] !== undefined) {
+  } else if (
+    message['takeoverResolution'] !== undefined ||
+    message['userQuestionResolution'] !== undefined
+  ) {
   } else if (
     (message['author'] as ChannelMessageAuthor)?.kind === 'system' &&
     !(

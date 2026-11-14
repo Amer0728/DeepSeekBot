@@ -291,8 +291,33 @@ async function humanProjections(
     ['channelTimeline', input],
     ['channels', {}],
     ['channelJournalPage', { ...input, through: f.channels.revision(f.group.id) }],
-    ['channelSearch', { ...input, text: message.body }],
-    ['messageSearch', { text: message.body }],
+    [
+      'channelSearch',
+      {
+        ...input,
+        text:
+          message.toolApprovalDecision ||
+          message.userQuestionResolution ||
+          message.privateInputResolution
+            ? f.channels.message(f.group.id, message.replyTo!)?.author.kind === 'bot'
+              ? Reflect.get(f.channels.message(f.group.id, message.replyTo!)!.author, 'slug')
+              : 'alice-bot'
+            : message.body,
+      },
+    ],
+    [
+      'messageSearch',
+      {
+        text:
+          message.toolApprovalDecision ||
+          message.userQuestionResolution ||
+          message.privateInputResolution
+            ? f.channels.message(f.group.id, message.replyTo!)?.author.kind === 'bot'
+              ? Reflect.get(f.channels.message(f.group.id, message.replyTo!)!.author, 'slug')
+              : 'alice-bot'
+            : message.body,
+      },
+    ],
   ] as const)
     check(await f.invoke(bob, method, args));
   await f.team.asMember('bob', async (peer) => {
@@ -325,6 +350,184 @@ async function humanProjections(
 }
 
 describe('M5 approval projections and decisions', () => {
+  it.each(['tool', 'question', 'secret'] as const)(
+    'never matches hidden %s content in any Human search',
+    async (kind) => {
+      const f = fixture();
+      f.roster.attach(createFakeRosterDomain().facility);
+      const request = await seed(f, kind);
+      for (const text of ['CONFIDENTIAL', 'CONFIDENTIAL_TOOL', 'CONFIDENTIAL_QUESTION', 'CO']) {
+        expect(await f.invoke(bob, 'channelSearch', { channelId: f.group.id, text })).toMatchObject(
+          { messages: [] },
+        );
+        expect(await f.invoke(bob, 'messageSearch', { text })).toMatchObject({ hits: [] });
+        for (const category of ['action', 'unread', 'replies', 'handled'] as const)
+          expect(f.attention.list(bob, { category, search: text }).items).toEqual([]);
+      }
+      for (const method of ['channelSearch', 'messageSearch'])
+        masked(
+          await f.invoke(bob, method, {
+            ...(method === 'channelSearch' ? { channelId: f.group.id } : {}),
+            text: 'alice-bot',
+          }),
+          request.id,
+        );
+      masked(f.attention.list(bob, { category: 'action', search: 'alice-bot' }), request.id);
+      expect(f.attention.list(bob, { category: 'action', search: 'Team' }).items).toEqual([]);
+      f.database.transaction((db) =>
+        db
+          .prepare(
+            `INSERT INTO channel_human_members(channel_id, human_id, display_name, visible_from_revision, joined_at) VALUES (?, 'admin', 'Admin', 0, ?)`,
+          )
+          .run(f.group.id, new Date().toISOString()),
+      );
+      expect(
+        await f.invoke(admin, 'channelSearch', { channelId: f.group.id, text: 'CONFIDENTIAL' }),
+      ).toMatchObject({ messages: [{ id: request.id }] });
+      expect(await f.invoke(admin, 'messageSearch', { text: 'CONFIDENTIAL' })).toMatchObject({
+        hits: [{ message: { id: request.id } }],
+      });
+      expect(
+        f.attention.list(admin, { category: 'action', search: 'CONFIDENTIAL' }).items,
+      ).toHaveLength(1);
+    },
+  );
+
+  it.each(['tool', 'question', 'secret'] as const)(
+    'removes reply previews of masked %s cards but keeps visible and ordinary previews',
+    async (kind) => {
+      const f = fixture();
+      const request = await seed(f, kind);
+      const reply: ChannelMessage = {
+        id: randomUUID(),
+        at: new Date().toISOString(),
+        author: { kind: 'human' },
+        body: 'Public reply',
+        replyTo: request.id,
+      };
+      await f.channels.appendMessage(bob, f.group.id, reply);
+      const canonical = f.channels.message(f.group.id, reply.id)!;
+      expect(canonical.replyToPreview?.body).toContain('CONFIDENTIAL');
+      expect(f.team.approvals.project(bob, canonical, f.group.id).replyToPreview).toBeNull();
+      expect(f.team.approvals.project(admin, canonical, f.group.id).replyToPreview?.body).toContain(
+        'CONFIDENTIAL',
+      );
+      const ordinary: ChannelMessage = {
+        id: randomUUID(),
+        at: reply.at,
+        author: { kind: 'human' },
+        body: 'Ordinary',
+        replyTo: reply.id,
+      };
+      await f.channels.appendMessage(bob, f.group.id, ordinary);
+      expect(
+        f.team.approvals.project(bob, f.channels.message(f.group.id, ordinary.id), f.group.id)
+          ?.replyToPreview?.body,
+      ).toBe('Public reply');
+      for (const method of ['channelMessages', 'channelTimeline', 'channelJournalPage']) {
+        const wire = JSON.stringify(
+          await f.invoke(bob, method, {
+            channelId: f.group.id,
+            ...(method === 'channelJournalPage'
+              ? { through: f.channels.revision(f.group.id) }
+              : {}),
+          }),
+        );
+        expect(wire).not.toContain('CONFIDENTIAL');
+      }
+    },
+  );
+
+  it.each(['missing', 'purged'] as const)(
+    'fails closed for buffered cards and resolutions with %s canonical requests',
+    async (state) => {
+      const f = fixture();
+      const request = await seed(f, 'question');
+      const live = createChannelLiveHub(
+        f.channels,
+        undefined,
+        undefined,
+        undefined,
+        (human) => f.team.isOwner(human),
+        undefined,
+        (human, id) => f.team.channelAccess.canRead(human, id, true),
+        undefined,
+        (human, value, channelId) => f.team.approvals.project(human, value, channelId),
+      );
+      const controller = new AbortController();
+      const frames = live
+        .followChannel(bob, f.group.id, 20, controller.signal)
+        [Symbol.asyncIterator]();
+      try {
+        await frames.next();
+        live.publishAdmission(f.group.id, request.id, request);
+        const read = f.channels.message.bind(f.channels);
+        const spy = vi.spyOn(f.channels, 'message').mockImplementation((channelId, id) =>
+          id === request.id
+            ? state === 'missing'
+              ? undefined
+              : {
+                  id,
+                  at: request.at,
+                  author: request.author,
+                  body: '',
+                  contentPurge: { at: request.at },
+                }
+            : read(channelId, id),
+        );
+        for (const human of [bob, owner]) {
+          const decision = {
+            id: 'decision',
+            at: request.at,
+            author: { kind: 'human' as const },
+            body: 'CONFIDENTIAL_ANSWER',
+            replyTo: request.id,
+            userQuestionResolution: {
+              requestMessageId: request.id,
+              state: 'answered' as const,
+              answers: [{ id: 'q', selected: ['CONFIDENTIAL_ANSWER'] }],
+            },
+          };
+          const wire = JSON.stringify(
+            f.team.approvals.project(
+              human,
+              [{ ...request, approval: { private: 'CONFIDENTIAL_STALE' } }, decision],
+              f.group.id,
+            ),
+          );
+          expect(wire).not.toContain('CONFIDENTIAL');
+          expect(wire).not.toContain('userQuestionRequest');
+          expect(wire).not.toContain('userQuestionResolution');
+        }
+        const frame = JSON.stringify((await frames.next()).value);
+        expect(frame).not.toContain('CONFIDENTIAL');
+        spy.mockRestore();
+      } finally {
+        controller.abort();
+        await frames.return?.();
+        live.close();
+      }
+    },
+  );
+
+  it('routes only the masked request to an unattended Bot owner outside a Human DM audience', async () => {
+    const f = fixture();
+    f.team.roles.set(owner, admin.humanId, ['member']);
+    const dm = f.team.channelAccess.dm(bob, admin.humanId).channel;
+    const request = await seed(f, 'question', 'alice-bot', dm.id);
+    masked(f.attention.list(alice, { category: 'action' }), request.id);
+    masked(activityListPushSource(f.attention, () => undefined).pending(alice), request.id);
+    expect(() => f.team.approvals.requireRequest(alice, dm.id, request.id)).toThrow(
+      'approval-not-allowed',
+    );
+    await expect(f.invoke(alice, 'channelMessages', { channelId: dm.id })).rejects.toMatchObject({
+      code: expect.stringMatching(/channel-not-found|remote-access\/denied/),
+    });
+    expect(f.attention.list(alice, { category: 'action', search: 'CONFIDENTIAL' }).items).toEqual(
+      [],
+    );
+  });
+
   it('repairs historical Human authors from canonical Source Event identity and preserves deleted authors', async () => {
     const f = fixture();
     const message: ChannelMessage = {
@@ -455,9 +658,9 @@ describe('M5 approval projections and decisions', () => {
         ['channelJournalPage', { ...input, through: 1 }],
         [
           'channelSearch',
-          { ...input, text: kind === 'ordinary' ? 'participant-message' : 'CONFIDENTIAL' },
+          { ...input, text: kind === 'ordinary' ? 'participant-message' : 'alice-bot' },
         ],
-        ['messageSearch', { text: kind === 'ordinary' ? 'participant-message' : 'CONFIDENTIAL' }],
+        ['messageSearch', { text: kind === 'ordinary' ? 'participant-message' : 'alice-bot' }],
       ] as const)
         check(await f.invoke(bob, method, args));
       const projected = f.team.approvals.project(bob, request, f.group.id);
@@ -571,7 +774,7 @@ describe('M5 approval projections and decisions', () => {
         () => f.invoke(bob, 'channelMessages', { channelId: f.group.id }),
         () => f.invoke(bob, 'channelTimeline', { channelId: f.group.id }),
         () => f.invoke(bob, 'channelJournalPage', { channelId: f.group.id, through: 1 }),
-        () => f.invoke(bob, 'channelSearch', { channelId: f.group.id, text: 'CONFIDENTIAL' }),
+        () => f.invoke(bob, 'channelSearch', { channelId: f.group.id, text: 'alice-bot' }),
         () =>
           f.invoke(
             bob,
@@ -724,7 +927,7 @@ describe('M5 approval projections and decisions', () => {
       expect(() => f.team.approvals.requireRequest(alice, f.group.id, request.id)).toThrow(
         'approval-not-allowed',
       );
-      expect(f.attention.list(alice, { category: 'action' }).items).toHaveLength(0);
+      masked(f.attention.list(alice, { category: 'action' }), request.id);
       expect(f.attention.list(admin, { category: 'action' }).items).toHaveLength(0);
     },
   );

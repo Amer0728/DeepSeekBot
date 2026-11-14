@@ -1,3 +1,4 @@
+import { Session, SessionId } from '@deepseek-ai/dsh-session';
 import { OWNER_HUMAN_CONTEXT } from '../src/humans/context.js';
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -264,6 +265,48 @@ describe('the native timed question port', () => {
   const view = (state: string) => ({
     active: [{ callId: 'call-1', questions, state }],
     settled: [],
+  });
+
+  it('persists the answer actor as an ignorable Session record and restores it without a live Agent', async () => {
+    const session = Session.create(SessionId(sessionId));
+    const root = { session };
+    const before = nativeTimedQuestions(context({ agents: { get: () => root } }), runtime, {
+      get: () => undefined,
+      list: () => [],
+    });
+    before.recordAnswer?.(sessionId, 'call-1', answer, { humanId: 'bob' });
+    const file = join(createTempRoot('question-actor-'), 'events.json');
+    writeFileSync(file, JSON.stringify(session.snapshotEvents()));
+    const events: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    expect(JSON.stringify(events)).not.toContain('Stable');
+    const after = nativeTimedQuestions(
+      context({
+        agents: { get: () => undefined },
+        sessionQuery: { readSession: async () => ({ session: { id: sessionId }, events }) },
+        sessionProjections: {
+          restore: () => ({
+            snapshot: {
+              values: {
+                userQuestions: {
+                  active: [],
+                  settled: [{ callId: 'call-1', answers: answer.answers }],
+                },
+              },
+            },
+          }),
+        },
+      }),
+      runtime,
+      { get: () => undefined, list: () => [] },
+    );
+    await after.load?.([sessionId]);
+    expect(after.answeringHuman?.(sessionId, 'call-1', answer)).toEqual({ humanId: 'bob' });
+    expect(after.answeringHuman?.(sessionId, 'other', answer)).toBeUndefined();
+    expect(
+      after.answeringHuman?.(sessionId, 'call-1', {
+        answers: [{ id: 'release-route', selected: ['Canary'] }],
+      }),
+    ).toBeUndefined();
   });
 
   it('reads a stored Session through the native projection and keeps the last live view', async () => {

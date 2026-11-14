@@ -1,4 +1,4 @@
-import { OWNER_HUMAN_CONTEXT } from '../src/humans/context.js';
+import { humanContext, OWNER_HUMAN_CONTEXT } from '../src/humans/context.js';
 import { Context } from '@deepseek-ai/cordis';
 import { join } from 'node:path';
 
@@ -655,6 +655,52 @@ describe('timed question cards outlive their asking Agent', () => {
     expect(states.snapshot('ada').attention).toBeUndefined();
   });
 
+  it.each(['foreground', 'continued'] as const)(
+    'recovers the submitting member after a %s answer before the Channel commit',
+    async (mode) => {
+      let native: ReturnType<TimedQuestionPort['read']> = { state: 'open' };
+      let receipt: { answer: typeof answer; human: ReturnType<typeof humanContext> } | undefined;
+      const { port } = recoveringPort(() => native);
+      const timed: TimedQuestionPort = {
+        ...port,
+        recordAnswer: (_session, _call, submitted, human) => {
+          receipt = { answer: submitted, human };
+        },
+        answeringHuman: (_session, _call, submitted) =>
+          JSON.stringify(receipt?.answer) === JSON.stringify(submitted)
+            ? receipt?.human
+            : undefined,
+      };
+      const state = fixture('orchestrator', timed);
+      const { id, controller } = await askTimed(state);
+      if (mode === 'continued') {
+        controller.abort();
+        state.setLive(false);
+        native = { state: 'continued' };
+      }
+      const member = humanContext('bob');
+      expect(await state.answerer.answer('ada', id, answer, member)).toBe(true);
+      expect(receipt?.human).toEqual(member);
+      state.answerer.close();
+      native = { state: 'answered', answer };
+      const restarted = new ChannelUserQuestions(
+        state.channels,
+        state.ownership,
+        () => false,
+        undefined,
+        undefined,
+        timed,
+      );
+      await restarted.recover([{ channelId, messageId: id }]);
+      const resolution = state.channels
+        .readMessages(channelId)
+        .find((item) => item.userQuestionResolution);
+      expect(resolution?.userQuestionResolution?.decidedBy).toEqual({ humanId: 'bob' });
+      expect(resolution?.author).toMatchObject({ kind: 'human', humanId: 'bob' });
+      restarted.close();
+    },
+  );
+
   it('records a native answer settled while the Host was down', async () => {
     const { port } = recoveringPort(() => ({ state: 'answered', answer }));
     const state = fixture('orchestrator', port);
@@ -669,6 +715,11 @@ describe('timed question cards outlive their asking Agent', () => {
     await state.answerer.recover([{ channelId, messageId: 'recovered-card' }]);
     expect(state.answerer.status('ada', 'recovered-card')).toBe('answered');
     expect(state.answerer.activeMessageIds()).toEqual([]);
+    const resolution = state.channels
+      .readMessages(channelId)
+      .find((item) => item.userQuestionResolution);
+    expect(resolution?.author).toEqual({ kind: 'system' });
+    expect(resolution?.userQuestionResolution?.decidedBy).toBeUndefined();
   });
 
   it('recovers nothing for a missing native question, another owner, an unavailable Session or a blocking card', async () => {
