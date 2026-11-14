@@ -4387,6 +4387,7 @@ ${STAMP_ME_SPACERS} {
 }
 .bh-empty-actions {
   display: flex;
+  margin-top: ${space.x3};
   flex-wrap: wrap;
   justify-content: center;
   gap: ${space.x2};

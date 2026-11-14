@@ -2407,30 +2407,26 @@ export function BotSidebar({
       teamMode?.enabled === true &&
       teamMode.viewer.kind === 'member' &&
       state.channels.length === 0 ? (
-        <PanelEmptyState
-          icon="hash"
-          action={
-            <div className="bh-empty-actions">
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setCreateRequest({ kind: 'public-channels' })}
-              >
-                {t('team.firstRun.browse')}
-              </Button>
-              {menuItemAllowed('message-person', teamMode.viewer) ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCreateRequest({ kind: 'message-person' })}
-                >
-                  {t('team.dm.menu')}
-                </Button>
-              ) : null}
-            </div>
-          }
-        >
+        <PanelEmptyState icon="hash">
           {t('team.firstRun.empty')}
+          <span className="bh-empty-actions">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setCreateRequest({ kind: 'public-channels' })}
+            >
+              {t('team.firstRun.browse')}
+            </Button>
+            {menuItemAllowed('message-person', teamMode.viewer) ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCreateRequest({ kind: 'message-person' })}
+              >
+                {t('team.dm.menu')}
+              </Button>
+            ) : null}
+          </span>
         </PanelEmptyState>
       ) : null}
       {state.status === 'ready' &&

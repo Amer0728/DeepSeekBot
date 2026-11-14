@@ -1,3 +1,4 @@
+import { useTeamMember } from './team-state.js';
 import { AnnouncementGate } from './announcement-gate.js';
 import { humanIdOf, useSelfHumanId, SelfHumanContext } from './self-human.js';
 import { CONVERSATION_STATE_KEYS, type ConversationStateView } from './store.js';
@@ -374,11 +375,18 @@ function Welcome({
   state: ConversationStateView;
   t: BotHarnessTranslate;
 }): ReactElement {
+  const member = useTeamMember();
   return (
     <div className="bh-root bh-main">
       <div className="bh-content" {...stylex.props(messageStyles.emptyContainer)}>
         <PanelEmptyState icon="messages-circle">
-          {t(state.bots.length === 0 ? 'main.welcome.empty' : 'main.welcome.hint')}
+          {t(
+            member
+              ? 'team.firstRun.main'
+              : state.bots.length === 0
+                ? 'main.welcome.empty'
+                : 'main.welcome.hint',
+          )}
         </PanelEmptyState>
       </div>
     </div>

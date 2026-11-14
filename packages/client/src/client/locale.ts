@@ -5519,6 +5519,7 @@ export const zh = {
   'team.permission.bots.createPrivate': '创建私有 Bot',
   'team.permission.bots.createPublic': '创建公开 Bot',
   'team.permission.bots.createPublic.hint': '公开 Bot 可以被其他人私聊、拉进频道。',
+  'team.firstRun.main': '在左侧打开一个频道，或者浏览频道加入一个。',
 } as const satisfies Record<string, string>;
 
 export type BotHarnessKey = keyof typeof zh;
@@ -11408,6 +11409,7 @@ My relationship with you, established lore and topics to avoid: [fill in].
   'team.permission.bots.createPublic': 'Create public Bots',
   'team.permission.bots.createPublic.hint':
     'Others can message public Bots and add them to channels.',
+  'team.firstRun.main': 'Open a channel on the left, or browse channels to join one.',
 } satisfies Record<BotHarnessKey, string>;
 
 export type BotHarnessTranslate = TranslateNS<typeof LOCALE_NS>;
