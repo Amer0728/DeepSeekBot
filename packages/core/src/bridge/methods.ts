@@ -676,7 +676,11 @@ export interface MessagingAppsView {
 export interface BridgeMethods extends TeamBridgeMethods {
   tobHome(
     payload: unknown,
-  ): Promise<BridgeResult<TobHome & { attention?: { unreadCount: number; hasAction: boolean } }>>;
+  ): Promise<
+    BridgeResult<
+      (TobHome & { attention?: { unreadCount: number; hasAction: boolean } }) | { available: false }
+    >
+  >;
   onboarding(payload: unknown): Promise<BridgeResult<OnboardingSnapshot>>;
   acknowledgements(payload: unknown): BridgeResult<{ items: Record<string, string> }>;
   acknowledge(payload: unknown): BridgeResult<{ key: string; value: string }>;
@@ -3125,6 +3129,7 @@ function buildBridgeMethods(
       });
     },
     async tobHome() {
+      if (!isHostOwner()) return { ok: true, value: { available: false as const } };
       if (!deps.tob) return unavailable();
       try {
         const home = await deps.tob.ensure(human);
@@ -3144,8 +3149,18 @@ function buildBridgeMethods(
       }
     },
     async onboarding(payload) {
-      if (deps.onboarding === undefined) return unavailable();
-      if (human.humanId !== OWNER_HUMAN_CONTEXT.humanId) {
+      if (!isHostOwner()) {
+        return {
+          ok: true,
+          value: {
+            profileId: human.humanId,
+            tutorial: 'skipped',
+            completed: true,
+            preparation: 'ready',
+          },
+        };
+      }
+      if (isHostOwner() && human.humanId !== OWNER_HUMAN_CONTEXT.humanId) {
         if (!deps.tob) return unavailable();
         const home = await deps.tob.ensure(human);
         return {
@@ -3160,6 +3175,7 @@ function buildBridgeMethods(
           },
         };
       }
+      if (deps.onboarding === undefined) return unavailable();
       const source = asObject(payload);
       const action = source['action'];
       if (

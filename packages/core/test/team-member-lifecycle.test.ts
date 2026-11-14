@@ -128,6 +128,10 @@ function createBot(f: ReturnType<typeof fixture>, human = bob, slug = 'bob-bot')
   if (!dm) throw new Error('DM fixture failed');
   return { bot: result.record, dm, memory: f.core.registry.memoryDirFor(slug)! };
 }
+function legacyMemberTob(f: ReturnType<typeof fixture>) {
+  const { bot, dm } = createBot(f, bob, 'legacy-tob');
+  return { botSlug: bot.slug, channelId: dm.id };
+}
 async function send(f: ReturnType<typeof fixture>, slug: string, id: string) {
   await f.core.channels.appendMessage(bob, 'dm-' + slug, {
     id,
@@ -469,7 +473,7 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       const other = createBot(f, alice, 'alice-bot');
       const opened = createBridgeMethodsForHumans(f.core)(bob).channelDm({ slug: 'bob-bot' });
       if (!opened.ok) throw new Error('DM unavailable');
-      const tob = await f.core.tob.ensure(bob);
+      const tob = legacyMemberTob(f);
       const exclusive = f.core.channels.getOrCreateBotDm(bob, 'bob-bot', 'bob-second', 'Exclusive');
       const mixed = f.core.channels.getOrCreateBotDm(bob, 'bob-bot', 'alice-bot', 'Mixed');
       if (!exclusive || !mixed) throw new Error('Bot DM unavailable');
@@ -496,11 +500,11 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       expect(preview.counts).toEqual(
         operation === 'purge'
           ? { channels: 4, bots: 3, messages: 3, files: 2 }
-          : { channels: 1, bots: 1, messages: 1, files: 1 },
+          : { channels: 0, bots: 0, messages: 0, files: 0 },
       );
       await f.core.team.purgeConfirm(owner, 'bob', preview.token, 'bob');
-      expect(f.core.channels.get(tob.channelId)).toBeUndefined();
-      expect(f.core.attachments.has(tobFile)).toBe(false);
+      expect(Boolean(f.core.channels.get(tob.channelId))).toBe(operation === 'transfer-first');
+      expect(f.core.attachments.has(tobFile)).toBe(operation === 'transfer-first');
       for (const channelId of [opened.value.channel.id, second.dm.id, exclusive.id])
         expect(Boolean(f.core.channels.get(channelId))).toBe(operation === 'transfer-first');
       expect(f.core.attachments.has(botFile)).toBe(operation === 'transfer-first');
@@ -564,7 +568,7 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
   });
 
   it.each(['tob', 'transferred', 'never-signed-in'])(
-    'purges a %s member created through the real sign-in lifecycle under an aliased Profile path',
+    'purges a Bot-less %s member created through the real sign-in lifecycle under an aliased Profile path',
     async (scenario) => {
       const root = createTempRoot('member-sign-in-purge-');
       mkdirSync(join(root, 'actual'));
@@ -587,7 +591,8 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       if (scenario !== 'never-signed-in')
         await f.core.team.signIn('bob', created.initialPassword, 'first-sign-in');
       const tobSlug = f.core.tob.slug(human);
-      expect(Boolean(tobSlug)).toBe(scenario !== 'never-signed-in');
+      expect(tobSlug).toBeUndefined();
+      expect(f.core.registry.list(human.humanId)).toEqual([]);
       const memory = tobSlug && f.core.registry.memoryDirFor(tobSlug);
       if (memory) writeFileSync(join(memory, 'private.md'), 'private Tob Memory');
       const shared = f.core.channels.createGroup(owner, {
@@ -714,11 +719,11 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
     );
   });
 
-  it('transfers private Bots and their history while keeping Tob bound to the original member', async () => {
+  it('transfers private Bots and former member Tobs with their history', async () => {
     const f = fixture();
     const original = createBot(f);
     createBot(f, alice, 'alice-bot');
-    const tob = await f.core.tob.ensure(bob);
+    const tob = legacyMemberTob(f);
     writeFileSync(join(original.memory, 'transferred.md'), 'private transferred memory');
     const group = f.core.channels.createGroup(owner, {
       name: 'Bot group',
@@ -739,6 +744,7 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
     });
     expect(f.core.team.transferPreview(owner, 'bob').bots).toEqual([
       { slug: 'bob-bot', displayName: 'bob-bot' },
+      { slug: 'legacy-tob', displayName: 'legacy-tob' },
     ]);
     const controller = new AbortController();
     const rosters = [bob, alice].map((human) =>
@@ -754,15 +760,15 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       await Promise.all(rosters.map((roster) => roster.return?.()));
     }
 
-    expect(f.core.registry.list('bob').map((bot) => bot.slug)).toEqual([tob.botSlug]);
+    expect(f.core.registry.list('bob')).toEqual([]);
     expect(
       f.core.registry
         .list('alice')
         .map((bot) => bot.slug)
         .sort(),
-    ).toEqual(['alice-bot', 'bob-bot']);
-    expect(f.core.tob.slug(bob)).toBe(tob.botSlug);
-    expect(f.core.registry.get(tob.botSlug)?.ownerHumanId).toBe('bob');
+    ).toEqual(['alice-bot', 'bob-bot', 'legacy-tob']);
+    expect(f.core.tob.slug(bob)).toBeUndefined();
+    expect(f.core.registry.get(tob.botSlug)?.ownerHumanId).toBe('alice');
     expect(f.core.team.belongs(alice, group.id)).toBe(true);
     expect(readFileSync(join(original.memory, 'transferred.md'), 'utf8')).toBe(
       'private transferred memory',
@@ -813,9 +819,9 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
     const f = fixture();
     const original = createBot(f);
     const aliceBot = createBot(f, alice, 'alice-bot');
-    const tob = await f.core.tob.ensure(bob);
+    const tob = legacyMemberTob(f);
     const tobMemory = f.core.registry.memoryDirFor(tob.botSlug)!;
-    expect(() => f.core.deletions.preview(tob.botSlug)).toThrowError('protected-bot');
+    expect(() => f.core.deletions.preview(tob.botSlug)).not.toThrow();
     const file = await f.core.attachments.upload({
       name: 'private.txt',
       data: (async function* () {
@@ -875,36 +881,30 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
     expect(JSON.stringify(f.core.contentPurge.checkpoint())).not.toContain('Bob private memory');
   });
 
-  it('does not recreate a Tob grant when offboarding finishes during first-sign-in workspace setup', async () => {
+  it('refuses member Tob setup before touching Workspace grants, including after offboarding', async () => {
     const f = fixture();
-    let finish: ((value: { id: string }) => void) | undefined;
-    const workspace = new Promise<{ id: string }>((resolve) => {
-      finish = resolve;
-    });
+    const ensureWorkspace = vi.fn();
     const tob = createTobService({
       database: f.db,
       registry: f.core.registry,
       channels: f.core.channels,
       workspaceRoot: join(f.dshHome, 'pending-tob-workspaces'),
       grants: f.core.grants,
-      ensureWorkspace: async () => workspace,
+      ensureWorkspace,
     });
-    const createGrant = vi.spyOn(f.core.grants, 'create');
-    const preparing = tob.ensure(bob);
-    const rejected = expect(preparing).rejects.toMatchObject({ code: 'tob-identity-unavailable' });
+    await expect(tob.ensure(bob)).rejects.toMatchObject({ code: 'tob-unavailable' });
     await f.core.team.deactivate(owner, 'bob');
     const preview = f.core.team.purgePreview(owner, 'bob');
+    expect(preview.counts).toEqual({ bots: 0, channels: 0, messages: 0, files: 0 });
     await f.core.team.purgeConfirm(owner, 'bob', preview.token, 'bob');
-    if (!finish) throw new Error('workspace was not pending');
-    finish({ id: 'late-workspace' });
-    await rejected;
-    expect(createGrant).not.toHaveBeenCalled();
+    await expect(tob.ensure(bob)).rejects.toMatchObject({ code: 'tob-unavailable' });
+    expect(ensureWorkspace).not.toHaveBeenCalled();
     expect(tob.slug(bob)).toBeUndefined();
   });
 
   it('refuses unsafe Memory before accepting member deletion, including the private Tob', async () => {
     const f = fixture();
-    const tob = await f.core.tob.ensure(bob);
+    const tob = legacyMemberTob(f);
     const path = f.core.registry.memoryDirFor(tob.botSlug)!;
     const retained = createTempRoot('m2-m9-retained-');
     writeFileSync(join(retained, 'keep.txt'), 'unrelated retained data');
@@ -923,7 +923,7 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
   it('replays Bot and Memory deletion over a pre-offboarding database snapshot without reviving Tob', async () => {
     const f = fixture();
     const bot = createBot(f);
-    const tob = await f.core.tob.ensure(bob);
+    const tob = legacyMemberTob(f);
     const tobMemory = f.core.registry.memoryDirFor(tob.botSlug)!;
     writeFileSync(join(bot.memory, 'secret.md'), 'private memory before purge');
     const snapshot = join(f.dshHome, 'before-offboarding.db');
@@ -958,7 +958,7 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       const bot = createBot(f);
       createBot(f, bob, 'paused-bot');
       expect(f.core.registry.setPaused('paused-bot', true)).toMatchObject({ ok: true });
-      const tob = await f.core.tob.ensure(bob);
+      const tob = legacyMemberTob(f);
       const group = f.core.channels.createGroup(bob, { name: 'Mentions', members: ['bob-bot'] });
       const schedule = f.core.schedules.create(
         'bob-bot',
@@ -1001,7 +1001,7 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
         await f.core.team.setMode(owner, true);
       }
       expect(f.core.team.member('bob')?.status).toBe('active');
-      expect(f.core.tob.slug(bob)).toBe(tob.botSlug);
+      expect(f.core.tob.slug(bob)).toBeUndefined();
       expect(f.core.registry.get('bob-bot')?.ownerHumanId).toBe('bob');
       expect(f.core.registry.get('paused-bot')?.paused).toBe(true);
     },

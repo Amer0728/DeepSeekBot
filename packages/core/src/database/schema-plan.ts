@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { DEFAULT_CHANNEL_POLICY } from '../team/channel-contract.js';
 import { ADMIN_PERMISSIONS, MEMBER_PERMISSIONS } from '../team/permissions.js';
 import { OWNER_HUMAN_CONTEXT } from '../humans/context.js';
@@ -3535,7 +3536,55 @@ const MEMBER_USAGE_MIGRATION: SchemaMigration = {
   },
 };
 
-export const BOT_HARNESS_SCHEMA_PLAN = defineSchemaPlan([
+const MINIMAL_MEMBER_MIGRATION: Omit<SchemaMigration, 'generation'> = {
+  module: 'team',
+  description: 'Minimal Member grants, split Bot creation and Owner-only Tob',
+  migrate(db) {
+    const previousMember = ['channels.create', 'dm.humans', 'bots.create', 'models.use'];
+    const rows = z
+      .array(
+        z.object({
+          role_id: z.string(),
+          builtin: z.string().nullable(),
+          name: z.string(),
+          permissions_json: z.string(),
+          models_json: z.string(),
+        }),
+      )
+      .parse(
+        db
+          .prepare('SELECT role_id, builtin, name, permissions_json, models_json FROM host_roles')
+          .all(),
+      );
+    for (const row of rows) {
+      const permissions = z.array(z.string()).parse(JSON.parse(row.permissions_json));
+      const unmodifiedMember =
+        row.builtin === 'member' &&
+        row.name === 'member' &&
+        row.models_json === '{"kind":"all"}' &&
+        permissions.length === previousMember.length &&
+        previousMember.every((permission) => permissions.includes(permission));
+      const grants = unmodifiedMember
+        ? ['dm.humans']
+        : [
+            ...new Set(
+              permissions.map((permission) =>
+                permission === 'bots.create' ? 'bots.createPrivate' : permission,
+              ),
+            ),
+          ];
+      db.prepare('UPDATE host_roles SET permissions_json = ? WHERE role_id = ?').run(
+        JSON.stringify(grants),
+        row.role_id,
+      );
+    }
+    db.exec(
+      'DELETE FROM tob_identity WHERE human_id <> (SELECT owner_human_id FROM team_settings)',
+    );
+  },
+};
+
+const BASE_MIGRATIONS: SchemaMigration[] = [
   SESSION_OWNERSHIP_MIGRATION,
   MESSAGING_TRACER_MIGRATION,
   ASSIGNMENT_DIRECTORY_MIGRATION,
@@ -3684,4 +3733,12 @@ export const BOT_HARNESS_SCHEMA_PLAN = defineSchemaPlan([
   HOST_RELATIONSHIP_REVOCATION_MIGRATION,
   TEAM_MODELS_MIGRATION,
   MEMBER_USAGE_MIGRATION,
+];
+
+export const BOT_HARNESS_SCHEMA_PLAN = defineSchemaPlan([
+  ...BASE_MIGRATIONS,
+  {
+    ...MINIMAL_MEMBER_MIGRATION,
+    generation: Math.max(...BASE_MIGRATIONS.map((migration) => migration.generation)) + 1,
+  },
 ]);
