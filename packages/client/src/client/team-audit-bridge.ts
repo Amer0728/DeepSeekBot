@@ -32,6 +32,7 @@ export interface AuditRecord {
   readonly kind: PrivateKind;
   readonly objectName: string;
   readonly reason?: string;
+  readonly action?: string;
 }
 
 const text = (value: unknown): string | undefined =>
@@ -77,6 +78,7 @@ export function parseAuditRecord(value: unknown): AuditRecord | undefined {
   if (row === undefined || auditId === undefined || !KINDS.includes(kind as PrivateKind))
     return undefined;
   const reason = text(row['reason']);
+  const action = text(row['action']);
   return {
     auditId,
     at: text(row['at']) ?? '',
@@ -84,7 +86,25 @@ export function parseAuditRecord(value: unknown): AuditRecord | undefined {
     kind: kind as PrivateKind,
     objectName: text(row['objectName']) ?? text(row['objectId']) ?? '',
     ...(reason === undefined ? {} : { reason }),
+    ...(action === undefined ? {} : { action }),
   };
+}
+
+export type AuditActionKey =
+  | 'paused'
+  | 'resumed'
+  | 'deleted'
+  | 'transferred'
+  | 'purged'
+  | 'changed';
+
+export function auditActionKey(action: string): AuditActionKey {
+  if (action === 'pause') return 'paused';
+  if (action === 'resume') return 'resumed';
+  if (action === 'deletionConfirm' || action === 'deletionRetry') return 'deleted';
+  if (action === 'transfer') return 'transferred';
+  if (action === 'memberPurgeConfirm') return 'purged';
+  return 'changed';
 }
 
 export async function loadPrivateObjects(

@@ -13,6 +13,7 @@ import { useMountedResource } from './mounted-resource.js';
 import type { TeamMember } from './team-bridge.js';
 import { teamErrorText } from './team-settings.js';
 import {
+  auditActionKey,
   loadAuditLog,
   loadPrivateObjects,
   openPrivateContent,
@@ -111,11 +112,17 @@ export function AuditLogSection({
         {rows !== undefined && rows.length === 0 ? <Note>{t('team.audit.empty')}</Note> : null}
         <div role="list" aria-label={t('team.audit.title')}>
           {(rows ?? []).map((row) => {
-            const label = t('team.audit.entry', {
-              viewer: row.viewerName,
-              object: row.objectName,
-              kind: t(`team.private.kind.${row.kind}`),
-            });
+            const label =
+              row.action === undefined
+                ? t('team.audit.entry', {
+                    viewer: row.viewerName,
+                    object: row.objectName,
+                    kind: t(`team.private.kind.${row.kind}`),
+                  })
+                : t(`team.audit.action.${auditActionKey(row.action)}`, {
+                    viewer: row.viewerName,
+                    object: row.objectName,
+                  });
             return (
               <div role="listitem" key={row.auditId} data-audit-record={row.auditId}>
                 <SettingsRow

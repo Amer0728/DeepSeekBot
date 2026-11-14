@@ -5534,6 +5534,12 @@ export const zh = {
   'team.error.ownContent': '这是你自己的内容，直接打开即可。',
   'team.error.privateViewsFull': '同时打开的查看太多了，请先关闭一些再试。',
   'team.error.auditIntegrityFailed': '访问记录完整性检查失败，暂时无法查看私密内容。',
+  'team.audit.action.paused': '{viewer} 暂停了 Bot「{object}」',
+  'team.audit.action.resumed': '{viewer} 恢复了 Bot「{object}」',
+  'team.audit.action.deleted': '{viewer} 删除了 Bot「{object}」',
+  'team.audit.action.transferred': '{viewer} 转交了 Bot「{object}」',
+  'team.audit.action.purged': '{viewer} 永久删除了 Bot「{object}」',
+  'team.audit.action.changed': '{viewer} 修改了 Bot「{object}」的设置',
 } as const satisfies Record<string, string>;
 
 export type BotHarnessKey = keyof typeof zh;
@@ -11441,6 +11447,12 @@ My relationship with you, established lore and topics to avoid: [fill in].
   'team.error.privateViewsFull': 'Too many views are open. Close some and try again.',
   'team.error.auditIntegrityFailed':
     'The access log failed its integrity check, so private content can’t be opened right now.',
+  'team.audit.action.paused': '{viewer} paused Bot “{object}”',
+  'team.audit.action.resumed': '{viewer} resumed Bot “{object}”',
+  'team.audit.action.deleted': '{viewer} deleted Bot “{object}”',
+  'team.audit.action.transferred': '{viewer} transferred Bot “{object}”',
+  'team.audit.action.purged': '{viewer} permanently removed Bot “{object}”',
+  'team.audit.action.changed': '{viewer} changed settings of Bot “{object}”',
 } satisfies Record<BotHarnessKey, string>;
 
 export type BotHarnessTranslate = TranslateNS<typeof LOCALE_NS>;
