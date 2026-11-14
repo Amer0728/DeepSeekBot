@@ -1,3 +1,4 @@
+import type { PrivateKind } from '../team/private-contract.js';
 import type { ChannelVisibility, ChannelPolicy } from '../team/channel-contract.js';
 import { TeamError, type TeamService } from '../team/service.js';
 import { OWNER_HUMAN_CONTEXT, type HumanContext } from '../humans/context.js';
@@ -407,6 +408,21 @@ export class BotharnessBridgeService extends TypertRemoteService {
   }
   usageByMember(period: UsageOverviewPeriod) {
     return unwrap(this.methods.usageByMember({ period }));
+  }
+  privateObjects(humanId?: string, kind?: PrivateKind, username?: string) {
+    return unwrapAsync(this.methods.privateObjects({ humanId, kind, username }));
+  }
+  privateContentOpen(kind: PrivateKind, objectId: string, reason?: string) {
+    return unwrapAsync(this.methods.privateContentOpen({ kind, objectId, reason }));
+  }
+  privateContentPage(viewId: string, before: string) {
+    return unwrapAsync(this.methods.privateContentPage({ viewId, before }));
+  }
+  auditLog(after?: string, limit?: number) {
+    return unwrapAsync(this.methods.auditLog({ after, limit }));
+  }
+  auditVerify() {
+    return unwrapAsync(this.methods.auditVerify({}));
   }
   teamMode() {
     return unwrapAsync(this.methods.teamMode({}));
@@ -3056,6 +3072,11 @@ export class BotharnessBridgeService extends TypertRemoteService {
 }
 
 markRemoteMethods(BotharnessBridgeService.prototype, [
+  'privateObjects',
+  'privateContentOpen',
+  'privateContentPage',
+  'auditLog',
+  'auditVerify',
   'teamMode',
   'modelsAllowed',
   'usageByMember',

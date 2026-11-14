@@ -3535,6 +3535,27 @@ const MEMBER_USAGE_MIGRATION: SchemaMigration = {
   },
 };
 
+const PRIVATE_CONTENT_AUDIT_MIGRATION: SchemaMigration = {
+  generation: MEMBER_USAGE_MIGRATION.generation + 1,
+  module: 'team',
+  description: 'Hash-chained private-content access audit and durable tail anchor',
+  migrate(database) {
+    database.exec(`
+        CREATE TABLE private_access_audit (
+          seq INTEGER PRIMARY KEY,
+          audit_id TEXT NOT NULL UNIQUE,
+          record_json TEXT NOT NULL CHECK(json_valid(record_json))
+        );
+        CREATE TABLE private_audit_head (
+          seq INTEGER NOT NULL,
+          audit_id TEXT NOT NULL,
+          hash TEXT NOT NULL
+        );
+        INSERT INTO private_audit_head VALUES (0, '', '');
+      `);
+  },
+};
+
 export const BOT_HARNESS_SCHEMA_PLAN = defineSchemaPlan([
   SESSION_OWNERSHIP_MIGRATION,
   MESSAGING_TRACER_MIGRATION,
@@ -3684,4 +3705,5 @@ export const BOT_HARNESS_SCHEMA_PLAN = defineSchemaPlan([
   HOST_RELATIONSHIP_REVOCATION_MIGRATION,
   TEAM_MODELS_MIGRATION,
   MEMBER_USAGE_MIGRATION,
+  PRIVATE_CONTENT_AUDIT_MIGRATION,
 ]);

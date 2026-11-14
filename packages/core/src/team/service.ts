@@ -1,3 +1,4 @@
+import { TeamPrivateContent } from './private-content.js';
 import type { UsageProjection } from '../usage/usage.js';
 import type { UsageByMemberResult, UsageOverviewPeriod } from '../usage/overview.js';
 import { TeamChannels } from './channels.js';
@@ -49,6 +50,7 @@ const memberSchema = z.object({
 export type TeamMember = z.infer<typeof memberSchema>;
 export interface TeamModeView {
   enabled: boolean;
+  privateAccessNotice?: true;
   activeMembers: number;
   suspendedMembers?: number;
   ownerPasswordSet: boolean;
@@ -93,6 +95,7 @@ const grantSchema = z.object({
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 
 export class TeamService {
+  readonly privateAccess: TeamPrivateContent;
   readonly roles: TeamRoles;
   readonly channelAccess: TeamChannels;
   private readonly accessListeners = new Set<() => void>();
@@ -109,6 +112,7 @@ export class TeamService {
   private accessChanged(revoke = false): void {
     this.invalidate();
     if (!revoke) return;
+    this.privateAccess.closeViews();
     for (const listener of this.accessListeners) listener();
     this.pairing?.closeStreams?.();
     this.db.transaction(
@@ -193,6 +197,13 @@ export class TeamService {
     this.now = options.now ?? Date.now;
     this.log = options.log ?? (() => {});
     this.limiter = new SignInRateLimit(this.now);
+    this.privateAccess = new TeamPrivateContent(
+      db,
+      channels,
+      this.roles,
+      this.channelAccess,
+      this.now,
+    );
   }
 
   bindRuntime(runtime: {
@@ -304,6 +315,7 @@ export class TeamService {
     if (!member) throw new TeamError('credentials-invalid');
     return {
       enabled: settings.enabled,
+      ...(settings.enabled ? { privateAccessNotice: true as const } : {}),
       activeMembers: this.db.read((db) =>
         Number(
           db

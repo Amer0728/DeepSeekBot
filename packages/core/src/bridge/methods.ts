@@ -2072,10 +2072,11 @@ export function createBridgeMethodsForHumans(
 ): (human: HumanContext) => BridgeMethods {
   const tables = new Map<HumanId, BridgeMethods>();
   return (human) => {
-    const existing = tables.get(human.humanId);
+    const key = JSON.stringify([human.humanId, human.caller]);
+    const existing = tables.get(key);
     if (existing !== undefined) return existing;
     const methods = createBridgeMethods(human, deps);
-    tables.set(human.humanId, methods);
+    tables.set(key, methods);
     return methods;
   };
 }

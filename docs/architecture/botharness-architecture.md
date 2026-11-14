@@ -1641,6 +1641,8 @@ The [M3 Host/CLI runtime](team-mode-m3-runtime.md) adds persistent Host Roles, u
 
 The [M9 lifecycle runtime](team-mode-m9-runtime.md) adds permission-scoped password resets, other-device sign-out, reversible mode suspension, deactivation/reactivation, group ownership transfer and permanent member deletion through Content Purge. Shared messages keep anonymous deleted-Human authorship; M2 private Bots and Tob participate in transfer, stop and Content Purge Memory erasure; shared roots and member mobile carriers retain their own qualification gates.
 
+The [M11 Host/CLI runtime](team-mode-m11-runtime.md) adds Human-only, permission-checked private-object discovery and read-only views through the same Team Service and Gateway. Opens append one hash-chained SQLite audit fact before content reads; metadata-only, Human-bound views reuse that fact for bounded pagination. A durable chain head detects deleted tail records. Role revocation clears views and uses the existing Peer/device stream disposal path; Team status advertises the member notice flag. Client and mobile presentation remain separate.
+
 The [M4 Host/CLI runtime](team-mode-m4-runtime.md) adds canonical Channel visibility, ownership/admins and policy, plus two-Human DM identity. The same audience Service scopes reads, SQL search, unread lists and live delivery; revocation closes existing browser Peers and paired-device streams. Private-content auditing remains M11.
 
 The Team usage and Role model policy runtime is described in [M10 Host and CLI logic](team-mode-m10-runtime.md).

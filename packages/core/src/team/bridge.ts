@@ -37,6 +37,14 @@ export function createTeamBridge(human: HumanContext, team: TeamService | undefi
     }
   };
   return {
+    privateObjects: (payload: unknown) =>
+      call((service) => service.privateAccess.objects(human, payload)),
+    privateContentOpen: (payload: unknown) =>
+      call((service) => service.privateAccess.open(human, payload)),
+    privateContentPage: (payload: unknown) =>
+      call((service) => service.privateAccess.page(human, payload)),
+    auditLog: (payload: unknown) => call((service) => service.privateAccess.log(human, payload)),
+    auditVerify: (_payload: unknown) => call((service) => service.privateAccess.verify(human)),
     teamMode: (_payload: unknown) => call((service) => service.mode(human)),
     teamModeSet: (payload: unknown) =>
       call((service) =>

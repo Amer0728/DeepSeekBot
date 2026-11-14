@@ -1126,6 +1126,7 @@ function initializeCore(
     database: operationalDatabase,
     ...(options.warn === undefined ? {} : { warn: options.warn }),
   });
+  team.privateAccess.bind({ registry, memory });
   startup.enter('usage', 'initialize');
   usage =
     operationalDatabase.mode === 'ready'
