@@ -190,7 +190,7 @@ describe('DM turn end to end', () => {
       botSlug: 'ada',
       provenance: 'created',
       parentSessionId: undefined,
-      cwdReference: join(dshHome, 'spaces', OWNER_HUMAN_CONTEXT.humanId, 'bots', 'ada', 'memory'),
+      cwdReference: join(dshHome, 'botharness', 'bots', 'ada', 'memory'),
     });
     expect(assignment).toMatchObject({
       botSlug: 'ada',
@@ -204,7 +204,7 @@ describe('DM turn end to end', () => {
       'standard',
     ]);
     expect(host.createOptions.map((options) => options.meta?.cwd)).toEqual([
-      join(dshHome, 'spaces', OWNER_HUMAN_CONTEXT.humanId, 'bots', 'ada', 'memory'),
+      join(dshHome, 'botharness', 'bots', 'ada', 'memory'),
       workspacePath,
     ]);
     for (const session of host.sessions) {

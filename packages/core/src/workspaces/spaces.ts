@@ -48,7 +48,13 @@ const rowSchema = z.object({
   audience_json: z.string().nullable(),
 });
 type SpaceRow = z.infer<typeof rowSchema>;
-const botSchema = z.object({ owner: z.string(), memory: z.string().nullable(), slug: z.string() });
+const botSchema = z.object({
+  owner: z.string(),
+  memory: z.string().nullable(),
+  slug: z.string(),
+  hostOwner: z.coerce.boolean(),
+  retained: z.string().nullable(),
+});
 
 export class WorkspaceSpaces {
   readonly home: string;
@@ -296,15 +302,19 @@ export class WorkspaceSpaces {
       .parse(
         this.db.read((connection) =>
           connection
-            .prepare(`SELECT slug, owner_human_id AS owner,
-      json_extract(body, '$.memoryDir') AS memory FROM persona_bots`)
+            .prepare(`SELECT slug, b.owner_human_id AS owner,
+      json_extract(body, '$.memoryDir') AS memory, b.owner_human_id = s.owner_human_id AS hostOwner,
+      (SELECT json_extract(p.body, '$.path') FROM persona_bot_memory_ownership p WHERE p.slug = b.slug) AS retained FROM persona_bots b CROSS JOIN team_settings s`)
             .all(),
         ),
       )
       .map((bot) => ({
         ...bot,
         memory: canonicalPath(
-          bot.memory ?? join(this.home, 'botharness', 'bots', bot.slug, 'memory'),
+          bot.memory ??
+            (!bot.hostOwner || bot.retained === accountMemoryPath(this.home, bot.owner, bot.slug)
+              ? accountMemoryPath(this.home, bot.owner, bot.slug)
+              : join(this.home, 'botharness', 'bots', bot.slug, 'memory')),
         ),
       }));
   }

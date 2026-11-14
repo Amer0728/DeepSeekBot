@@ -1,7 +1,7 @@
 import { currentRoots } from './workspaces/grant-native-tools.js';
 import { recoverSpaceTransfers } from './workspaces/space-lifecycle.js';
 import { WorkspaceSpaces } from './workspaces/spaces.js';
-import { accountMemoryPath, relocateSpaceMemories } from './workspaces/space-memory.js';
+import { defaultSpaceMemoryPath, relocateSpaceMemories } from './workspaces/space-memory.js';
 import { TeamError } from './team/error.js';
 import { requireBotModel } from './team/models.js';
 import { createMemberTobOperations } from './tob/member-operations.js';
@@ -747,7 +747,13 @@ function initializeCore(
     startup.enter('bot-registry', 'initialize');
     registry = createPersonaBotRegistry({
       rootDir,
-      defaultMemoryPath: (slug, humanId) => accountMemoryPath(realpathSync(dshHome), humanId, slug),
+      defaultMemoryPath: (slug, humanId) =>
+        defaultSpaceMemoryPath(
+          attachOperationalModule(operationalDatabase, 'workspace-spaces'),
+          realpathSync(dshHome),
+          humanId,
+          slug,
+        ),
       validateMemoryPath: (slug, humanId, path) => spaces.assertMemoryPath(humanId, slug, path),
       creationTopics: ['workspace-grants'],
       onCreated: (bot, connection) => {
