@@ -1,4 +1,5 @@
 import { TeamPrivateContent } from './private-content.js';
+import { TeamApprovals } from './approvals.js';
 import type { UsageProjection } from '../usage/usage.js';
 import type { UsageByMemberResult, UsageOverviewPeriod } from '../usage/overview.js';
 import { TeamChannels } from './channels.js';
@@ -49,6 +50,7 @@ const memberSchema = z.object({
 });
 export type TeamMember = z.infer<typeof memberSchema>;
 export interface TeamModeView {
+  isolation: 'trial' | 'enforced';
   enabled: boolean;
   privateAccessNotice?: true;
   activeMembers: number;
@@ -97,6 +99,7 @@ const tokenHash = (token: string) => createHash('sha256').update(token).digest('
 export class TeamService {
   readonly privateAccess: TeamPrivateContent;
   readonly roles: TeamRoles;
+  readonly approvals: TeamApprovals;
   readonly channelAccess: TeamChannels;
   private readonly accessListeners = new Set<() => void>();
   onAccessChanged(listener: () => void): () => void {
@@ -184,10 +187,25 @@ export class TeamService {
     this.channelAccess = new TeamChannels(db, channels, this.roles, (revoke) =>
       this.accessChanged(revoke),
     );
+    this.approvals = new TeamApprovals(db, channels, this.roles);
     channels.bindHumanAccess?.({
+      searchText: (human, channelId, messageId, text) =>
+        this.approvals.searchText(human, channelId, messageId, text),
       canRead: (human, id) => this.channelAccess.canRead(human, id),
       requirePolicy: (human, id, key) => this.channelAccess.requirePolicy(human, id, key),
-      requirePost: (human, id, all) => {
+      requirePost: (human, id, all, message) => {
+        const decision =
+          message?.toolApprovalDecision ??
+          message?.userQuestionResolution ??
+          message?.privateInputResolution;
+        if (
+          !all &&
+          decision?.decidedBy?.humanId === human.humanId &&
+          message?.replyTo === decision.requestMessageId
+        ) {
+          this.approvals.requireRequest(human, id, decision.requestMessageId);
+          return;
+        }
         const channel = channels.get(id);
         if (channel?.type !== 'group' && !channel?.humanParticipants) return;
         this.channelAccess.requirePolicy(human, id, 'post');
@@ -314,6 +332,7 @@ export class TeamService {
     const member = this.member(human.humanId);
     if (!member) throw new TeamError('credentials-invalid');
     return {
+      isolation: 'trial',
       enabled: settings.enabled,
       ...(settings.enabled ? { privateAccessNotice: true as const } : {}),
       activeMembers: this.db.read((db) =>
@@ -441,7 +460,7 @@ export class TeamService {
     username: string,
     displayName: string,
     roleIds: string[] = ['member'],
-  ): Promise<{ member: TeamMember; initialPassword: string }> {
+  ): Promise<{ member: TeamMember; initialPassword: string; isolation: 'trial' | 'enforced' }> {
     this.roles.require(human, 'members.manage');
     this.roles.validateAssignments(human, roleIds);
     if (!this.settings().enabled) throw new TeamError('team-mode-off');
@@ -476,7 +495,7 @@ export class TeamService {
       ['team', 'human-identity'],
     );
     this.invalidate();
-    return { member: this.member(humanId)!, initialPassword };
+    return { member: this.member(humanId)!, initialPassword, isolation: 'trial' };
   }
 
   private byUsername(username: string): TeamMember | undefined {

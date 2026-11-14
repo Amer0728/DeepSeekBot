@@ -2,7 +2,11 @@
 
 Tobs Connect 本机自检由现有 Devices owner 管理临时观察：账号、连接组件、relay 在线状态及公网设备通道的 TLS 与本机身份绑定 Noise 握手。它不创建 Device grant 或持久在线权威；结果五分钟后过期，账号或连接变化时失效，登录及组件恢复自动触发，手动检查走同一个已认证 Host API 与 CLI。并发合并、整体 20 秒及公网 8 秒上限，无新增后台轮询。检查通过仅证明本机当时可经公网连回自己，不能保证手机网络可达（#4170）。
 
+E7 的创建目标也限定“与人私聊”。既有 Team 联系人目录和 Human DM owner 执行权限检查，并复用该 Host 上两位参与者之间的唯一 DM。联系人查询、创建、频道刷新和打开会话使用固定的 HostClient；离线或被替换的来源不会回退到本机。关闭弹窗会取消待完成的打开动作。成员页面沿用自己的认证 Host，不接入 Owner 环境选择。Human DM 复用原聊天界面、普通消息气泡与频道文件，隐藏 Bot 专属面板和控件。
+
 ## 已确认目标：环境面板与双向 Host 关系（逐片交付）
+
+E9 的远端 Bot 设置复用原有 ConversationView 内的资料、模型、Workspace Grant 与审批控件，来源上下文固定捕获所属 Host、Bot 与原 HostClient。写入仍经过原 Host 的 Registry、模型、Workspace 和审批 owners 与既有 Device Gateway/API Gateway；每次调用前后检查原 Client 及连接状态，离开来源、撤销或同 Host ID 换 Client 后，旧结果不能提交后续操作。Workspace 目录选择沿用目标 Host 的目录浏览与 Workspace owner，保留分页而不向远端暴露本机 OS picker。纯 Human 会话不显示 Bot 控件。删除独立远端 SettingsDialog，不增加持久数据、代理权限层或 Bot 协作成员授权。
 
 私有线路 admission 存入既有受保护 credentials owner，以准确关系和固定对端身份绑定；公开关系、CLI 结果及生命周期日志不包含 token。仅固定身份的加密控制交换学习 admission，并在已认证的登记 ticket 中交给当前 Client，沿用既有 Noise 配对。等待对端撤销确认期间保留原有引用；确认后只清理该关系引用，重启补清已确认残留。异步写入与清理按关系串行，并在 await 后重新核对 canonical 授权；已断开关系不能继续普通返回探测。Tailscale HTTPS 登记仍走固定 Noise，后续沿用既有 HostClient 线路策略。
 
@@ -19,6 +23,8 @@ E3 在既有关系 owner 内保留缺少返回地址的已批准关系；固定 
 E1 将手动电脑连接接入 `host-relationships` 应用 owner：Operational Database generation 144 保存双端关系、固定对端身份及派生设备关联；现有受保护 Noise Host 密钥只用于关系控制，不能直接读取 Feed。发起端核对对端指纹、接收端核对发起端指纹并批准双向权限后，两端经加密控制通道激活关系。每个 Web/CLI Client 本地生成自己的密钥，Host 只转交绑定该公钥的短期 enrollment offer；现有 pairing owner 兑换、保存并准入独立设备，远端私钥不交给本机 Host。Client 复用 RemoteHosts、HostClient、Feed 与 Channel 路径，不建立内容镜像或第二套连接存储。
 
 本地认证的 `/api/botharness/relationships` 与 `relationships` CLI 共用同一 owner；普通 Device Gateway 拒绝转发关系管理，手机不因已配对而继承关系。撤销先持久化关系失效，再撤销关联设备；每次设备准入也检查关系，避免清理中断继续放行。独立设备授权及 Channel 数据保留，远端未确认撤销时保留 pending 状态。E1 不实现 Environment 面板、账号自动准入、多线路恢复或离线撤销后台重试；这些仍按 hub 的后续切片交付。
+
+E5 的 Environment 面板注册为现有全局 dockable panel，布局由 Client 的 Simple/Advanced owner 保存。`RemoteHosts` 继续持有独立 HostClient、凭据、Feed 和持久浏览 scope；面板、Channels 和 Activity 只消费同一 scope，不建立内容存储或授权权威。All 将来源限定的频道按最近消息与稳定键排序；单 Host 恢复自己的 Sections。离线来源保留已加载内容，重新连接仍调用原 HostClient。别名和图标继续由 Client 本地 HostLooks 管理，不修改实际 Host 名称。
 
 手机 Connect 账号管理直接使用 relay 现有的电脑列表和会话撤销接口，无需已配对或在线 Host（ADR-0241、#4039）。手机账号 owner 在串行操作中验证确认时的账号 action key 后刷新凭据并撤销目标；relay 仍是关联和撤销状态的持久权威。界面刷新列表并保留手机配对；旧关联明确提示可能自动重新关联。不改变 LAN/Tailscale 配对权限或本地 Bot 数据。
 
@@ -1599,6 +1605,8 @@ Android text playback has an independent opt-in native pacing experiment (`EXPO_
 
 ### Same-account Connect enrollment
 
+Node Host/CLI tunnel requests may recover an ENOTFOUND inside the existing transport using one bounded fresh configured-DNS query, retaining hostname TLS and Host pins. The self-check/CLI receipt distinguishes that recovery from a successful system lookup; product code never resets OS/VPN settings. Native phone workspace account rows treat service presence as advisory and refresh on foreground with account-scoped error/retry and no second directory store. See [ADR-0338](../adr/0338-connect-dns-recovery-is-request-scoped.md).
+
 The application-defined Connect account owner authorizes a fresh device after verifying signed-in state, the relay signature, exact account and Host registration, freshness and verifier hash. The encrypted gateway validates the phone verifier and approves only its exact Noise key through the existing paired-device owner. The mobile account-list path pins the Host key obtained through authenticated account enrollment without a manual fingerprint comparison. Unsigned offers and LAN/private pairing retain manual device approval. Account authentication and the relay are trusted enrollment authorities: compromise can authorize a new device, unlike ADR-0244's earlier guarantee. Existing grants persist across sign-out or code rollback and require explicit revocation; securing compromised account access is also necessary to prevent re-enrollment. No review-only configuration or second persistence owner exists. See [ADR-0327](../adr/0327-connect-account-ownership-authorizes-enrollment.md).
 
 In the opt-in `identitySource: client` offer mode, the application-defined Relay verifies account/Host ownership and returns the canonical official HTTPS hostname and verifier-bound signed enrollment without fetching the Host. The phone retrieves and validates Device identity on that exact HTTPS route, refuses redirects, pins the key and completes the existing Noise pairing and Host Feed path. Connector observations are advisory and never gate an existing route; saved-device reconnect adds no background probe. Legacy Relay-fetched identity offers remain supported. The trust and compatibility boundaries are recorded in the ADR-0327 client reachability amendment.
@@ -1623,6 +1631,8 @@ Reciprocal relationship management remains a current-Owner capability, separate 
 
 Member pages disable the existing RemoteHosts provider before Owner storage, key or HostClient initialization and do not compose the native Owner file provider. They retain normal member BridgeCall/RPC operations; their empty remote view does not delete or replace Owner connection storage. Remote pairing, enrollment and mutations refuse with `owner-required` in that disabled provider.
 
+The Environment filter selects Client presentation scope over those saved Host connections. A remote Channel uses the same `ConversationView`, Group header, timeline, message author and reading indicators, composer and Channel panels as a serving-Host Channel. Its owning HostClient supplies raw canonical messages through the existing native Channel journal and an injected `BridgeCall`; a Host-scoped ClientStore is a disposable projection, not another durable store. The authenticated target Host's composer identity supplies the current Human, so other Humans remain distinct left-side authors. Composer recovery's `hostId` is a machine-local composer namespace, separate from the Paired Device Host ID pinned by HostClient; its unchanged `(hostId, profileId, humanId, channelId)` tuple scopes drafts and is never compared with that transport identity. Conversation context covers only its header, body and bound entries: Workspace Environment, Channels, Activity and global settings continue to use the serving Host. Model plans, workspace events, pagination, settings attention and resources retain the same Host scope; avatars, attachments and memory media cannot fall back to serving-Host HTTP. Browser and Computer keep their native dock registrations with the target Host viewer transport. Human-only conversations reuse the same renderer with Bot-only panels and composer controls absent; Bot-containing Groups keep their existing capabilities.
+
 The Desktop intro includes an optional phone step that opens the existing Connections dialog. Every phone entry first shows shared App download guidance and requires explicit installed confirmation before preparing a route or creating an invitation, including when a usable route already exists. Its completion derives from the exact redeemed device's first successful Feed acknowledgement in the device-pairing owner, not from approval or transport admission. The mobile Host client reports only after loading and publishing the Bot/Channel roster; the authenticated gateway supplies device identity. `device-probe` shares that client and `devices` reads the same receipt. Skip creates no resources; Back and Close preserve existing routes and grants. See [ADR-0335](../adr/0335-phone-onboarding-confirms-device-feed-read.md).
 
 ### Bounded private route coexistence
@@ -1646,3 +1656,5 @@ The [M11 Host/CLI runtime](team-mode-m11-runtime.md) adds Human-only, permission
 The [M4 Host/CLI runtime](team-mode-m4-runtime.md) adds canonical Channel visibility, ownership/admins and policy, plus two-Human DM identity. The same audience Service scopes reads, SQL search, unread lists and live delivery; revocation closes existing browser Peers and paired-device streams. Private-content auditing remains M11.
 
 The Team usage and Role model policy runtime is described in [M10 Host and CLI logic](team-mode-m10-runtime.md).
+
+The [M5 approval logic](team-mode-m5-runtime.md) adds caller-scoped masking across Channel projections, Activity and push, Human decision attribution and unattended routing to the Bot owner. Member-owned Sessions refuse full access, suppressed asks and escalation. Team status and invitation responses identify the current isolation as `trial`; M12 owns enforcement qualification.
