@@ -608,7 +608,9 @@ describe('M6 path-addressed tools', () => {
           'grant-foreign-space',
         );
       }
-      f.core.assignmentAccess.set('alice-bot', 'danger-full-access', 'chat');
+      expect(() => f.core.assignmentAccess.set('alice-bot', 'danger-full-access', 'chat')).toThrow(
+        'permission-required',
+      );
       const fullSession = {
         id: 'alice-session',
         header: { cwd: f.core.registry.memoryDirFor('alice-bot')! },
@@ -629,7 +631,7 @@ describe('M6 path-addressed tools', () => {
             tool,
             toolArgs(tool, path),
           ),
-        ).toBe('grant-foreign-space');
+        ).toBe('permission-required');
       expect(readFileSync(secret, 'utf8')).toBe('Bob only');
       expect(f.core.currentRoots(session, 'read')).toContain(project);
       if (tool === 'glob' || tool === 'grep')
