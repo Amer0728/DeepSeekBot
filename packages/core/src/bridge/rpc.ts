@@ -1,3 +1,4 @@
+import type { ApprovalTemplateDeletionPreview } from '../workspaces/approval-template-deletion-contract.js';
 import type {
   BotMetadata,
   BotMetadataResult,
@@ -1659,11 +1660,20 @@ export class BotharnessBridgeService extends TypertRemoteService {
     );
   }
 
-  approvalTemplateDelete(name: string): {
+  approvalTemplateDeletePreview(name: string): { preview: ApprovalTemplateDeletionPreview } {
+    return unwrap(this.methods.approvalTemplateDeletePreview({ name }));
+  }
+
+  approvalTemplateDelete(
+    name: string,
+    revision: string,
+  ): {
     template: { name: string };
     clearedBots: string[];
+    inheritedBots: string[];
+    globalDefault: string | null;
   } {
-    return unwrap(this.methods.approvalTemplateDelete({ name }));
+    return unwrap(this.methods.approvalTemplateDelete({ name, confirmed: true, revision }));
   }
 
   approvalTemplateGlobalSet(template: string | null): { template: string | null } {
@@ -3431,6 +3441,7 @@ markRemoteMethods(BotharnessBridgeService.prototype, [
   'botPromptSet',
   'approvalTemplateCreate',
   'approvalTemplateUpdate',
+  'approvalTemplateDeletePreview',
   'approvalTemplateDelete',
   'approvalTemplateGlobalSet',
   'botApprovalTemplateSet',

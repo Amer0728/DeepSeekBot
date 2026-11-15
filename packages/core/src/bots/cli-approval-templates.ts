@@ -7,6 +7,7 @@ type Rpc = (method: string, payload: Record<string, unknown>) => Promise<unknown
 
 export const APPROVAL_TEMPLATE_OPTIONS = {
   from: { type: 'string' },
+  'delete-revision': { type: 'string' },
   'text-stdin': { type: 'boolean' },
 } as const;
 
@@ -15,6 +16,8 @@ export interface ApprovalTemplateValues {
   file?: string;
   from?: string;
   'text-stdin'?: boolean;
+  confirm?: boolean;
+  'delete-revision'?: string;
 }
 
 export const APPROVAL_TEMPLATE_COMMANDS = [
@@ -139,8 +142,17 @@ export async function runApprovalTemplateCommand(
     return rpc('approvalTemplateUpdate', { name, text });
   }
   if (subcommand === 'delete') {
+    const revision = values['delete-revision'];
+    if (values.confirm === true && (revision === undefined || !/^[a-f0-9]{64}$/u.test(revision)))
+      usage(
+        'Preview approval-template delete first, then pass --confirm --delete-revision <revision>.',
+      );
+    if (values.confirm !== true && revision !== undefined)
+      usage('--delete-revision requires --confirm.');
     const rpc = await connect();
-    return rpc('approvalTemplateDelete', { name });
+    return values.confirm === true
+      ? rpc('approvalTemplateDelete', { name, confirmed: true, revision })
+      : rpc('approvalTemplateDeletePreview', { name });
   }
   const rpc = await connect();
   const bot = subcommand === 'list' ? values.bot?.trim() : undefined;

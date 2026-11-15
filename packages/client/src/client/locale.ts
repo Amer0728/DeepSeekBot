@@ -4458,7 +4458,17 @@ export const zh = {
   'autoApproval.library.inUse':
     '{names} 正在使用这个模板，保存后立刻按新内容审批。Bot 若想从 Shell 修改或删除它，会先发审批卡片给你。',
   'autoApproval.library.deleteTitle': '删除“{title}”？',
-  'autoApproval.library.deleteBody': '会删除 approval-templates/{name}.md。',
+  'autoApproval.library.deleteBody': '将永久删除模板“{name}”。',
+  'autoApproval.library.deletePreviewFailed': '删除影响读取失败。重新读取后再确认。',
+  'autoApproval.library.deleteChanged': '引用或全局选择已变化。核对最新结果后再确认。',
+  'autoApproval.library.deleteUnconfirmed': '删除结果尚未确认。重新读取当前状态后再决定。',
+  'autoApproval.library.deleteDirect': '这些 Bot 将改为继承全局：{names}',
+  'autoApproval.library.deleteInherited': '这些 Bot 保持继承全局：{names}',
+  'autoApproval.library.deleteClearsGlobal': '全局默认将清空。',
+  'autoApproval.library.deleteUnused': '没有 Bot 引用此模板。',
+  'autoApproval.library.deleteHidden': '另外 {count} 个私有 Bot 也受影响。',
+  'autoApproval.library.deleteEffective': '删除后，受影响 Bot 的自动审核：{template}',
+  'autoApproval.library.deleteRulesUnchanged': '已保存授权和完全访问不变。',
   'autoApproval.library.deleteInUse':
     '{names} 正在使用它。删除后这些 Bot 的自动审批会关闭，工具审批改回由你在卡片上批准。',
   'access.section': '权限',
@@ -10447,7 +10457,22 @@ My relationship with you, established lore and topics to avoid: [fill in].
   'autoApproval.library.inUse':
     'Used by {names}; your edits apply to them right away. A Bot that tries to edit or delete it from its Shell asks you with an approval card first.',
   'autoApproval.library.deleteTitle': 'Delete “{title}”?',
-  'autoApproval.library.deleteBody': 'This removes approval-templates/{name}.md.',
+  'autoApproval.library.deleteBody': 'Permanently delete template “{name}”.',
+  'autoApproval.library.deletePreviewFailed':
+    'Could not read deletion effects. Reload before confirming.',
+  'autoApproval.library.deleteChanged':
+    'References or the global choice changed. Check the updated effects before confirming.',
+  'autoApproval.library.deleteUnconfirmed':
+    'The deletion result is unconfirmed. Reload the current state before deciding.',
+  'autoApproval.library.deleteDirect': 'These Bots will inherit the global choice: {names}',
+  'autoApproval.library.deleteInherited':
+    'These Bots will keep inheriting the global choice: {names}',
+  'autoApproval.library.deleteClearsGlobal': 'The global default will be cleared.',
+  'autoApproval.library.deleteUnused': 'No Bots reference this template.',
+  'autoApproval.library.deleteHidden': '{count} additional private Bots are also affected.',
+  'autoApproval.library.deleteEffective': 'After deletion, affected Bots use: {template}',
+  'autoApproval.library.deleteRulesUnchanged':
+    'Saved authorizations and Full Access stay the same.',
   'autoApproval.library.deleteInUse':
     'Used by {names}. Their auto approval turns off, and their tool approvals come to you as cards again.',
   'access.section': 'Access',

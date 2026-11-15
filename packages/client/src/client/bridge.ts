@@ -1,3 +1,7 @@
+import {
+  approvalTemplateDeletionPreviewSchema,
+  type ApprovalTemplateDeletionPreview,
+} from '../../../core/src/workspaces/approval-template-deletion-contract.js';
 import { MEMBER_METHODS } from '../../../core/src/team/member-methods.js';
 import { memberPage } from './member-page.js';
 import {
@@ -4453,14 +4457,29 @@ export function updateApprovalTemplate(
 ): Promise<ApprovalTemplateView> {
   return writtenApprovalTemplate(call, 'approvalTemplateUpdate', { name, text });
 }
-export async function deleteApprovalTemplate(
+export async function previewApprovalTemplateDeletion(
   call: BridgeCall,
   name: string,
-): Promise<{ clearedBots: string[] }> {
-  const response = asRecord(await unwrap(call, 'approvalTemplateDelete', { name }));
-  if (!Array.isArray(response?.['clearedBots']))
+): Promise<ApprovalTemplateDeletionPreview> {
+  const response = asRecord(await unwrap(call, 'approvalTemplateDeletePreview', { name }));
+  const preview = approvalTemplateDeletionPreviewSchema.parse(response?.['preview']);
+  if (preview.name !== name) throw new Error('invalid approval template deletion target');
+  return preview;
+}
+export async function deleteApprovalTemplate(
+  call: BridgeCall,
+  preview: ApprovalTemplateDeletionPreview,
+): Promise<{ inheritedBots: string[] }> {
+  const response = asRecord(
+    await unwrap(call, 'approvalTemplateDelete', {
+      name: preview.name,
+      confirmed: true,
+      revision: preview.revision,
+    }),
+  );
+  if (!Array.isArray(response?.['inheritedBots']))
     throw new Error('invalid approvalTemplateDelete response');
-  return { clearedBots: stringArray(response['clearedBots']) };
+  return { inheritedBots: stringArray(response['inheritedBots']) };
 }
 export async function setBotApprovalTemplate(
   call: BridgeCall,

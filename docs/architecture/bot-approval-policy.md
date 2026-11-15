@@ -60,6 +60,8 @@ Deleting a referenced template uses a second confirmation listing affected Bots 
 
 If the global default is another template, Bots falling back to inheritance use that template. Confirmation must disclose that result, not merely say the deleted template will be removed. Deterministic rules and Full Access are not revoked or changed by this operation.
 
+The application-defined deletion workflow composes the existing template-file owner and Bot Registry. The authenticated Host provides a read-only impact preview and rechecks its revision before confirmed deletion. The revision includes the template, remaining global policy and complete reference set. Visible Bot identities and a count of protected private references disclose the impact without opening another Human's private Bots. A stale preview is refreshed for another explicit confirmation; an unreadable or missing template refuses deletion rather than applying fallback. File deletion failure attempts to restore the preceding choices and reports incomplete restoration explicitly. No new persistence authority or database migration is introduced.
+
 ## Review snapshots and failures
 
 Each Review captures its template identity, version and content when it begins. Edits and selection changes affect later Reviews; already-started Reviews may finish using their captured version. Review records retain that identity/version. This is policy-version consistency, not an exception to current authorization and execution fences.

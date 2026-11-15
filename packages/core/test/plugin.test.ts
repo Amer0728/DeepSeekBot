@@ -1064,6 +1064,7 @@ describe('plugin entry', () => {
       'botPromptSet',
       'approvalTemplateCreate',
       'approvalTemplateUpdate',
+      'approvalTemplateDeletePreview',
       'approvalTemplateDelete',
       'approvalTemplateGlobalSet',
       'botApprovalTemplateSet',

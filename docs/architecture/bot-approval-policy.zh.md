@@ -4,7 +4,7 @@
 
 [ADR-0342](../adr/0342-bot-approval-selects-one-template-and-keeps-deterministic-authorization-separate.md) 记录长期决策与权衡，本文整合目标行为；GitHub issue 记录交付状态。设计确认不授权实施功能、更改运行权限或推进 SQLite 迁移。
 
-实施首片 #4211 通过既有文件 owner、认证 Host、在线 CLI 和 Client Select 打通全局／Bot 选择及两结果版本化 Review。三部分编辑、规则统一表和确认后的批量删除回退由后续切片交付。
+实施首片 #4211 通过既有文件 owner、认证 Host、在线 CLI 和 Client Select 打通全局／Bot 选择及两结果版本化 Review。三部分编辑和规则统一表由各自切片交付；确认删除通过绑定 revision 的影响预览及批量回退交付。
 
 ## 一份有效模板
 
@@ -61,6 +61,8 @@ Full Access 本身不豁免 [E2 #4210](https://github.com/BotHarness/DeepSeekBot
 | Bot 使用其他模板或关闭 | 保持原选择                                  |
 
 如果全局仍选另一份模板，回退继承的 Bot 随即使用它，确认信息必须说明这一结果，而不只是说“删除模板”。删除不撤销确定性授权，不改变 Full Access。
+
+应用定义的删除工作流组合既有模板文件 owner 与 Bot Registry。认证 Host 提供只读影响预览，确认删除时重新校验 revision；其绑定模板、剩余全局策略及完整引用集合。界面列出可见 Bot，以数量披露受保护的私有引用，不打开其他 Human 的私有 Bot。预览过期后刷新影响，须再次显式确认；模板缺失或无法读取时拒绝删除，不执行回退。文件删除失败会尝试恢复先前选择，恢复不完整时明确返回失败。不新增持久化权威或数据库迁移。
 
 ## Review 快照与失败
 

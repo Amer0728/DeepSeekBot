@@ -819,11 +819,16 @@ deepseekbot approval-template create night-shift --file night-shift.md
 deepseekbot approval-template create my-cautious --from cautious
 deepseekbot approval-template edit night-shift --file night-shift.md
 deepseekbot approval-template delete night-shift
+deepseekbot approval-template delete night-shift --confirm --delete-revision <revision-from-preview>
 ```
+
+删除命令先返回只读 `preview`：`revision` 绑定模板内容、当前全局选择及全部引用。预览包含 `globalDefaultBefore`、`globalDefaultAfter`、`globalDefaultAvailable`、可见 `affectedBots`（`slug` 和 `source`），以及身份不可见引用的 `hiddenBotCount`。加 `--confirm --delete-revision` 才删除；未确认不删除、不改选择。模板内容、引用或全局策略已变时返回 `approval-template-delete-changed`，须重新预览。
+
+确认后，特定引用统一改为 `@global`；删除全局默认会清空默认，原继承者保持继承并关闭 Reviewer。全局仍选另一模板时会使用它；默认不可读时仍显示不可用，未解决调用交给 Human。其他特定选择、关闭、Full Access 及已保存确定性规则不变；已开始的 Review 保留当次版本。结果含 `inheritedBots` 和 `globalDefault`；兼容字段 `clearedBots` 表示已移除特定选择的可见引用。删除失败返回 `approval-template-delete-unavailable`；若恢复选择也失败则为 `approval-template-delete-incomplete`，重试前先读取当前状态。意外缺失或读失败不会触发删除回退。
 
 `list` 返回 `templates` 和 `globalDefault`（模板名或 `null`）。加 `--bot` 时还返回 `selected`（`@global`、特定模板名或 `null`）、`source`（`global`、`specific`、`off`）及 `effective`（模板名或 `null`）。全局设置返回 `{template}`，Bot 设置返回 `{bot}`。写入由认证 Host 持有；不存在的模板不能被选中，全局选择读取失败返回 `approval-selection-unavailable`，不冒充空默认。
 
-模板继续使用内置只读内容或 `$DSH_HOME/botharness/approval-templates/` 下的 Markdown 文件；同一文件 owner 在 `.selection.json` 保存全局选择，不新增 schema 迁移。名称使用小写字母、数字和短横线，正文最多 32 KiB。`show` 返回全文；`create --from` 复制内容。现有编辑和删除流程保持原状；三部分编辑、统一规则表和确认后的批量删除回退由后续切片交付。
+模板继续使用内置只读内容或 `$DSH_HOME/botharness/approval-templates/` 下的 Markdown 文件；同一文件 owner 在 `.selection.json` 保存全局选择，不新增 schema 迁移。名称使用小写字母、数字和短横线，正文最多 32 KiB。`show` 返回全文；`create --from` 复制内容。三部分编辑和统一规则表由各自切片交付。
 
 确定性授权先处理，覆盖请求时不调用 Reviewer。其余请求按所选模板进入全新、无工具的 Reviewer Session，只接受本次 `allow` 或 `ask-human`。Always ask 优先于 Always allow，free text 补充两者；旧模板的 Reject 指引表示交给 Human。模型不存规则、不自主拒绝，拒绝熔断不再生效。旧拒绝记录及显式 Human override 保持可读。
 
