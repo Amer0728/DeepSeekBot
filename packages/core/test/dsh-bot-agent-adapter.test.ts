@@ -4191,3 +4191,57 @@ describe('model-free Tob preparation cancellation', () => {
     },
   );
 });
+
+it('keeps a cancelled native publication reserved until its late handle is cleaned up', async () => {
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const agents = new FakeAgentHost({ kind: 'completed' }, { onTurn: async () => {} });
+  const original = agents.create.bind(agents);
+  const create = vi.spyOn(agents, 'create').mockImplementation(async (options) => {
+    const handle = await original(options);
+    await gate;
+    return handle;
+  });
+  const adapter = createDshBotAgentAdapter({
+    agents,
+    defaultModel: { currentSelection: () => ({ provider: 'test', model: 'test' }) },
+    orchestratorCwd: () => '/memory/ada',
+    ensureWorkspace: () => undefined,
+  });
+  const controller = new AbortController();
+  const cancelled = adapter
+    .runOrchestrator({
+      ...reportRun,
+      tobCli: true,
+      tobCliTurn: {
+        command: { argv: ['approval-templates'], stdin: '' },
+        signal: controller.signal,
+        complete: () => {
+          throw Error('must not execute');
+        },
+      },
+    })
+    .catch(() => undefined);
+  try {
+    await vi.waitFor(() => expect(agents.get(reportRun.sessionId)).toBeDefined());
+    controller.abort();
+    await cancelled;
+    await expect(
+      adapter.runOrchestrator({ ...reportRun, message: 'Must wait for native cleanup' }),
+    ).rejects.toThrow('preparation');
+    expect(agents.received.get(reportRun.sessionId) ?? []).toEqual([]);
+    expect(create.mock.calls[0]?.[0].signal?.aborted).toBe(true);
+    release?.();
+    await vi.waitFor(() => expect(agents.disposed).toContain(reportRun.sessionId));
+    create.mockRestore();
+    await adapter.runOrchestrator({ ...reportRun, message: 'Run safely after cleanup' });
+    expect(agents.received.get(reportRun.sessionId)).toHaveLength(1);
+    expect(agents.get(reportRun.sessionId)).toBeDefined();
+  } finally {
+    release?.();
+    await cancelled;
+    await adapter.close();
+  }
+});

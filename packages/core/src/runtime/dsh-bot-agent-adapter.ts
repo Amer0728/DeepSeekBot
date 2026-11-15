@@ -648,33 +648,47 @@ class DshBotAgentAdapter implements BotAgentAdapter {
     this.#preparationVisibleMs = options.preparationVisibleMs ?? PREPARATION_VISIBLE_MS;
   }
 
-  async #prepare<T>(sessionId: string, work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  async #prepare<T>(
+    sessionId: string,
+    work: (signal: AbortSignal) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    if (this.#preparations.has(sessionId))
+      throw new DirectBotToolError(
+        'bot-busy',
+        'The previous native preparation is still being cleaned up',
+      );
     const controller = new AbortController();
     this.#preparations.set(sessionId, controller);
     const abort = () => controller.abort();
+    const release = () => {
+      if (this.#preparations.get(sessionId) === controller) this.#preparations.delete(sessionId);
+    };
+    let pending: Promise<T> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const stopped = new Promise<never>((_, reject) => {
         controller.signal.addEventListener('abort', () => reject(new PreparationStopped()), {
           once: true,
         });
-        timer = setTimeout(
-          () =>
-            reject(
-              new Error(
-                `Preparing this turn took longer than ${Math.round(this.#preparationTimeoutMs / 1000)} s (model route or Session resume did not answer). Check the DSH model provider, then send the message again.`,
-              ),
+        timer = setTimeout(() => {
+          reject(
+            new Error(
+              `Preparing this turn took longer than ${Math.round(this.#preparationTimeoutMs / 1000)} s (model route or Session resume did not answer). Check the DSH model provider, then send the message again.`,
             ),
-          this.#preparationTimeoutMs,
-        );
+          );
+          controller.abort();
+        }, this.#preparationTimeoutMs);
       });
       signal?.addEventListener('abort', abort, { once: true });
       signal?.throwIfAborted();
-      return await Promise.race([work(), stopped]);
+      pending = Promise.resolve().then(() => work(controller.signal));
+      void pending.then(release, release);
+      return await Promise.race([pending, stopped]);
     } finally {
       signal?.removeEventListener('abort', abort);
       clearTimeout(timer);
-      if (this.#preparations.get(sessionId) === controller) this.#preparations.delete(sessionId);
+      if (pending === undefined) release();
     }
   }
 
@@ -752,11 +766,11 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       try {
         handle = await this.#prepare(
           run.sessionId,
-          async () => {
+          async (signal) => {
             run.tobCliTurn?.signal.throwIfAborted();
             if (run.tobCliTurn === undefined)
               await this.#prepareModelRoute?.(run.bot.slug, 'orchestrator');
-            return this.#orchestratorHandle(run);
+            return this.#orchestratorHandle(run, signal);
           },
           run.tobCliTurn?.signal,
         );
@@ -1194,13 +1208,14 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       error.name = 'SessionUnavailableError';
       throw error;
     }
-    await this.#prepare(run.sessionId, async () => {
+    await this.#prepare(run.sessionId, async (signal) => {
       await this.#prepareModelRoute?.(run.bot.slug, 'orchestrator');
-      await this.#orchestratorHandle(run);
+      await this.#orchestratorHandle(run, signal);
     });
   }
 
-  async #orchestratorHandle(run: OrchestratorAgentRun): Promise<AgentHandle> {
+  async #orchestratorHandle(run: OrchestratorAgentRun, signal?: AbortSignal): Promise<AgentHandle> {
+    signal?.throwIfAborted();
     const existing = this.#liveHandle(run.sessionId);
     if (existing !== undefined) return existing;
     const resolvedAgentOptions = agentOptions(
@@ -1317,6 +1332,7 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       this.#authorizeBorrow?.(live, 'orchestrator');
       try {
         await setup(live.ctx, live, true);
+        signal?.throwIfAborted();
         run.tobCliTurn?.signal.throwIfAborted();
       } catch (error) {
         for (const dispose of borrowedDisposers.reverse()) await dispose();
@@ -1332,7 +1348,11 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       this.#orchestratorSelections.set(run.sessionId, selection);
       return borrowed;
     }
-    const options = { agentOptions: resolvedAgentOptions, setup };
+    const options = {
+      agentOptions: resolvedAgentOptions,
+      setup,
+      ...(signal === undefined ? {} : { signal }),
+    };
     const meta = createMeta(
       run,
       this.#resolveOrchestratorCwd(run.bot),
@@ -1352,6 +1372,7 @@ class DshBotAgentAdapter implements BotAgentAdapter {
           ...options,
         });
     try {
+      signal?.throwIfAborted();
       run.tobCliTurn?.signal.throwIfAborted();
       assertOrchestratorWorkingDirectory(
         run.sessionId,
