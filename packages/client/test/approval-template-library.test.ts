@@ -98,7 +98,7 @@ it.each(['write', 'readback'])(
     if (!option) throw new Error('Missing template option');
     await act(async () => option.click());
     expect(writes).toBe(1);
-    expect(trigger().textContent).toContain('无法读取');
+    expect(trigger().textContent).toContain('读取失败');
     expect(host.querySelector('[role="alert"]')).not.toBeNull();
     const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent === t('autoApproval.reload'),

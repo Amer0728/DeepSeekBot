@@ -44,7 +44,7 @@ it('keeps a failed selection read unknown instead of claiming the Bot is Off', a
     ),
   );
   const choice = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]');
-  expect(choice?.textContent).toContain('无法读取');
+  expect(choice?.textContent).toContain('读取失败');
   expect(choice?.textContent).not.toContain(t('autoApproval.off'));
   expect(choice?.disabled).toBe(true);
   expect(host.textContent).not.toContain(t('autoApproval.hintOff'));
