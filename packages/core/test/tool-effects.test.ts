@@ -354,3 +354,31 @@ it('resolves private-route reads and secret-bearing remote route changes', () =>
     }),
   ).toMatchObject({ reach: 'external', authority: 'management', secrets: true });
 });
+
+it.each(['tool-approval-decide', 'tool-approval-rule-revoke', 'user-question-answer'])(
+  'includes external card settlement for %s',
+  (command) => {
+    expect(toolEffects('deepseekbot ' + command, { patch: { argv: [command] } })).toMatchObject({
+      changes: 'irreversible',
+      reach: 'external',
+    });
+  },
+);
+it.each([
+  'approval-test',
+  'approval-retry',
+  'question-retry',
+  'failure-alerts-test',
+  'failure-alerts-retry',
+])('includes actual provider card/notification delivery for %s', (command) => {
+  expect(
+    toolEffects('deepseekbot ' + command, { patch: { argv: [command, 'bot'] } }),
+  ).toMatchObject({ changes: 'irreversible', reach: 'external' });
+});
+it('includes irreversible member purge without weakening broker refusal', () => {
+  expect(
+    toolEffects('deepseekbot members', {
+      patch: { argv: ['members', 'purge', 'member', '--confirm', '--token-stdin'] },
+    }),
+  ).toMatchObject({ changes: 'irreversible', authority: 'management', secrets: true });
+});

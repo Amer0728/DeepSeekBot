@@ -15,6 +15,11 @@ const destructiveSecret = { ...destructive, secrets: true } satisfies ToolEffect
 const secretWrite = { ...write, secrets: true } satisfies ToolEffects;
 const management = { ...write, authority: 'management' } satisfies ToolEffects;
 const secretManagement = { ...management, secrets: true } satisfies ToolEffects;
+const externalIrreversibleManagement = {
+  ...management,
+  changes: 'irreversible',
+  reach: 'external',
+} satisfies ToolEffects;
 const externalManagement = { ...management, reach: 'external' } satisfies ToolEffects;
 const externalSecretManagement = { ...externalManagement, secrets: true } satisfies ToolEffects;
 const destructiveManagement = { ...management, changes: 'irreversible' } satisfies ToolEffects;
@@ -447,16 +452,16 @@ export const CLI_EFFECTS = {
   'todo-tools': { effects: read, brokerRead: true },
   'todo-update': { effects: write, brokerRead: false },
   todos: { effects: read, brokerRead: true },
-  'tool-approval-decide': { effects: management, brokerRead: false },
+  'tool-approval-decide': { effects: externalIrreversibleManagement, brokerRead: false },
   'tool-approval-history': { effects: read, brokerRead: true },
-  'tool-approval-rule-revoke': { effects: management, brokerRead: false },
+  'tool-approval-rule-revoke': { effects: externalIrreversibleManagement, brokerRead: false },
   'tool-approval-rules': { effects: read, brokerRead: true },
   'tool-approval-status': { effects: read, brokerRead: true },
   update: { effects: write, brokerRead: false },
   'update-cancel': { effects: write, brokerRead: false },
   'update-status': { effects: read, brokerRead: true },
   usage: { effects: read, brokerRead: false },
-  'user-question-answer': { effects: write, brokerRead: false },
+  'user-question-answer': { effects: external, brokerRead: false },
   'user-question-status': { effects: read, brokerRead: true },
   'voice-asr-set': { effects: write, brokerRead: false },
   'voice-default-set': { effects: write, brokerRead: false },
