@@ -117,6 +117,54 @@ describe('Channel invitations client', () => {
     );
   });
 
+  it('disables Add when a later search fails after a selection', async () => {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    let fail = false;
+    const call = vi.fn(async () =>
+      fail
+        ? { ok: false as const, error: { code: 'unavailable', message: 'unavailable' } }
+        : { ok: true as const, value: [{ humanId: 'h-carol', displayName: 'Carol' }] },
+    ) as unknown as BridgeCall;
+    try {
+      await act(async () =>
+        root.render(
+          createElement(AddPeopleDialog, {
+            call,
+            channelId: 'c1',
+            t: zhTranslate,
+            onClose: vi.fn(),
+            onAdded: vi.fn(),
+          }),
+        ),
+      );
+      await flush();
+      await act(async () =>
+        document.querySelector<HTMLButtonElement>('[data-channel-add-option="h-carol"]')?.click(),
+      );
+      const submit = (): HTMLButtonElement =>
+        document.querySelector<HTMLButtonElement>('[data-channel-add-people-submit]')!;
+      expect(submit().disabled).toBe(false);
+      fail = true;
+      const input = container.querySelector<HTMLInputElement>('input')!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+          input,
+          'zz',
+        );
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await flush(300);
+      expect(document.body.textContent).toContain(zhTranslate('channelPeople.loadFailed'));
+      expect(submit().disabled).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it('searches, adds the chosen person and shows a refusal without closing', async () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     const container = document.createElement('div');
@@ -189,5 +237,8 @@ describe('Channel invitations client', () => {
     );
     expect(memberHumanName(owner, 'h-alice', zhTranslate)).toBe(zhTranslate('team.members.owner'));
     expect(memberHumanName(alice, 'h-alice', zhTranslate)).toBe('Alice');
+    expect(
+      memberHumanName({ humanId: 'h-nameless', displayName: 'Human' }, 'h-alice', zhTranslate),
+    ).toBe('Human');
   });
 });

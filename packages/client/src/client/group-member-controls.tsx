@@ -545,8 +545,10 @@ export function memberHumanName(
   self: string,
   t: BotHarnessTranslate,
 ): string {
-  if (member.displayName !== 'Human') return member.displayName;
-  return member.humanId === self ? humanLabel(member.displayName, t) : t('team.members.owner');
+  if (member.humanId === self) return humanLabel(member.displayName, t);
+  if (member.humanId === OWNER_HUMAN_ID && member.displayName === 'Human')
+    return t('team.members.owner');
+  return member.displayName;
 }
 
 export function MembersEntry(props: ChannelSidebarEntryProps): ReactElement {

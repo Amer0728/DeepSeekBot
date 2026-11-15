@@ -210,7 +210,7 @@ export function AddPeopleDialog({
     },
     [call, channelId, delayedQuery],
   );
-  const people = candidates?.people ?? [];
+  const people = loadFailed ? [] : (candidates?.people ?? []);
   const chosen = people.some((person) => person.humanId === selected) ? selected : undefined;
   const add = (): void => {
     if (chosen === undefined) return;

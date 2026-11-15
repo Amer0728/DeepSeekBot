@@ -2517,7 +2517,8 @@ const SEARCH_INDEX: ReadonlyArray<{ command: string; description: string }> = [
   { command: 'channel-human-name-set', description: 'set the per-channel Human nickname' },
   {
     command: 'channels',
-    description: 'list | add-member <id> <username> | member-candidates <id> [--query <text>]',
+    description:
+      'list channels | add-member <id> <username> | member-candidates <id> [--query <text>]',
   },
   { command: 'channel-messages', description: 'read channel messages' },
   { command: 'grants', description: 'list bot workspace grants' },
