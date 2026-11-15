@@ -175,9 +175,10 @@ describe('two-outcome Reviewer Human control', () => {
       expect(f.broker.autoApprovalPaused(f.sessionId)).toBe(false);
     }
     expect(f.review).toHaveBeenCalledTimes(4);
+    expect(f.messages().some((message) => message.toolAutoApprovalPause)).toBe(false);
     expect(
-      f.messages().some((message) => message.toolAutoApprovalPause || message.toolAutoApproval),
-    ).toBe(false);
+      f.messages().filter((message) => message.toolAutoApproval?.outcome === 'ask-human'),
+    ).toHaveLength(4);
     f.verdicts.push('allow');
     expect(await f.call('covered')).toBe('allowed-once');
     expect(f.review).toHaveBeenCalledTimes(5);

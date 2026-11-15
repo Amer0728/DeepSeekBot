@@ -19,12 +19,15 @@ describe('approval display content boundary', () => {
       }),
     ).toEqual(request);
   });
+  it('preserves an empty working directory supplied by the Host', () => {
+    expect(approvalContent({ ...request, cwd: '' })).toEqual({ ...request, cwd: '' });
+  });
   it.each([
     null,
     {},
     { ...request, input: undefined },
     { ...request, role: 'other' },
-    { ...request, cwd: '' },
+    { ...request, cwd: undefined },
     { ...request, allowAlways: 'true' },
   ])('refuses malformed content instead of inventing input', (value) => {
     expect(approvalContent(value)).toBeUndefined();

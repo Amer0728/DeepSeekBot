@@ -52,7 +52,7 @@ export function approvalContent(value: unknown): ApprovalContent | undefined {
     return undefined;
   if (!('role' in value) || (value.role !== 'orchestrator' && value.role !== 'assignment'))
     return undefined;
-  if (!('cwd' in value) || typeof value.cwd !== 'string' || !value.cwd.trim()) return undefined;
+  if (!('cwd' in value) || typeof value.cwd !== 'string') return undefined;
   if (!('input' in value) || typeof value.input !== 'string') return undefined;
   if ('allowAlways' in value && typeof value.allowAlways !== 'boolean') return undefined;
   return {
