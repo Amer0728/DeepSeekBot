@@ -61,7 +61,11 @@ async function fixture() {
     }
     sql.prepare('UPDATE team_settings SET enabled = 1').run();
   });
-  const team = new TeamService(db, core.channels, { now: () => now });
+  for (const human of [owner, alice, bob, carol]) core.team.spaces.ensureAccount(human.humanId);
+  const team = new TeamService(db, core.channels, {
+    now: () => now,
+    spaces: () => core.team.spaces,
+  });
   team.privateAccess.bind({ registry: core.registry, memory: core.memory });
   const auditor = team.roles.create(owner, 'Auditor', ['privateContent.view', 'audit.view']).role;
   team.roles.set(owner, carol.humanId, ['member', auditor.roleId]);

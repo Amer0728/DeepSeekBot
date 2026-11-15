@@ -436,15 +436,28 @@ try {
     if (granted.grant?.workspaceId !== workspaceId)
       throw new Error('Owner native Workspace Grant was refused after changing Team mode');
     const proofs = proofDatabase();
+    const auditBefore = await rpc(port, 'botharness', 'auditLog');
+    let privateOpens = 0;
     try {
       for (const memory of memories) {
         const detail = await rpc(port, 'botharness', 'get', { slug: memory.slug });
+        let profile = detail.bot;
+        if (detail.metadataOnly === true) {
+          if ('memoryDir' in profile || 'persona' in profile || 'sessions' in profile)
+            throw new Error('Private Bot administration returned content');
+          const view = await rpc(port, 'botharness', 'privateContentOpen', {
+            kind: 'bot',
+            objectId: memory.slug,
+          });
+          profile = view.object.profile;
+          privateOpens++;
+        }
         const history = execFileSync('git', ['-C', memory.path, 'rev-list', 'HEAD'], {
           encoding: 'utf8',
           windowsHide: true,
         }).trim();
         if (
-          detail.bot.memoryDir !== memory.path ||
+          profile.memoryDir !== memory.path ||
           history !== memory.history ||
           readFileSync(join(memory.path, 'switch-kept.txt'), 'utf8') !== memory.slug ||
           proofs
@@ -460,6 +473,11 @@ try {
     } finally {
       proofs.close();
     }
+    const auditAfter = await rpc(port, 'botharness', 'auditLog');
+    if (auditAfter.records.length !== auditBefore.records.length + privateOpens)
+      throw new Error('Private Memory reads were not audited exactly once');
+    const verified = await rpc(port, 'botharness', 'auditVerify');
+    if (!verified.ok) throw new Error('Private Memory audit chain failed verification');
   }
   await rpc(port, 'botharness', 'teamModeSet', { enabled: false });
   const dm = await rpc(port, 'botharness', 'channelDm', { slug, displayName });

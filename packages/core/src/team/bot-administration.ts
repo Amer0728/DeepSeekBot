@@ -46,7 +46,10 @@ export function botMetadata(
 }
 const resultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), value: z.unknown() }),
-  z.object({ ok: z.literal(false), error: z.object({ code: z.string() }) }),
+  z.object({
+    ok: z.literal(false),
+    error: z.object({ code: z.string(), details: z.unknown().optional() }),
+  }),
 ]);
 const deletionSchema = z.object({
   slug: z.string(),
@@ -73,8 +76,25 @@ export function administrativeResult(
   raw: unknown,
 ) {
   const result = resultSchema.parse(raw);
-  if (!result.ok)
-    return { ok: false, error: { code: result.error.code, message: result.error.code } };
+  if (!result.ok) {
+    const route =
+      result.error.code === 'model-not-allowed'
+        ? z.object({ route: z.string() }).safeParse(result.error.details)
+        : undefined;
+    const permission =
+      result.error.code === 'permission-required'
+        ? z.object({ permission: z.string() }).safeParse(result.error.details)
+        : undefined;
+    const details = route?.success ? route.data : permission?.success ? permission.data : undefined;
+    return {
+      ok: false,
+      error: {
+        code: result.error.code,
+        message: result.error.code,
+        ...(details ? { details } : {}),
+      },
+    };
+  }
   const value = { metadataOnly: true, bot: botMetadata(human, bot) } satisfies BotMetadataResult;
   if (method === 'deletionPreview') {
     const { preview } = z.object({ preview: previewSchema }).parse(result.value);

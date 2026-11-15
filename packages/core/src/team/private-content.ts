@@ -2,6 +2,7 @@ import { botProfileFingerprint } from '../bots/profile-snapshot.js';
 import type { BotAdminAction } from './bot-administration.js';
 import type { PersonaBotRecord } from '../bots/persona-bot.js';
 import { randomUUID } from 'node:crypto';
+import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import type { OperationalDatabaseModulePort } from '../database/owner.js';
 import type { PersonaBotRegistry } from '../bots/registry.js';
@@ -301,6 +302,7 @@ export class TeamPrivateContent {
     human: HumanContext,
     bot: Pick<PersonaBotRecord, 'slug' | 'displayName' | 'ownerHumanId'>,
     action: BotAdminAction,
+    transaction?: DatabaseSync,
   ): void {
     if (human.caller === 'bot')
       throw new TeamError('permission-required', undefined, { permission: 'owner' });
@@ -309,22 +311,25 @@ export class TeamPrivateContent {
     else if (!this.roles.isOwner(human))
       throw new TeamError('permission-required', undefined, { permission: 'owner' });
     if (botOwner(bot) === human.humanId) return;
-    this.audit.append({
-      at: new Date(this.now()).toISOString(),
-      viewerHumanId: human.humanId,
-      viewerName: z
-        .object({ display_name: z.string() })
-        .parse(
-          this.db.read((db) =>
-            db.prepare('SELECT display_name FROM humans WHERE human_id = ?').get(human.humanId),
-          ),
-        ).display_name,
-      kind: 'bot',
-      objectId: bot.slug,
-      objectName: bot.displayName,
-      ownerHumanIds: [botOwner(bot)],
-      action,
-    });
+    this.audit.append(
+      {
+        at: new Date(this.now()).toISOString(),
+        viewerHumanId: human.humanId,
+        viewerName: z
+          .object({ display_name: z.string() })
+          .parse(
+            this.db.read((db) =>
+              db.prepare('SELECT display_name FROM humans WHERE human_id = ?').get(human.humanId),
+            ),
+          ).display_name,
+        kind: 'bot',
+        objectId: bot.slug,
+        objectName: bot.displayName,
+        ownerHumanIds: [botOwner(bot)],
+        action,
+      },
+      transaction,
+    );
   }
 
   log(human: HumanContext, payload: unknown) {

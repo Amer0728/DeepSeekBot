@@ -16,6 +16,7 @@ import { memoryOwnership } from '../src/bots/deletion.js';
 import { accountMemoryPath, relocateSpaceMemories } from '../src/workspaces/space-memory.js';
 import { createSqliteChannelStore } from '../src/channels/sqlite-store.js';
 import { TeamService } from '../src/team/service.js';
+import { PrivateAudit } from '../src/team/audit.js';
 import {
   relocateTobWorkspaces,
   prepareSpaceTransfer,
@@ -376,6 +377,17 @@ describe('M6 durable filesystem transactions', () => {
       );
       const spaces = new WorkspaceSpaces(db, f.home, team.roles);
       const committed = stop === 0 || stop >= 4;
+      const records = team.privateAccess.log(memory.operator, {}).records;
+      expect(records).toHaveLength(committed ? 1 : 0);
+      if (committed)
+        expect(records[0]).toMatchObject({
+          kind: 'bot',
+          objectId: 'former-owner',
+          action: 'transfer',
+          ownerHumanIds: [owner.humanId],
+          viewerHumanId: memory.operator.humanId,
+        });
+      expect(team.privateAccess.verify(memory.operator)).toEqual({ ok: true });
       expect(
         db.read(
           (connection) =>
@@ -401,6 +413,8 @@ describe('M6 durable filesystem transactions', () => {
         expect(fs.existsSync(memory.target)).toBe(false);
         await expect(team.transfer(memory.operator, owner.humanId, 'bob')).resolves.toBeNull();
       }
+      expect(team.privateAccess.log(memory.operator, {}).records).toHaveLength(1);
+      expect(team.privateAccess.verify(memory.operator)).toEqual({ ok: true });
       expect(fs.existsSync(memory.source)).toBe(false);
       expect(fs.readFileSync(join(memory.target, 'uncommitted.txt'), 'utf8')).toBe(
         'retained uncommitted Memory',
@@ -668,6 +682,11 @@ describe('M6 durable filesystem transactions', () => {
     f.database.close();
     const next = mount(f.home);
     const db = attachOperationalModule(next, 'verify');
+    const audit = new PrivateAudit(db);
+    expect(audit.list({}).records).toMatchObject([
+      { kind: 'bot', objectId: 'alice-private', action: 'transfer', ownerHumanIds: ['alice'] },
+    ]);
+    expect(audit.verify()).toEqual({ ok: true });
     const target = accountMemoryPath(f.home, 'bob', 'alice-private');
     expect(fs.readFileSync(join(target, 'kept'), 'utf8')).toBe('kept');
     expect(fs.existsSync(source)).toBe(false);
@@ -683,6 +702,32 @@ describe('M6 durable filesystem transactions', () => {
     expect(
       db.read((connection) => connection.prepare('SELECT * FROM workspace_file_transfers').all()),
     ).toEqual([]);
+  });
+
+  it('rolls back ownership and filesystem moves if the transfer cannot append its audit record', async () => {
+    const f = fixture();
+    const created = f.registry.create({
+      slug: 'alice-private',
+      displayName: 'Private',
+      ownerHumanId: 'alice',
+    });
+    if (!created.ok) throw new Error('create-refused');
+    const source = f.registry.memoryDirFor('alice-private')!;
+    fs.writeFileSync(join(source, 'kept'), 'private Memory');
+    f.team.privateAccess.recordBotAction(owner, created.record, 'pause');
+    f.db.transaction((db) => db.prepare('DELETE FROM private_access_audit').run());
+    await expect(f.team.transfer(owner, 'alice', 'bob')).rejects.toMatchObject({
+      code: 'audit-integrity-failed',
+    });
+    expect(f.registry.get('alice-private')?.ownerHumanId).toBe('alice');
+    expect(f.registry.memoryDirFor('alice-private')).toBe(source);
+    expect(fs.readFileSync(join(source, 'kept'), 'utf8')).toBe('private Memory');
+    expect(fs.existsSync(accountMemoryPath(f.home, 'bob', 'alice-private'))).toBe(false);
+    expect(f.team.privateAccess.log(owner, {}).records).toEqual([]);
+    expect(f.team.privateAccess.verify(owner)).toMatchObject({ ok: false });
+    expect(f.db.read((db) => db.prepare('SELECT * FROM workspace_file_transfers').all())).toEqual(
+      [],
+    );
   });
 
   it.each([0, 3, 4, 5, 6, 7])(

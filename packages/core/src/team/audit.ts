@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import type { DatabaseSync } from 'node:sqlite';
 import type { OperationalDatabaseModulePort } from '../database/owner.js';
 import { auditListSchema, auditRecordSchema, type AuditRecord } from './private-contract.js';
 import { TeamError } from './error.js';
@@ -16,49 +17,51 @@ const unsigned = (record: AuditRecord): Omit<AuditRecord, 'hash'> => {
 export class PrivateAudit {
   constructor(private readonly db: OperationalDatabaseModulePort) {}
 
-  append(input: Omit<AuditRecord, 'auditId' | 'prevHash' | 'hash'>): AuditRecord {
-    const appended = this.db.transaction(
-      (db) => {
-        const head = headSchema.parse(db.prepare('SELECT * FROM private_audit_head').get());
-        const tail = db
-          .prepare('SELECT * FROM private_access_audit ORDER BY seq DESC LIMIT 1')
-          .get();
-        if (head.seq > 0) {
-          const parsed = rowSchema.safeParse(tail);
-          if (
-            !parsed.success ||
-            parsed.data.seq !== head.seq ||
-            parsed.data.audit_id !== head.audit_id
-          )
-            return undefined;
-          const record = auditRecordSchema.safeParse(JSON.parse(parsed.data.record_json));
-          if (
-            !record.success ||
-            record.data.hash !== head.hash ||
-            digest(unsigned(record.data)) !== head.hash
-          )
-            return undefined;
-        } else if (tail !== undefined) return undefined;
-        const value = auditRecordSchema.omit({ hash: true }).parse({
-          auditId: randomUUID(),
-          ...input,
-          prevHash: head.hash,
-        });
-        const record = { ...value, hash: digest(value) };
-        db.prepare('INSERT INTO private_access_audit VALUES (?, ?, ?)').run(
-          head.seq + 1,
-          record.auditId,
-          JSON.stringify(record),
-        );
-        db.prepare('UPDATE private_audit_head SET seq = ?, audit_id = ?, hash = ?').run(
-          head.seq + 1,
-          record.auditId,
-          record.hash,
-        );
-        return record;
-      },
-      ['private-audit'],
-    );
+  append(
+    input: Omit<AuditRecord, 'auditId' | 'prevHash' | 'hash'>,
+    transaction?: DatabaseSync,
+  ): AuditRecord {
+    const write = (db: DatabaseSync) => {
+      const head = headSchema.parse(db.prepare('SELECT * FROM private_audit_head').get());
+      const tail = db.prepare('SELECT * FROM private_access_audit ORDER BY seq DESC LIMIT 1').get();
+      if (head.seq > 0) {
+        const parsed = rowSchema.safeParse(tail);
+        if (
+          !parsed.success ||
+          parsed.data.seq !== head.seq ||
+          parsed.data.audit_id !== head.audit_id
+        )
+          return undefined;
+        const record = auditRecordSchema.safeParse(JSON.parse(parsed.data.record_json));
+        if (
+          !record.success ||
+          record.data.hash !== head.hash ||
+          digest(unsigned(record.data)) !== head.hash
+        )
+          return undefined;
+      } else if (tail !== undefined) return undefined;
+      const value = auditRecordSchema.omit({ hash: true }).parse({
+        auditId: randomUUID(),
+        ...input,
+        prevHash: head.hash,
+      });
+      const record = { ...value, hash: digest(value) };
+      db.prepare('INSERT INTO private_access_audit VALUES (?, ?, ?)').run(
+        head.seq + 1,
+        record.auditId,
+        JSON.stringify(record),
+      );
+      db.prepare('UPDATE private_audit_head SET seq = ?, audit_id = ?, hash = ?').run(
+        head.seq + 1,
+        record.auditId,
+        record.hash,
+      );
+      return record;
+    };
+    if (transaction && !transaction.isTransaction) throw new Error('audit-transaction-required');
+    const appended = transaction
+      ? write(transaction)
+      : this.db.transaction(write, ['private-audit']);
     if (!appended) throw new TeamError('audit-integrity-failed');
     return appended;
   }

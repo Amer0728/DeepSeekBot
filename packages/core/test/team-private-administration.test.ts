@@ -15,11 +15,14 @@ import { createBridgeMethodsForHumans } from '../src/bridge/methods.js';
 import { registerBridge } from '../src/bridge/rpc.js';
 import { humanContext, OWNER_HUMAN_CONTEXT as owner } from '../src/humans/context.js';
 import { attachOperationalModule } from '../src/database/owner.js';
-import { TeamService } from '../src/team/service.js';
 import { DUMMY_PASSWORD_HASH } from '../src/team/password.js';
 import { memberPolicy } from '../src/team/policy.js';
 import { guardHumanBridge } from '../src/team/bridge-access.js';
-import { botAdminActionSchema, botMetadata } from '../src/team/bot-administration.js';
+import {
+  botAdminActionSchema,
+  botMetadata,
+  administrativeResult,
+} from '../src/team/bot-administration.js';
 import { auditRecordSchema } from '../src/team/private-contract.js';
 import { PrivateAudit } from '../src/team/audit.js';
 import {
@@ -75,7 +78,8 @@ async function fixture() {
         );
     sql.prepare('UPDATE team_settings SET enabled = 1').run();
   });
-  const team = new TeamService(db, core.channels);
+  for (const human of [owner, alice, bob]) core.team.spaces.ensureAccount(human.humanId);
+  const team = core.team;
   team.privateAccess.bind({ registry: core.registry, memory: core.memory });
   const created = core.registry.create({
     slug: 'alice-bot',
@@ -623,4 +627,23 @@ it('denies Bot-origin member purge before permissions or private deletion', asyn
   ).rejects.toMatchObject({ code: 'permission-required' });
   expect(f.core.registry.get('alice-bot')).toBeDefined();
   expect(f.records()).toHaveLength(0);
+});
+
+it.each([
+  ['model-not-allowed', { route: 'provider/denied' }],
+  ['permission-required', { permission: 'models.manage' }],
+  ['invalid-input', undefined],
+])('preserves only safe refusal details for administrative %s', async (code, details) => {
+  const f = await fixture();
+  const bot = f.core.registry.get('alice-bot');
+  if (!bot) throw new Error('bot-missing');
+  const result = administrativeResult(owner, bot, 'modelPlanSet', {
+    ok: false,
+    error: { code, message: SECRET, details: { ...details, private: SECRET } },
+  });
+  expect(result).toEqual({
+    ok: false,
+    error: { code, message: code, ...(details ? { details } : {}) },
+  });
+  expect(JSON.stringify(result)).not.toContain(SECRET);
 });

@@ -977,8 +977,6 @@ export class TeamService {
     if (!currentTarget || (!currentTarget.owner && currentTarget.status !== 'active'))
       throw new TeamError('transfer-target-invalid');
     const preview = this.transferPreview(human, humanId);
-    for (const bot of preview.bots)
-      this.privateAccess.recordBotAction(human, { ...bot, ownerHumanId: humanId }, 'transfer');
     if (this.spaceProvider) {
       this.spaces.ensureAccount(humanId);
       this.spaces.ensureAccount(toHumanId);
@@ -996,6 +994,13 @@ export class TeamService {
     try {
       this.db.transaction(
         (db) => {
+          for (const bot of preview.bots)
+            this.privateAccess.recordBotAction(
+              human,
+              { ...bot, ownerHumanId: humanId },
+              'transfer',
+              db,
+            );
           spaceTransfer?.commit(db);
           db.prepare(`UPDATE persona_bots SET owner_human_id = ?, body = json_set(body, '$.ownerHumanId', ?)
           WHERE slug IN (SELECT value FROM json_each(?)) AND owner_human_id = ?`).run(
@@ -1028,6 +1033,7 @@ export class TeamService {
           'bot-ownership',
           'workspace-spaces',
           'workspace-grants',
+          'private-audit',
         ],
       );
     } catch (error) {
@@ -1037,7 +1043,11 @@ export class TeamService {
           this.disposePeers(),
           Promise.resolve().then(() => this.stopBots?.(preview.bots.map((bot) => bot.slug))),
         ]);
-      } else spaceTransfer?.rollback();
+      } else {
+        spaceTransfer?.rollback();
+        if (error instanceof OperationalDatabaseError && error.cause instanceof TeamError)
+          throw error.cause;
+      }
       throw error;
     }
     this.accessChanged(true);
