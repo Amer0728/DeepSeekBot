@@ -561,3 +561,18 @@ it.each([
   expect(brokerCliEffects('deepseekbot ' + argv[0], { patch: { argv } })).toEqual(expected);
   expect(toolEffects('deepseekbot_cli', { argv, stdin: '' })).toEqual(expected);
 });
+
+it('keeps the inherited global-template selection behind explicit management approval', () => {
+  const argv = ['approval-template-global-set', 'cautious'];
+  const expected = {
+    changes: 'reversible',
+    reach: 'local',
+    personalData: true,
+    authority: 'management',
+  };
+  expect(cliEffects(argv)).toEqual(expected);
+  expect(brokerCliEffects('deepseekbot approval-template-global-set', { patch: { argv } })).toEqual(
+    expected,
+  );
+  expect(toolEffects('deepseekbot_cli', { argv })).toEqual(expected);
+});

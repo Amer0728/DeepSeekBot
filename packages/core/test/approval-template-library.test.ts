@@ -1,14 +1,17 @@
 import { OWNER_HUMAN_CONTEXT } from '../src/humans/context.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import nativeFs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { runBotCreateCli } from '../src/bots/bot-create-cli.js';
 import type { PersonaBotRecord } from '../src/bots/persona-bot.js';
 import { createBridgeMethods, type BridgeMethodsDeps } from '../src/bridge/methods.js';
 import {
+  APPROVAL_TEMPLATE_TEXT_LIMIT,
   changesApprovalPolicy,
   createApprovalTemplateLibrary,
 } from '../src/workspaces/approval-templates.js';
@@ -42,7 +45,7 @@ const MINE =
   '# Night shift\n\nLet builds and tests run; ask me before anything leaves the machine.\n';
 
 function fakeRegistry(records: Partial<PersonaBotRecord>[]) {
-  const bots = records.map((record) => ({ ...record }) as PersonaBotRecord);
+  const bots = records.map((record) => ({ workspaces: [], ...record }) as PersonaBotRecord);
   return {
     bots,
     list: () => bots,
@@ -97,6 +100,54 @@ describe('Approval Template library', () => {
     expect(library.delete('night-shift')).toMatchObject({ ok: true });
     expect(existsSync(join(dir, 'night-shift.md'))).toBe(false);
     expect(library.get('night-shift')).toBeUndefined();
+  });
+
+  it('bounds externally edited template bytes before exposing them for review', () => {
+    const dir = tempDir();
+    const library = createApprovalTemplateLibrary(dir);
+    const path = join(dir, 'external.md');
+    const atLimit = 'x'.repeat(APPROVAL_TEMPLATE_TEXT_LIMIT);
+    writeFileSync(path, atLimit);
+    expect(library.get('external')?.text).toBe(atLimit);
+    for (const text of [atLimit + 'x', '界'.repeat(11_000), 'x'.repeat(65_559)]) {
+      writeFileSync(path, text);
+      expect(library.get('external')).toBeUndefined();
+      expect(library.list().some((template) => template.name === 'external')).toBe(false);
+      expect(library.create('external', MINE)).toEqual({ ok: false, reason: 'exists' });
+      expect(readFileSync(path, 'utf8')).toBe(text);
+    }
+    writeFileSync(
+      join(dir, '.selection.json'),
+      JSON.stringify({ template: 'cautious', padding: atLimit }),
+    );
+    expect(library.global()).toEqual({ kind: 'invalid' });
+  });
+
+  it('caps actual file I/O and closes the descriptor after rejecting external growth', () => {
+    const dir = tempDir();
+    const library = createApprovalTemplateLibrary(dir);
+    const path = join(dir, 'external.md');
+    writeFileSync(path, 'x'.repeat(65_559));
+    const opened = vi.spyOn(nativeFs, 'openSync');
+    const read = vi.spyOn(nativeFs, 'readSync');
+    const closed = vi.spyOn(nativeFs, 'closeSync');
+    syncBuiltinESMExports();
+    try {
+      expect(library.get('external') === undefined).toBe(true);
+      expect(opened).toHaveBeenCalledExactlyOnceWith(path, 'r');
+      const descriptor = opened.mock.results[0]!.value;
+      expect(read.mock.calls.length).toBeGreaterThan(0);
+      expect(read.mock.calls.every((call) => call[0] === descriptor)).toBe(true);
+      expect(read.mock.results.reduce((total, result) => total + Number(result.value), 0)).toBe(
+        APPROVAL_TEMPLATE_TEXT_LIMIT + 1,
+      );
+      expect(closed).toHaveBeenCalledExactlyOnceWith(descriptor);
+    } finally {
+      opened.mockRestore();
+      read.mockRestore();
+      closed.mockRestore();
+      syncBuiltinESMExports();
+    }
   });
 
   it('refuses bad names, empty text, unknown templates and changes to built-ins', () => {
@@ -159,6 +210,27 @@ describe('self-escalation guard for Approval Templates', () => {
     );
   });
 
+  it.each(['\\', '/'])(
+    'protects native policy paths with %s separators through the public Shell seam',
+    (separator) => {
+      const file = ['C:', 'dsh', 'botharness', 'approval-templates', '.selection.json'].join(
+        separator,
+      );
+      const command = `Set-Content -LiteralPath '${file}' -Value '{"template":"get-work-done"}'`;
+      expect(changesApprovalPolicy(command, () => false)).toBe(true);
+      expect(requiresHumanToolApproval('pwsh', { command }, () => false)).toBe(true);
+    },
+  );
+
+  it('protects active Windows template files while keeping unused drafts separate', () => {
+    const command = (name: string) =>
+      `Set-Content -LiteralPath 'C:\\dsh\\botharness\\approval-templates\\${name}.md' -Value 'policy'`;
+    expect(requiresHumanToolApproval('pwsh', { command: command('night-shift') }, inUse)).toBe(
+      true,
+    );
+    expect(requiresHumanToolApproval('pwsh', { command: command('my-draft') }, inUse)).toBe(false);
+  });
+
   it('turns a Shell edit of a template a Bot uses into a Human approval', () => {
     const registry = fakeRegistry([{ slug: 'ada', approvalTemplate: 'night-shift' }]);
     const templateInUse = approvalTemplateInUse(registry);
@@ -185,16 +257,82 @@ describe('Approval Template bridge methods', () => {
       { slug: 'ada', approvalTemplate: 'night-shift' },
       { slug: 'bob' },
     ]);
-    const library = createApprovalTemplateLibrary(join(tempDir(), 'approval-templates'));
+    const dir = join(tempDir(), 'approval-templates');
+    const library = createApprovalTemplateLibrary(dir);
     return {
       registry,
       library,
+      dir,
       bridge: createBridgeMethods(OWNER_HUMAN_CONTEXT, {
         registry,
+        states: { snapshot: () => ({ state: 'idle' }) },
         approvalTemplates: library,
       } as unknown as BridgeMethodsDeps),
     };
   }
+
+  it('uses one fresh global snapshot for a settings response and all template references', () => {
+    const { bridge, library, registry } = methods();
+    library.create('night-shift', MINE);
+    library.setGlobal('night-shift');
+    registry.setApprovalTemplate('bob', '@global');
+    const readGlobal = vi.spyOn(library, 'global');
+    const first = bridge.approvalTemplates({ slug: 'bob' });
+    expect(readGlobal).toHaveBeenCalledTimes(1);
+    expect(first).toMatchObject({
+      value: { globalDefault: 'night-shift', effective: 'night-shift' },
+    });
+    expect(
+      first.ok && first.value.templates.find((template) => template.name === 'night-shift')?.usedBy,
+    ).toEqual(['ada', 'bob']);
+    library.setGlobal('cautious');
+    readGlobal.mockClear();
+    const next = bridge.approvalTemplates({ slug: 'bob' });
+    expect(readGlobal).toHaveBeenCalledTimes(1);
+    expect(next).toMatchObject({ value: { globalDefault: 'cautious', effective: 'cautious' } });
+    expect(
+      next.ok && next.value.templates.find((template) => template.name === 'cautious')?.usedBy,
+    ).toEqual(['bob']);
+  });
+
+  it('keeps unreadable global selection distinct from a deliberately empty default', () => {
+    const { bridge, dir } = methods();
+    expect(bridge.approvalTemplateGlobalSet({ template: null })).toMatchObject({ ok: true });
+    expect(bridge.approvalTemplates({})).toMatchObject({ value: { globalDefault: null } });
+    writeFileSync(join(dir, '.selection.json'), '{broken');
+    expect(bridge.approvalTemplates({})).toMatchObject({
+      ok: false,
+      error: { code: 'approval-selection-unavailable' },
+    });
+  });
+
+  it('resolves dynamic global inheritance without enabling legacy disabled Bots', () => {
+    const { bridge, registry } = methods();
+    expect(bridge.approvalTemplateGlobalSet({ template: 'cautious' })).toMatchObject({ ok: true });
+    expect(bridge.approvalTemplates({ slug: 'bob' })).toMatchObject({
+      value: { selected: null, effective: null, source: 'off' },
+    });
+    expect(bridge.botApprovalTemplateSet({ slug: 'bob', template: '@global' })).toMatchObject({
+      ok: true,
+    });
+    expect(bridge.approvalTemplates({ slug: 'bob' })).toMatchObject({
+      value: { selected: '@global', effective: 'cautious', source: 'global' },
+    });
+    bridge.approvalTemplateGlobalSet({ template: 'get-work-done' });
+    expect(bridge.approvalTemplates({ slug: 'bob' })).toMatchObject({
+      value: { effective: 'get-work-done' },
+    });
+    bridge.botApprovalTemplateSet({ slug: 'bob', template: 'cautious' });
+    expect(bridge.approvalTemplates({ slug: 'bob' })).toMatchObject({
+      value: { effective: 'cautious', source: 'specific' },
+    });
+    bridge.approvalTemplateGlobalSet({ template: null });
+    expect(bridge.approvalTemplates({ slug: 'bob' })).toMatchObject({
+      value: { effective: 'cautious' },
+    });
+    bridge.botApprovalTemplateSet({ slug: 'bob', template: null });
+    expect(registry.get('bob')?.approvalTemplate).toBeUndefined();
+  });
 
   it('creates, copies, edits and lists templates with the Bots that use them', () => {
     const { bridge } = methods();
@@ -332,11 +470,17 @@ describe('deepseekbot approval-template', () => {
     await invoke(['approval-template', 'create', 'mine', '--from', 'cautious'], live.url);
     await invoke(['approval-template', 'edit', 'mine', '--text-stdin'], live.url, MINE);
     await invoke(['approval-template', 'delete', 'mine'], live.url);
+    await invoke(['approval-template-global-set', 'cautious'], live.url);
+    await invoke(['approval-template-global-set', 'off'], live.url);
+    await invoke(['approval-template-set', 'ada', 'inherit'], live.url);
     expect(live.calls.slice(2)).toEqual([
       { method: 'approvalTemplateCreate', args: { name: 'night-shift', text: MINE } },
       { method: 'approvalTemplateCreate', args: { name: 'mine', from: 'cautious' } },
       { method: 'approvalTemplateUpdate', args: { name: 'mine', text: MINE } },
       { method: 'approvalTemplateDelete', args: { name: 'mine' } },
+      { method: 'approvalTemplateGlobalSet', args: { template: 'cautious' } },
+      { method: 'approvalTemplateGlobalSet', args: { template: null } },
+      { method: 'botApprovalTemplateSet', args: { slug: 'ada', template: '@global' } },
     ]);
   });
 

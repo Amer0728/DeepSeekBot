@@ -56,6 +56,7 @@ export const CLI_EFFECTS = {
   'approval-route': { effects: management, brokerRead: false },
   'approval-routes': { effects: read, brokerRead: true },
   'approval-template': { effects: management, brokerRead: false },
+  'approval-template-global-set': { effects: management, brokerRead: false },
   'approval-template-set': { effects: management, brokerRead: false },
   'approval-template-show': { effects: read, brokerRead: true },
   'approval-templates': { effects: read, brokerRead: true },

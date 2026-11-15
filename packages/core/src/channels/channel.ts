@@ -313,7 +313,8 @@ export interface ChannelToolAutoApproval {
   toolName: string;
   input: string;
   template: string;
-  outcome: 'allowed' | 'rejected';
+  templateVersion?: string;
+  outcome: 'allowed' | 'rejected' | 'ask-human';
   reason: string;
 }
 
@@ -1216,7 +1217,9 @@ export function isChannelMessage(value: unknown): value is ChannelMessage {
         (key) => typeof record[key] !== 'string' || record[key].length === 0,
       ) ||
       typeof record['input'] !== 'string' ||
-      (record['outcome'] !== 'allowed' && record['outcome'] !== 'rejected')
+      (record['outcome'] !== 'allowed' &&
+        record['outcome'] !== 'rejected' &&
+        record['outcome'] !== 'ask-human')
     )
       return false;
   } else if (message['toolAutoApprovalPause'] !== undefined) {

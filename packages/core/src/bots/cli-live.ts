@@ -69,6 +69,7 @@ import {
 import {
   MESSAGING_COMMANDS,
   prepareMessaging,
+  messagingReadMode,
   runMessaging,
   type MessagingCommand,
   type MessagingValues,
@@ -1669,6 +1670,7 @@ async function runImControlCommand(
   values: LiveValues,
   io: BotCreateCliIo,
 ): Promise<unknown> {
+  const mode = messagingReadMode(command, values['read-mode']);
   if (rest.length !== 1 || !rest[0]?.trim()) usage(`${command} needs exactly one target.`);
   const target = rest[0].trim();
   const app = values.app?.trim() ?? '';
@@ -1729,12 +1731,13 @@ async function runImControlCommand(
     });
   }
   const slug = command === 'channel-connect' ? values.bot!.trim() : target;
-  const snapshot = record(await rpc('messagingSnapshot', { slug }));
+  const snapshot = record(await rpc('messagingSnapshot', { slug, ...(mode ? { mode } : {}) }));
   const identities = (Array.isArray(snapshot['identities']) ? snapshot['identities'] : []).map(
     record,
   );
   if (command === 'im-status')
     return {
+      ...(snapshot['checks'] === undefined ? {} : { checks: snapshot['checks'] }),
       apps: (Array.isArray(snapshot['accounts']) ? snapshot['accounts'] : [])
         .map(record)
         .map((entry) => ({

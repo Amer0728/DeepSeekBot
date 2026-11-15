@@ -138,6 +138,7 @@ export const INBOX_OPTIONS = {
 
 export const MESSAGING_OPTIONS = {
   'input-stdin': { type: 'boolean' },
+  'read-mode': { type: 'string' },
   confirm: { type: 'boolean' },
   binding: { type: 'string' },
   source: { type: 'string' },

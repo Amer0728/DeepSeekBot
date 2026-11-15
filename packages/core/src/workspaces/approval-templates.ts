@@ -1,5 +1,22 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
+import { atomicWriteFile } from '../fs/atomic-write.js';
+
+export const INHERIT_APPROVAL_TEMPLATE = '@global';
+export type ApprovalTemplateDefault =
+  | { kind: 'selected'; name: string }
+  | { kind: 'off' }
+  | { kind: 'invalid' };
 
 export interface ApprovalTemplate {
   name: string;
@@ -118,6 +135,8 @@ export type ApprovalTemplateWriteResult =
     };
 
 export interface ApprovalTemplateLibrary {
+  global(): ApprovalTemplateDefault;
+  setGlobal(name: string | null): void;
   list(): ApprovalTemplate[];
   get(name: string): ApprovalTemplate | undefined;
   create(name: string, text: string): ApprovalTemplateWriteResult;
@@ -156,12 +175,30 @@ function textProblem(text: string): boolean {
   );
 }
 
+function readTemplateFile(path: string): string {
+  const descriptor = openSync(path, 'r');
+  try {
+    const buffer = Buffer.alloc(APPROVAL_TEMPLATE_TEXT_LIMIT + 1);
+    let size = 0;
+    while (size < buffer.length) {
+      const count = readSync(descriptor, buffer, size, buffer.length - size, null);
+      if (count === 0) break;
+      size += count;
+    }
+    if (size > APPROVAL_TEMPLATE_TEXT_LIMIT)
+      throw new Error('Approval template file exceeds byte limit');
+    return buffer.toString('utf8', 0, size);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 export function createApprovalTemplateLibrary(dir?: string): ApprovalTemplateLibrary {
   const file = (name: string) => join(dir!, name + '.md');
   const readCustom = (name: string): ApprovalTemplate | undefined => {
     if (dir === undefined || !isApprovalTemplateName(name) || approvalTemplate(name)) return;
     try {
-      return summaryOf(name, readFileSync(file(name), 'utf8'));
+      return summaryOf(name, readTemplateFile(file(name)));
     } catch {
       return undefined;
     }
@@ -182,6 +219,28 @@ export function createApprovalTemplateLibrary(dir?: string): ApprovalTemplateLib
     return undefined;
   };
   return {
+    global() {
+      if (dir === undefined) return { kind: 'off' };
+      let value: unknown;
+      try {
+        value = JSON.parse(readTemplateFile(join(dir, '.selection.json')));
+      } catch (error) {
+        return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+          ? { kind: 'off' }
+          : { kind: 'invalid' };
+      }
+      if (typeof value !== 'object' || value === null || !('template' in value))
+        return { kind: 'invalid' };
+      if (value.template === null) return { kind: 'off' };
+      return typeof value.template === 'string' && isApprovalTemplateName(value.template)
+        ? { kind: 'selected', name: value.template }
+        : { kind: 'invalid' };
+    },
+    setGlobal(name) {
+      if (dir === undefined) throw new Error('Approval Template storage unavailable');
+      mkdirSync(dir, { recursive: true });
+      atomicWriteFile(join(dir, '.selection.json'), JSON.stringify({ template: name }) + '\n');
+    },
     list() {
       let names: string[] = [];
       if (dir !== undefined)
@@ -208,7 +267,7 @@ export function createApprovalTemplateLibrary(dir?: string): ApprovalTemplateLib
     create(name, text) {
       const problem = check(name, text);
       if (problem !== undefined) return problem;
-      if (readCustom(name) !== undefined) return { ok: false, reason: 'exists' };
+      if (existsSync(file(name))) return { ok: false, reason: 'exists' };
       return { ok: true, template: write(name, text) };
     },
     update(name, text) {
@@ -229,11 +288,11 @@ export function createApprovalTemplateLibrary(dir?: string): ApprovalTemplateLib
 }
 
 const POLICY_CHANGE_PATTERNS: readonly RegExp[] = [
-  /approval-template-set\b/iu,
+  /approval-template-(?:global-)?set\b/iu,
   /grant-request-approve\b|grantRequestApprove\b|grant-write-set\b/iu,
   /approval-reviewer[\s\S]*\b(set|edit|delete|rm|remove)\b/iu,
   /approval-reviewer\.json/iu,
-  /botApprovalTemplateSet|approvalReviewerModelSet|approvalTemplateUpdate|approvalTemplateDelete/u,
+  /approvalTemplateGlobalSet|botApprovalTemplateSet|approvalReviewerModelSet|approvalTemplateUpdate|approvalTemplateDelete/u,
   /botharness\.db|persona_bots|tool_approval_rules/iu,
 ];
 
@@ -253,7 +312,7 @@ export function deletesMarketplaceBot(input: string): boolean {
 }
 
 const CHANGING_SUBCOMMANDS = new Set(['set', 'edit', 'update', 'delete', 'rm', 'remove']);
-const TEMPLATE_FILE = /approval-templates\/+([^\s"'`;&|)\\/]*)/giu;
+const TEMPLATE_FILE = /approval-templates[\\/]+([^\s"'`;&|)\\/]*)/giu;
 
 export function changesApprovalPolicy(
   input: string,

@@ -111,6 +111,7 @@ export type { HumanAssignmentContext } from '../../../core/src/runtime/assignmen
 import type {
   MessagingApp,
   MessagingSnapshot,
+  MessagingReadMode,
   MessagingGrant,
   OutboxIntent,
 } from '../../../core/src/messaging/outbound.js';
@@ -1213,7 +1214,27 @@ export function parseChannelMessage(value: unknown): ChannelMessage | undefined 
               : {}),
           }
         : undefined;
+    const review = asRecord(request['approvalReview']);
+    let approvalReview:
+      | import('../../../core/src/workspaces/tool-approval.js').ToolApprovalReview
+      | undefined;
+    if (review?.['kind'] === 'template-unavailable' && typeof review['reason'] === 'string')
+      approvalReview = { kind: 'template-unavailable', reason: review['reason'] };
+    else if (
+      review?.['kind'] === 'review' &&
+      typeof review['reason'] === 'string' &&
+      typeof review['template'] === 'string' &&
+      typeof review['version'] === 'string'
+    )
+      approvalReview = {
+        kind: 'review',
+        template: review['template'],
+        version: review['version'],
+        reason: review['reason'],
+        ...(typeof review['fallback'] === 'string' ? { fallback: review['fallback'] } : {}),
+      };
     toolApprovalRequest = {
+      ...(approvalReview === undefined ? {} : { approvalReview }),
       ...(typeof request['allowAlways'] === 'boolean'
         ? { allowAlways: request['allowAlways'] }
         : {}),
@@ -1348,7 +1369,9 @@ export function parseChannelMessage(value: unknown): ChannelMessage | undefined 
         (key) => typeof auto[key] !== 'string' || (auto[key] as string).length === 0,
       ) ||
       typeof auto['input'] !== 'string' ||
-      (auto['outcome'] !== 'allowed' && auto['outcome'] !== 'rejected')
+      (auto['outcome'] !== 'allowed' &&
+        auto['outcome'] !== 'rejected' &&
+        auto['outcome'] !== 'ask-human')
     )
       return undefined;
     toolAutoApproval = {
@@ -1358,6 +1381,9 @@ export function parseChannelMessage(value: unknown): ChannelMessage | undefined 
       toolName: auto['toolName'] as string,
       input: auto['input'],
       template: auto['template'] as string,
+      ...(typeof auto['templateVersion'] === 'string'
+        ? { templateVersion: auto['templateVersion'] }
+        : {}),
       outcome: auto['outcome'],
       reason: auto['reason'] as string,
     };
@@ -4375,12 +4401,19 @@ function parseApprovalTemplate(item: unknown): ApprovalTemplateView | undefined 
 export async function loadApprovalTemplates(
   call: BridgeCall,
   slug?: string,
-): Promise<{ templates: ApprovalTemplateView[]; selected: string | null }> {
+): Promise<{
+  templates: ApprovalTemplateView[];
+  selected: string | null;
+  globalDefault?: string | null;
+}> {
   const response = asRecord(
     await unwrap(call, 'approvalTemplates', slug === undefined ? {} : { slug }),
   );
   const templates = response?.['templates'];
   const selected = response?.['selected'] ?? null;
+  const globalDefault = response?.['globalDefault'];
+  if (globalDefault !== undefined && globalDefault !== null && typeof globalDefault !== 'string')
+    throw new Error('invalid global approval selection');
   if (!Array.isArray(templates) || (selected !== null && typeof selected !== 'string'))
     throw new Error('invalid approvalTemplates response');
   return {
@@ -4389,7 +4422,14 @@ export async function loadApprovalTemplates(
       return template === undefined ? [] : [template];
     }),
     selected,
+    ...(globalDefault === undefined ? {} : { globalDefault }),
   };
+}
+export async function setGlobalApprovalTemplate(
+  call: BridgeCall,
+  template: string | null,
+): Promise<void> {
+  await unwrap(call, 'approvalTemplateGlobalSet', { template });
 }
 async function writtenApprovalTemplate(
   call: BridgeCall,
@@ -6322,8 +6362,11 @@ function validReceptionRecovery(value: unknown): boolean {
 export async function loadChannelBridges(
   call: BridgeCall,
   channelId: string,
+  mode?: MessagingReadMode,
 ): Promise<ChannelBridgeSnapshot> {
-  const value = asRecord(await unwrap(call, 'channelBridges', { channelId }));
+  const value = asRecord(
+    await unwrap(call, 'channelBridges', { channelId, ...(mode ? { mode } : {}) }),
+  );
   const source = (item: unknown) => {
     const row = asRecord(item);
     return (
@@ -6339,6 +6382,7 @@ export async function loadChannelBridges(
   if (
     !value ||
     value['channelId'] !== channelId ||
+    (value['checks'] !== undefined && !['pending', 'complete'].includes(String(value['checks']))) ||
     (value['canTargetInbox'] !== undefined && typeof value['canTargetInbox'] !== 'boolean') ||
     (value['receptionNeedsAttention'] !== undefined &&
       typeof value['receptionNeedsAttention'] !== 'boolean') ||
@@ -6528,11 +6572,14 @@ export async function loadMessagingApps(
 export async function loadMessagingSnapshot(
   call: BridgeCall,
   slug: string,
+  mode?: MessagingReadMode,
 ): Promise<MessagingSnapshot> {
-  const value = await unwrap(call, 'messagingSnapshot', { slug });
+  const value = await unwrap(call, 'messagingSnapshot', { slug, ...(mode ? { mode } : {}) });
   const record = asRecord(value);
   if (
     !record ||
+    (record['checks'] !== undefined &&
+      !['pending', 'complete'].includes(String(record['checks']))) ||
     !Array.isArray(record['accounts']) ||
     !Array.isArray(record['grants']) ||
     !record['grants'].every((item: unknown) =>
