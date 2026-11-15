@@ -16,7 +16,7 @@ function fixture() {
   const home = createTempRoot('botharness-device-pairing-');
   let clock = Date.parse('2026-10-14T08:00:00.000Z');
   const events: DevicePairingEvent[] = [];
-  const open = () => {
+  const open = (onRevoked?: (deviceId: string) => void) => {
     const owner = trackTestOwner(
       mountOperationalDatabase({ dshHome: home, schemaPlan: BOT_HARNESS_SCHEMA_PLAN }),
     );
@@ -27,6 +27,7 @@ function fixture() {
         hostName: 'studio',
         now: () => clock,
         record: (event) => events.push(event),
+        ...(onRevoked ? { onRevoked } : {}),
       }),
     };
   };
@@ -284,6 +285,26 @@ describe('Device Pairing', () => {
     });
     expect(host.pairing.list()[0]?.revokedAt).toBeDefined();
     expect(host.pairing.revoke(paired.device.id)).toEqual({ revoked: false, closedStreams: 0 });
+  });
+
+  it('tears down an owned stream after its canonical device row has been purged', () => {
+    const notified: string[] = [];
+    const host = fixture().open((id) => notified.push(id));
+    const paired = host.pairing.redeem({ offer: host.pairing.createOffer().offer });
+    if (!paired.ok) throw new Error('pairing failed');
+    let closed = 0;
+    host.pairing.attachStream(paired.device.id, () => {
+      closed++;
+    });
+    attachOperationalModule(host.owner, 'device-pairing').transaction((db) =>
+      db.prepare('DELETE FROM paired_devices WHERE device_id = ?').run(paired.device.id),
+    );
+    expect(host.pairing.revoke(paired.device.id)).toEqual({ revoked: true, closedStreams: 1 });
+    expect(closed).toBe(1);
+    expect(notified).toEqual([paired.device.id]);
+    expect(host.pairing.revoke(paired.device.id)).toEqual({ revoked: false, closedStreams: 0 });
+    expect(host.pairing.revoke('unknown')).toEqual({ revoked: false, closedStreams: 0 });
+    expect(notified).toEqual([paired.device.id]);
   });
 
   it('tells a missing, unknown and forged credential apart from a revoked one', () => {

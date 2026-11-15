@@ -95,6 +95,7 @@ export interface DevicePairing {
   }): { ok: true; receipt: string } | { ok: false; code: OfferRefusal };
   pendingKeys(): PendingDeviceKey[];
   approveKey(receipt: string, publicKey: string): boolean;
+  cancelRelationshipOffers(relationshipId: string, publicKey: string): number;
   admitKey(authorization: string | undefined, publicKey: string): Admission;
   admit(authorization: string | undefined): Admission;
   check(deviceId: string): Admission;
@@ -380,6 +381,16 @@ export function createDevicePairing(options: DevicePairingOptions): DevicePairin
       }
       return false;
     },
+    cancelRelationshipOffers(relationshipId, publicKey) {
+      let cancelled = 0;
+      for (const [key, open] of offers) {
+        if (open.relationshipId !== relationshipId || open.publicKey !== publicKey) continue;
+        offers.delete(key);
+        settle(open.receipt, { state: 'refused' });
+        cancelled++;
+      }
+      return cancelled;
+    },
 
     admitKey(authorization, publicKey) {
       const admitted = this.admit(authorization);
@@ -429,6 +440,22 @@ export function createDevicePairing(options: DevicePairingOptions): DevicePairin
               .get(open.relationshipId)
           )
             return false;
+          if (open.relationshipId !== undefined) {
+            const enrollment = connection
+              .prepare(
+                "SELECT state, expires_at FROM relationship_client_enrollments WHERE relationship_id = ? AND public_key = ? AND direction = 'incoming'",
+              )
+              .get(open.relationshipId, input.publicKey ?? '') as
+              | { state: string; expires_at: number }
+              | undefined;
+            if (!enrollment || enrollment.state !== 'unconfirmed' || enrollment.expires_at <= now())
+              return false;
+            connection
+              .prepare(
+                "UPDATE relationship_client_enrollments SET state = 'committed' WHERE relationship_id = ? AND public_key = ? AND direction = 'incoming'",
+              )
+              .run(open.relationshipId, input.publicKey ?? '');
+          }
           connection
             .prepare(
               'INSERT INTO paired_devices (device_id, name, secret_hash, paired_at, public_key, human_id) VALUES (?, ?, ?, ?, ?, ?)',
@@ -528,6 +555,7 @@ export function createDevicePairing(options: DevicePairingOptions): DevicePairin
     },
 
     revoke(deviceId) {
+      const known = row(deviceId) !== undefined;
       const changed = database.transaction(
         (connection) =>
           connection
@@ -540,10 +568,10 @@ export function createDevicePairing(options: DevicePairingOptions): DevicePairin
       const open = [...(streams.get(deviceId) ?? [])];
       streams.delete(deviceId);
       for (const close of open) close();
-      if (Number(changed) === 0 && open.length === 0) return { revoked: false, closedStreams: 0 };
-      record({ phase: 'device-revoked', deviceId, closedStreams: open.length });
-      options.onRevoked?.(deviceId);
-      return { revoked: true, closedStreams: open.length };
+      const revoked = Number(changed) !== 0 || open.length !== 0;
+      if (revoked) record({ phase: 'device-revoked', deviceId, closedStreams: open.length });
+      if (known || revoked) options.onRevoked?.(deviceId);
+      return { revoked, closedStreams: open.length };
     },
 
     closeStreams() {

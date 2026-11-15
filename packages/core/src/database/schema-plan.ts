@@ -3535,8 +3535,31 @@ const MEMBER_USAGE_MIGRATION: SchemaMigration = {
   },
 };
 
-const WORKSPACE_SPACES_MIGRATION: SchemaMigration = {
+const HOST_RELATIONSHIP_ACCOUNT_MIGRATION: SchemaMigration = {
   generation: 150,
+  module: 'host-relationships',
+  description: 'Retain verified same-account relationship provenance',
+  migrate(database) {
+    database.exec(`
+      ALTER TABLE host_relationships ADD COLUMN account_origin TEXT;
+      CREATE TABLE relationship_client_enrollments (
+        relationship_id TEXT NOT NULL REFERENCES host_relationships(relationship_id),
+        public_key TEXT NOT NULL,
+        direction TEXT NOT NULL CHECK (direction IN ('incoming', 'outgoing')),
+        state TEXT NOT NULL CHECK (state IN ('unconfirmed', 'committed', 'cleanup-pending', 'cleaned', 'cancelled')),
+        expires_at INTEGER NOT NULL,
+        account_generation TEXT,
+        cleanup_attempts INTEGER NOT NULL DEFAULT 0,
+        retry_at INTEGER,
+        PRIMARY KEY (relationship_id, public_key, direction)
+      );
+      CREATE INDEX relationship_enrollment_cleanup ON relationship_client_enrollments(direction, state, retry_at);
+    `);
+  },
+};
+
+const WORKSPACE_SPACES_MIGRATION: SchemaMigration = {
+  generation: 151,
   module: 'workspace-spaces',
   description:
     'Account and audience-contained shared Workspace roots and resumable Memory relocation',
@@ -3719,5 +3742,6 @@ export const BOT_HARNESS_SCHEMA_PLAN = defineSchemaPlan([
   HOST_RELATIONSHIP_REVOCATION_MIGRATION,
   TEAM_MODELS_MIGRATION,
   MEMBER_USAGE_MIGRATION,
+  HOST_RELATIONSHIP_ACCOUNT_MIGRATION,
   WORKSPACE_SPACES_MIGRATION,
 ]);

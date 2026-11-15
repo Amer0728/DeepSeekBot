@@ -836,7 +836,7 @@ describe('M6 Memory migration and offboarding', () => {
       writeFileSync(join(before.path, 'kept'), 'preserved');
       prior.close();
       const f = fixture(home);
-      expect(f.core.operationalDatabase.generation).toBe(150);
+      expect(f.core.operationalDatabase.generation).toBe(151);
       expect(
         f.db.read((connection) =>
           connection
