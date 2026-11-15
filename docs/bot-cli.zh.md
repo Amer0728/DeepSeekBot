@@ -818,7 +818,7 @@ deepseekbot approval-template edit night-shift --file night-shift.md
 deepseekbot approval-template delete night-shift
 ```
 
-`list` 返回 `templates` 和 `globalDefault`（模板名或 `null`）。加 `--bot` 时还返回 `selected`（`@global`、特定模板名或 `null`）、`source`（`global`、`specific`、`off`）及 `effective`（模板名或 `null`）。全局设置返回 `{template}`，Bot 设置返回 `{bot}`。写入由认证 Host 持有；不存在的模板不能被选中，全局选择读取失败返回 `unavailable`，不冒充空默认。
+`list` 返回 `templates` 和 `globalDefault`（模板名或 `null`）。加 `--bot` 时还返回 `selected`（`@global`、特定模板名或 `null`）、`source`（`global`、`specific`、`off`）及 `effective`（模板名或 `null`）。全局设置返回 `{template}`，Bot 设置返回 `{bot}`。写入由认证 Host 持有；不存在的模板不能被选中，全局选择读取失败返回 `approval-selection-unavailable`，不冒充空默认。
 
 模板继续使用内置只读内容或 `$DSH_HOME/botharness/approval-templates/` 下的 Markdown 文件；同一文件 owner 在 `.selection.json` 保存全局选择，不新增 schema 迁移。名称使用小写字母、数字和短横线，正文最多 32 KiB。`show` 返回全文；`create --from` 复制内容。现有编辑和删除流程保持原状；三部分编辑、统一规则表和确认后的批量删除回退由后续切片交付。
 

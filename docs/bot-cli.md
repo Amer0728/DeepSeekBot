@@ -849,7 +849,7 @@ deepseekbot approval-template edit night-shift --file night-shift.md
 deepseekbot approval-template delete night-shift
 ```
 
-`list` returns `templates` and `globalDefault` (a template name or `null`). With `--bot`, it also returns `selected` (`@global`, a specific template name, or `null`), `source` (`global`, `specific`, or `off`) and `effective` (a name or `null`). The global setter returns `{template}`; the Bot setter returns `{bot}`. The authenticated Host owns these writes; missing templates refuse selection, and an unreadable global selection returns `unavailable` rather than an empty default.
+`list` returns `templates` and `globalDefault` (a template name or `null`). With `--bot`, it also returns `selected` (`@global`, a specific template name, or `null`), `source` (`global`, `specific`, or `off`) and `effective` (a name or `null`). The global setter returns `{template}`; the Bot setter returns `{bot}`. The authenticated Host owns these writes; missing templates refuse selection, and an unreadable global selection returns `approval-selection-unavailable` rather than an empty default.
 
 Templates remain read-only built-ins or Markdown files in `$DSH_HOME/botharness/approval-templates/`. The same file owner saves the global choice in `.selection.json`; no schema migration is involved. Names use lowercase letters, digits and dashes, text is at most 32 KiB. `show` returns full text; `create --from` copies text. The existing editor and deletion flow remain unchanged; three-part editing, shared rule tables and confirmed bulk deletion fallback are separate slices.
 

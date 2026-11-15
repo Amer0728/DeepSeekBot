@@ -206,7 +206,7 @@ describe('Approval Template bridge methods', () => {
     writeFileSync(join(dir, '.selection.json'), '{broken');
     expect(bridge.approvalTemplates({})).toMatchObject({
       ok: false,
-      error: { code: 'unavailable' },
+      error: { code: 'approval-selection-unavailable' },
     });
   });
 

@@ -5135,7 +5135,14 @@ function buildBridgeMethods(
     approvalTemplates(payload) {
       const templates = approvalTemplateLibrary.list().map(templateEntry);
       const global = approvalTemplateLibrary.global();
-      if (global.kind === 'invalid') return unavailable();
+      if (global.kind === 'invalid')
+        return {
+          ok: false,
+          error: {
+            code: 'approval-selection-unavailable',
+            message: 'Approval template selection could not be read.',
+          },
+        };
       const globalDefault = global.kind === 'selected' ? global.name : null;
       if (asObject(payload)['slug'] === undefined)
         return { ok: true, value: { templates, globalDefault } };
@@ -5365,7 +5372,13 @@ function buildBridgeMethods(
       try {
         approvalTemplateLibrary.setGlobal(template);
       } catch {
-        return unavailable();
+        return {
+          ok: false,
+          error: {
+            code: 'approval-selection-unavailable',
+            message: 'Approval template selection could not be saved.',
+          },
+        };
       }
       return { ok: true, value: { template } };
     },
