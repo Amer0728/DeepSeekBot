@@ -32,3 +32,29 @@ export function audienceSummary(
     );
   return t('team.spaces.audienceList', { names: names.join(', ') });
 }
+
+export function audienceOptions(
+  t: BotHarnessTranslate,
+  audience: SpaceAudience,
+  stored: SpaceAudience | undefined,
+  { roles, members }: AudienceDirectory,
+): { id: string; label: string }[] {
+  if (audience.kind === 'everyone') return [];
+  const listed =
+    audience.kind === 'roles'
+      ? roles.map((role) => ({ id: role.roleId, label: roleName(t, role) }))
+      : members.map((member) => ({ id: member.humanId, label: member.displayName }));
+  const kept =
+    stored?.kind === 'roles' && audience.kind === 'roles'
+      ? stored.roleIds
+      : stored?.kind === 'members' && audience.kind === 'members'
+        ? stored.humanIds
+        : [];
+  const label = t(
+    audience.kind === 'roles' ? 'team.spaces.unavailableRole' : 'team.spaces.inactiveMember',
+  );
+  return [
+    ...listed,
+    ...kept.filter((id) => !listed.some((option) => option.id === id)).map((id) => ({ id, label })),
+  ];
+}

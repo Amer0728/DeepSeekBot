@@ -5554,6 +5554,8 @@ export const zh = {
   'team.spaces.audienceList': '给 {names}',
   'team.spaces.audienceSomeRoles': '给指定角色',
   'team.spaces.audienceSomePeople': '给指定成员',
+  'team.spaces.inactiveMember': '已停用的成员',
+  'team.spaces.unavailableRole': '不可用的角色',
   'team.spaces.deleteTitle': '删除{name}？',
   'team.spaces.deleteBody': '只能删除空的文件夹。请先移走或删除其中的文件和 Bot 记忆。',
   'team.error.spaceNameTaken': '已有同名文件夹。',
@@ -11528,6 +11530,8 @@ My relationship with you, established lore and topics to avoid: [fill in].
   'team.spaces.audienceList': 'For {names}',
   'team.spaces.audienceSomeRoles': 'For chosen roles',
   'team.spaces.audienceSomePeople': 'For chosen people',
+  'team.spaces.inactiveMember': 'Inactive member',
+  'team.spaces.unavailableRole': 'Unavailable role',
   'team.spaces.deleteTitle': 'Delete {name}?',
   'team.spaces.deleteBody':
     'Only an empty folder can be deleted. Move or remove its files and Bot memory first.',

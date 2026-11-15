@@ -8,7 +8,7 @@ import {
   loadSpaces,
   parseSpace,
 } from '../src/client/team-spaces-bridge.js';
-import { audienceSummary } from '../src/client/team-spaces-view.js';
+import { audienceOptions, audienceSummary } from '../src/client/team-spaces-view.js';
 
 const t = (key: string, values?: Record<string, string>): string =>
   values === undefined ? key : `${key}:${JSON.stringify(values)}`;
@@ -102,5 +102,18 @@ describe('Team spaces client', () => {
       roles: [{ roleId: 'r1', name: 'Finance', builtin: null }],
       members: [{ humanId: 'h1', displayName: 'h1' }],
     });
+  });
+
+  it('keeps stored audience entries that left the directory so they can be cleared', () => {
+    const directory = { roles: [], members: [{ humanId: 'h1', displayName: 'Bob' }] };
+    const stored = { kind: 'members' as const, humanIds: ['h1', 'gone'] };
+    expect(audienceOptions(t as never, stored, stored, directory)).toEqual([
+      { id: 'h1', label: 'Bob' },
+      { id: 'gone', label: 'team.spaces.inactiveMember' },
+    ]);
+    expect(audienceOptions(t as never, { kind: 'roles', roleIds: [] }, stored, directory)).toEqual(
+      [],
+    );
+    expect(audienceOptions(t as never, { kind: 'everyone' }, stored, directory)).toEqual([]);
   });
 });

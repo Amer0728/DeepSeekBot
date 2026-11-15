@@ -14,7 +14,7 @@ import { useMountedResource } from './mounted-resource.js';
 import type { TeamMember } from './team-bridge.js';
 import type { TeamRole } from './team-roles-bridge.js';
 import { teamErrorText } from './team-settings.js';
-import { audienceSummary, roleName } from './team-spaces-view.js';
+import { audienceOptions, audienceSummary } from './team-spaces-view.js';
 import {
   audienceReady,
   createSpace,
@@ -205,12 +205,7 @@ function SpaceDialog({
       : audience.kind === 'members'
         ? audience.humanIds
         : [];
-  const options =
-    audience.kind === 'roles'
-      ? directory.roles.map((role) => ({ id: role.roleId, label: roleName(t, role) }))
-      : audience.kind === 'members'
-        ? directory.members.map((member) => ({ id: member.humanId, label: member.displayName }))
-        : [];
+  const options = audienceOptions(t, audience, current?.audience, directory);
   return (
     <FormDialog
       title={
