@@ -382,3 +382,11 @@ it('includes irreversible member purge without weakening broker refusal', () => 
     }),
   ).toMatchObject({ changes: 'irreversible', authority: 'management', secrets: true });
 });
+
+it('covers the landed im-reconnect owner without inventing permission changes', () => {
+  expect(
+    toolEffects('deepseekbot im-reconnect', {
+      patch: { argv: ['im-reconnect', 'bot', '--app', 'app'] },
+    }),
+  ).toEqual({ changes: 'reversible', reach: 'external', personalData: true });
+});
