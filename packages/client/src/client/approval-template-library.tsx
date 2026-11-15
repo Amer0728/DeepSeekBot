@@ -5,7 +5,7 @@ import {
 } from '../../../core/src/workspaces/approval-template-guidance.js';
 import { useClientFields, useStoreSlice } from './use-client-store.js';
 import { useState, type ReactElement } from 'react';
-import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives';
+import { Button, Input, Tag } from '@deepseek-ai/dsh-client-ui-primitives';
 import * as stylex from '@stylexjs/stylex';
 
 import { templateDescription, templateTitle } from './approval-template-entry.js';
@@ -21,12 +21,14 @@ import {
   type BridgeCall,
 } from './bridge.js';
 import { Callout } from './ds/callout.js';
-import { FieldStack, TextAreaField, TextField } from './ds/field.js';
+import { Field, FieldStack, TextAreaField, TextField } from './ds/field.js';
 import { ConfirmDialog, DangerTextButton, FormDialog } from './ds/form-dialog.js';
 import { Note } from './ds/note.js';
 import { Select } from './ds/select.js';
 import { SettingsRow, SettingsSection } from './ds/settings-row.js';
-import { space } from './ds/tokens.stylex.js';
+import { space, text } from './ds/tokens.stylex.js';
+import { ChannelSidebarIcon } from './channel-sidebar-icon.js';
+import { SidebarCardList, SidebarCardRow } from './sidebar-card.js';
 import type { BotHarnessTranslate } from './locale.js';
 import { LoadingSkeleton } from './loading-skeleton.js';
 import { useMountedResource } from './mounted-resource.js';
@@ -46,6 +48,15 @@ const NAME = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
 
 const styles = stylex.create({
   meta: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space.x2 },
+  ruleInput: {
+    boxSizing: 'border-box',
+    width: '100%',
+    minWidth: 0,
+    borderWidth: 0,
+    borderRadius: 0,
+    backgroundColor: 'transparent',
+    fontWeight: text.regular,
+  },
 });
 
 type Editor =
@@ -82,59 +93,66 @@ function GuidanceFields({
   return (
     <FieldStack>
       <Note>{t('autoApproval.library.guidanceHint')}</Note>
-      {(['alwaysAsk', 'alwaysAllow'] as const).map((key) => (
-        <FieldStack key={key}>
-          {parts[key].map((row, index) => (
-            <div key={index}>
-              <TextField
-                label={
-                  t(
-                    key === 'alwaysAsk'
-                      ? 'autoApproval.library.alwaysAsk'
-                      : 'autoApproval.library.alwaysAllow',
-                  ) +
-                  ' ' +
-                  String(index + 1)
-                }
-                value={row}
-                onChange={(value) =>
-                  update({
-                    ...parts,
-                    [key]: parts[key].map((item, position) => (position === index ? value : item)),
-                  })
-                }
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  update({
-                    ...parts,
-                    [key]: parts[key].filter((_, position) => position !== index),
-                  })
-                }
-              >
-                {t('autoApproval.library.removeRow')}
-              </Button>
-            </div>
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => update({ ...parts, [key]: [...parts[key], ''] })}
-          >
-            {t('autoApproval.library.addRow', {
-              section: t(
-                key === 'alwaysAsk'
-                  ? 'autoApproval.library.alwaysAsk'
-                  : 'autoApproval.library.alwaysAllow',
-              ),
-            })}
-          </Button>
-        </FieldStack>
-      ))}
+      {(['alwaysAsk', 'alwaysAllow'] as const).map((key) => {
+        const label = t(
+          key === 'alwaysAsk'
+            ? 'autoApproval.library.alwaysAsk'
+            : 'autoApproval.library.alwaysAllow',
+        );
+        return (
+          <Field key={key} label={label} group>
+            {() => (
+              <SidebarCardList label={label}>
+                {parts[key].map((row, index) => {
+                  const rowLabel = label + ' ' + String(index + 1);
+                  return (
+                    <SidebarCardRow
+                      key={index}
+                      leading={<span aria-hidden>{index + 1}</span>}
+                      title={
+                        <Input
+                          aria-label={rowLabel}
+                          className={stylex.props(styles.ruleInput).className ?? ''}
+                          value={row}
+                          onChange={(event) =>
+                            update({
+                              ...parts,
+                              [key]: parts[key].map((item, position) =>
+                                position === index ? event.currentTarget.value : item,
+                              ),
+                            })
+                          }
+                        />
+                      }
+                      trailing={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-label={t('autoApproval.library.removeRow') + ' · ' + rowLabel}
+                          onClick={() =>
+                            update({
+                              ...parts,
+                              [key]: parts[key].filter((_, position) => position !== index),
+                            })
+                          }
+                        >
+                          <ChannelSidebarIcon name="x" size={16} />
+                        </Button>
+                      }
+                    />
+                  );
+                })}
+                <SidebarCardRow
+                  icon="plus"
+                  title={t('autoApproval.library.addRow', { section: label })}
+                  onClick={() => update({ ...parts, [key]: [...parts[key], ''] })}
+                />
+              </SidebarCardList>
+            )}
+          </Field>
+        );
+      })}
       <TextAreaField
         label={t('autoApproval.library.freeText')}
         hint={t('autoApproval.library.freeTextHint')}

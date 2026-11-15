@@ -3,6 +3,10 @@ import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ApprovalTemplateLibrarySettings } from '../src/client/approval-template-library.js';
+import {
+  decodeApprovalTemplateGuidance,
+  encodeApprovalTemplateGuidance,
+} from '../../core/src/workspaces/approval-template-guidance.js';
 import type { BridgeCall } from '../src/client/bridge.js';
 import { zhTranslate as t } from '../src/client/locale.js';
 import { createStore } from '../src/client/store.js';
@@ -152,7 +156,9 @@ it('requires an explicit source before showing the blank three-part editor and d
   await clickText(
     t('autoApproval.library.addRow', { section: t('autoApproval.library.alwaysAsk') }),
   );
-  expect(document.body.textContent).toContain(t('autoApproval.library.alwaysAsk') + ' 1');
+  expect(
+    document.querySelector('input[aria-label="' + t('autoApproval.library.alwaysAsk') + ' 1"]'),
+  ).not.toBeNull();
   expect(calls).toEqual(['approvalTemplates']);
 });
 
@@ -241,4 +247,75 @@ it('keeps the visible View action in accessible template names', async () => {
     expect(button.textContent).toBe(t('autoApproval.library.view'));
     expect(button.getAttribute('aria-label')).toContain(button.textContent);
   }
+});
+
+it('edits and removes independent guidance cards without changing neighbouring rules or applying', async () => {
+  let template = {
+    name: 'qa-rules',
+    title: 'QA rules',
+    description: '',
+    builtIn: false,
+    usedBy: [],
+    text: encodeApprovalTemplateGuidance({
+      alwaysAsk: ['Ask A', 'Ask B', 'Ask C'],
+      alwaysAllow: ['Allow A', 'Allow B'],
+      freeText: 'Keep free text unchanged.',
+    }),
+  };
+  const calls: string[] = [];
+  const call: BridgeCall = async (endpoint, payload) => {
+    calls.push(endpoint);
+    if (endpoint === 'approvalTemplates')
+      return { ok: true, value: { templates: [template], globalDefault: null } };
+    if (endpoint === 'approvalTemplateUpdate') {
+      if (typeof payload.text !== 'string') throw new Error('Missing saved guidance');
+      template = { ...template, text: payload.text };
+      return { ok: true, value: { template } };
+    }
+    throw new Error('Unexpected endpoint ' + endpoint);
+  };
+  const ask = t('autoApproval.library.alwaysAsk');
+  const allow = t('autoApproval.library.alwaysAllow');
+  const input = (label: string): HTMLInputElement => {
+    const found = document.querySelector<HTMLInputElement>('input[aria-label="' + label + '"]');
+    if (!found) throw new Error('Missing rule ' + label);
+    return found;
+  };
+  const fill = async (label: string, value: string): Promise<void> => {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        input(label),
+        value,
+      );
+      input(label).dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+  const remove = async (label: string): Promise<void> => {
+    const found = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="' + t('autoApproval.library.removeRow') + ' · ' + label + '"]',
+    );
+    if (!found) throw new Error('Missing remove action ' + label);
+    await act(async () => found.click());
+  };
+  await render(call);
+  const edit = host.querySelector<HTMLButtonElement>('[data-approval-template="qa-rules"] button');
+  if (!edit) throw new Error('Missing template');
+  await act(async () => edit.click());
+  await fill(ask + ' 2', 'Ask B edited');
+  await remove(ask + ' 1');
+  expect(input(ask + ' 1').value).toBe('Ask B edited');
+  expect(input(ask + ' 2').value).toBe('Ask C');
+  expect(input(allow + ' 1').value).toBe('Allow A');
+  await clickText(t('autoApproval.library.addRow', { section: ask }));
+  await fill(ask + ' 3', 'Ask D');
+  await remove(ask + ' 2');
+  await fill(allow + ' 2', 'Allow B edited');
+  expect(document.querySelector('textarea')?.value).toBe('Keep free text unchanged.');
+  await clickText(t('autoApproval.library.save'));
+  expect(decodeApprovalTemplateGuidance(template.text)).toEqual({
+    alwaysAsk: ['Ask B edited', 'Ask D'],
+    alwaysAllow: ['Allow A', 'Allow B edited'],
+    freeText: 'Keep free text unchanged.',
+  });
+  expect(calls).toEqual(['approvalTemplates', 'approvalTemplateUpdate', 'approvalTemplates']);
 });
