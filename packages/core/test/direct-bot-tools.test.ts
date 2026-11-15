@@ -175,7 +175,7 @@ describe('direct Bot tool runner', () => {
     }
   });
 
-  it('lists runtime Bot tools while cloud_work has its dedicated direct CLI', () => {
+  it('lists direct Bot tools while cloud and admitted CLI keep their dedicated paths', async () => {
     const { runtime } = setup();
     const listed = runtime.directBotTools!().map((tool) => tool.name);
     expect(listed).toContain('channel_list');
@@ -200,12 +200,23 @@ describe('direct Bot tool runner', () => {
           (name) =>
             !exempt.includes(name) &&
             name !== 'cloud_work' &&
+            name !== 'deepseekbot_cli' &&
+            !TURN_ONLY_BOT_TOOLS.has(name) &&
             !PRIVATE_INPUT_TOOLS.has(name) &&
             !TAKEOVER_TOOLS.has(name),
         )
         .sort(),
     );
     expect(listed.every((name) => botTools.includes(name))).toBe(true);
+    expect(listed).not.toContain('deepseekbot_cli');
+    await expect(
+      runtime.runDirectBotTool!(
+        'ada',
+        'deepseekbot_cli',
+        { argv: ['approval-templates'] },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: 'tool-not-direct' });
     expect(botTools).toContain('cloud_work');
     expect(exempt).not.toContain('cloud_work');
     expect(readFileSync(join(repo, 'packages/core/src/bots/cli-live.ts'), 'utf8')).toContain(

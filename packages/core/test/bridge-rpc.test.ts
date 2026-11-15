@@ -872,6 +872,7 @@ describe('bridge typert service', () => {
       'messageSearch',
       'channelUnreadCounts',
       'channelAllBotPreview',
+      'tobCli',
       'channelSend',
       'channelSendStatus',
       'channelGenuiView',
@@ -1371,4 +1372,28 @@ it('exports the named Overview period and cursor through the existing Typert ser
   await expect(service.overviewMemory()).rejects.toThrow('Memory statistics unavailable');
   expect(parameterNames(service.overviewUsage)).toEqual(['period', 'after']);
   expect(() => service.overviewUsage('week')).toThrow('Usage statistics unavailable');
+});
+
+it('exposes named Tob CLI start/status/cancel arguments through the gateway facade', async () => {
+  const { service, methods } = setup();
+  const response = {
+    id: 'lease',
+    channelId: 'dm-tob',
+    messageId: 'human-cli',
+    state: 'running' as const,
+    cancelRequested: false,
+  };
+  const owner = vi.spyOn(methods, 'tobCli').mockResolvedValue({ ok: true, value: response });
+  expect(parameterNames(service.tobCli)).toEqual(['action', 'command', 'id']);
+  expect(await service.tobCli('start', { argv: ['approval-templates'], stdin: '' })).toEqual(
+    response,
+  );
+  expect(owner).toHaveBeenLastCalledWith({
+    action: 'start',
+    command: { argv: ['approval-templates'], stdin: '' },
+  });
+  await service.tobCli('status', undefined, 'lease');
+  expect(owner).toHaveBeenLastCalledWith({ action: 'status', id: 'lease' });
+  await service.tobCli('cancel', undefined, 'lease');
+  expect(owner).toHaveBeenLastCalledWith({ action: 'cancel', id: 'lease' });
 });

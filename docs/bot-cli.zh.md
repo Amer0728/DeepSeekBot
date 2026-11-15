@@ -459,6 +459,9 @@ printf '{"token":"…"}' | deepseekbot im-app-add discord --credentials-stdin
 deepseekbot im-app-status discord
 deepseekbot im-bind <bot-id> --app <app-id>
 deepseekbot im-status <bot-id>
+deepseekbot im-status <bot-id> --read-mode saved
+deepseekbot messaging-grants <bot-id> --read-mode status
+deepseekbot channel-bridges <channel-id> --read-mode saved
 deepseekbot channel-ingests <channel>
 deepseekbot channel-connect <channel> --bot <bot-id> --conversation <external-id>
 deepseekbot im-reconnect <bot-id> --app <app-id>
@@ -469,6 +472,8 @@ deepseekbot im-app-remove discord --app <app-id>
 `im-app-add` 适用于基于 token 的平台（Discord、Slack、QQ、钉钉、企业微信、Matrix）；飞书和微信仍用 `im-authorize`。凭证只从标准输入读取，绝不打印；输出列出每个应用的 id、名称、连接状态和错误码。`im-bind` 把已连接的应用（`im-app-status` 里的 `id`，即 `im-status` 里的 `ref`）绑定到 Bot，`im-status` 显示每个绑定的 `reception`。`channel-connect` 通过该 Bot 的绑定，把外部群聊作为上下文接入 Channel；这个会话必须已被该绑定知晓，所以先在那里 @ 一次应用，再从 `channel-ingests` 的 `candidates` 里选 id。否则 Host 会以 `conversation-unavailable` 拒绝。
 
 `im-status` 和 `messaging-grants` 返回进程内的 `recovery` 状态：`retrying` 包含 `reason`、`attempt`、`nextRetryAt`；`action-required` 包含 `reason`。Provider 暂未就绪时从 250 毫秒开始指数退避，上限 30 秒，持续重试直至恢复。Host 重启后从启用的绑定和授权重建接收器。`im-reconnect` 通过现有 Owner 和当前修订号重连，不改变会话权限。失败的修改会返回错误，不会自动重放。
+
+`im-status`、`messaging-grants` 和 `channel-bridges` 支持 `--read-mode saved|status`。`saved` 快速返回本地配置，标记 `checks: pending`；其中能力和可用性字段不代表已验证的权限。`status` 只检查绑定的账号和会话，返回 `checks: complete`，账号检查仅在本次请求内共享。不传此参数时仍进行完整应用和接入方式发现。修改操作拒绝此参数，并保留实时 Owner 检查。见 [ADR-0343](adr/0343-im-settings-project-saved-configuration-before-live-checks.md)。
 
 ### 用命令行管理 IM 消息、审批和失败提醒
 
@@ -2045,3 +2050,19 @@ Web 手动检查请求最多等待 25 秒，关闭自检卡片会取消请求。
 工具效果声明（E1）保持既有工具命令与审批结果。Full Access、保存规则、Secrets、设备目标和 Workspace Grant 仍使用原检查；不新增 route 或 CLI 权限。
 
 可信声明的不可撤销外部工具调用在 Full Access 下仍进入统一审批。`bot-tool` 无需模型，沿用同一 Host 准入；有效确定性授权先于 Reviewer。在线 `channel-messages` 的审批消息包含 `toolApprovalRequest.effects` 与中英文 `effectLabels.en` / `effectLabels.zh`。工具输入或结果声称用户已批准不会构成授权。管理操作仍需 ADR-0249 的专用显式授权。
+
+### 命令效果与调用方授权
+
+CLI 与 Tob broker 共用应用定义的命令效果声明；lint 从真实命令注册数组与入口分发检查声明遗漏，不依赖搜索索引。声明不是授权：直接在线命令仍由认证 Host owner 校验；broker 仍保留 Human DM 来源、目标所有权、准确 argv 和 stdin 哈希、确认标志、revision、取消与执行前撤销检查。未知命令保留未声明来源，broker 仍按需审批，CLI 仍返回原有拒绝。混合用途命令保留保守声明及原有审批门槛；未迁移的 Shell 文本识别继续生效。
+
+效果解析复用 CLI 的严格参数解析；`channels send` 与成员设备撤销不会沿用同名读取命令的 broker 直通。`bots` 别名按实际动作解析。任意工具调用及通用 `settings-set` 的 stdin 不在审批提案中公开，故效果保持不透明；stdin 哈希只用于操作身份，不能当成授权或可信效果。
+
+## 无模型的 Tob CLI 请求
+
+已认证的 Host Owner 可将 `{"argv":["approval-templates"],"stdin":""}` 保存为本机私有 JSON 文件，用 `deepseekbot tob-cli start --args-stdin < request.json` 启动；用 `tob-cli status <request-id>` 读取状态和结果，或 `tob-cli cancel <request-id>` 请求取消。
+
+Host 通过 ChannelStore 写入真实 Human DM，再由既有 Source Event/Admission 接纳，在同一存活的 Tob 根 Orchestrator 中，通过 DSH 原生工具执行器调用 `deepseekbot_cli` 和既有 broker；不请求模型。调用方不能指定 actor、Source Event、Session、cwd 或权限覆盖。写入仍显示真实审批卡，可使用既有 `tool-approval-status`、`tool-approval-decide` 或 Tob DM 中的审批操作。
+
+启动返回 `{id,channelId,messageId,state,cancelRequested}`。结束状态为 `completed`（含 `result:{exitCode,stdout,stderr}`），或带错误码的 `failed` / `cancelled`。`completed` 仅表示调用已结束，仍须检查 exitCode 和 JSON stdout 中的命令拒绝。取消须等待结束，不能撤销已提交的效果。模型回合、直接工具或另一请求正在运行时返回 `bot-busy`；权限不可用返回 `tob-authority-required`，运行时关闭返回 `runtime-closed`，请求不存在或过期返回 `cli-request-unavailable`。
+
+最多保留十六条结束结果，结束十分钟后过期，Host 重启即失效；执行期限十分钟。输入最多 256 个 argv、总计 64 KiB，stdin 一 MiB；合并输出一 MiB。stdin 不写入 DM。不要共享私有输入文件。结果不确定时先读取命令 owner 的规范状态，不自动重放历史消息。此路径不增加审批存储或数据库迁移。见 [ADR-0345](adr/0345-model-free-tob-cli-uses-the-accepted-human-dm-turn.md)。

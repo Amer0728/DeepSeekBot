@@ -111,3 +111,9 @@ Future delivery must demonstrate inherited versus specific/Off behavior, Reviewe
 Performance assessment: this change edits documentation only, introduces no dependency and changes no runtime hot path, so no runtime benchmark is warranted. Future E2/E3 work must separately budget added admission work and model calls, prove deterministic hits make no Reviewer call, and verify the affected real journey under the repository's performance policy.
 
 Direct CLI effect calls use an owned native execution Session with the existing `direct-` identity prefix. Ownership resolves for admission and audit, but these one-call executions are excluded from persistent Bot root enumeration: they must not become the current chat Orchestrator or cause report delivery to wake a model. The native Agent is disposed after the call; ownership and execution evidence remain.
+
+## Human approval result presentation
+
+A Reviewer handoff appends an explicit `ask-human` result to the canonical Channel before the Human request, with its captured template identity/version, sanitized input and reason. Record failure still routes to Human; cancellation and owner changes cannot grant authorization. Historical autonomous rejection records remain readable; the historical rejection override cannot accept an `ask-human` record.
+
+The Web and mobile Human approval card keeps its full request content after Allow once, Always allow or Reject. Only the operation area becomes the selected, disabled result. Open details remain open across a decision, and historical cards retain the original content on reload. Mobile projects validated display-only request content from the existing Channel message, without per-card history/status reads; cached content never authorizes a decision. Missing or malformed historical content is shown as unavailable.

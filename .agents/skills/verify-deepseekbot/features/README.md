@@ -2,6 +2,8 @@
 
 | Feature | Needs a model | Scripted journey | File |
 | --- | --- | --- | --- |
+| Anonymous Bot Session token telemetry | only for live reply proof | `scripts/e2e-token-telemetry.mjs` | [token-telemetry.md](token-telemetry.md) |
+| Saved IM settings before connection checks | no | `verify-app` isolated settings path and read-mode CLI | [im-settings-loading.md](im-settings-loading.md) |
 | Lightweight settings during first-Tob preparation | no | `scripts/e2e-settings-loading.mjs` | [settings-loading.md](settings-loading.md) |
 | Durable timed-question answers across Host restart | yes | `verify-app` original card + `user-question-answer` | [timed-question-recovery.md](timed-question-recovery.md) |
 | Tobs channel group create, rename, delete and failure recovery | no | `verify-app` sidebar path | [channel-sections.md](channel-sections.md) |
@@ -25,7 +27,7 @@
 | DeepSeekBot device-local appearance | no | `scripts/e2e-local-appearance.mjs` | [local-appearance.md](local-appearance.md) |
 | Functional Panel appearance | no | `scripts/e2e-panel-appearance.mjs`, `scripts/e2e-nested-appearance.mjs` | [panel-appearance.md](panel-appearance.md) |
 | Global panel materials | no | `scripts/e2e-global-materials.mjs` | [global-materials.md](global-materials.md) |
-| Protected Tob DM and mobile pull-to-Tob (management, models, runtime, privacy and updates) | yes for reply and approval | `scripts/e2e-tob-home.mjs`, `scripts/e2e-tob-model-runtime.mjs`, `scripts/e2e-tob-bot-management.mjs`, `scripts/e2e-tob-channel-management.mjs`, `scripts/e2e-tob-group-settings.mjs`, `scripts/e2e-tob-group-decisions.mjs`, `scripts/e2e-tob-delegation.mjs` | [tob-home.md](tob-home.md) |
+| Protected Tob DM and mobile pull-to-Tob (management, models, runtime, privacy and updates), plus typed CLI admission | yes for model reply; no for typed CLI approval | `scripts/e2e-tob-home.mjs`, `scripts/e2e-tob-model-runtime.mjs`, `scripts/e2e-tob-bot-management.mjs`, `scripts/e2e-tob-channel-management.mjs`, `scripts/e2e-tob-group-settings.mjs`, `scripts/e2e-tob-group-decisions.mjs`, `scripts/e2e-tob-delegation.mjs` | [tob-home.md](tob-home.md) |
 | DSH Session list Bot folders | for fresh execution | `scripts/e2e-bot-session-folders.mjs` | [bot-session-folders.md](bot-session-folders.md) |
 
 One file per user-facing feature. Each file has four sections: `Sub-features`, `How to get to it (user POV)`, `Driving it with verify-app`, and `Gotchas`.

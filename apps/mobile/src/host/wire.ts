@@ -87,6 +87,7 @@ export interface ChannelWireMessage extends WireMessage {
   };
   bridgeOrigin?: { sourceEventId: string };
   toolApprovalRequest?: unknown;
+  toolAutoApproval?: unknown;
   userQuestionRequest?: unknown;
   privateInputRequest?: unknown;
   takeoverRequest?: unknown;
@@ -593,6 +594,7 @@ export interface QuestionAnswer {
 }
 
 export interface TimelineMessage {
+  contentPurge?: unknown;
   id: string;
   body: string;
   toolApprovalRequest?: ToolApprovalRequestCard;

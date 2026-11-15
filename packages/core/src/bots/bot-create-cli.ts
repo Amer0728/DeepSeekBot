@@ -1,3 +1,4 @@
+import { hasCliDeclaration } from './cli-effects.js';
 import { botMetadata, type BotMetadataResult } from '../team/bot-administration.js';
 import { privateBotRegistry, ownsBot } from '../team/bot-access.js';
 import { TeamRoles } from '../team/roles.js';
@@ -275,7 +276,7 @@ Usage:
   tobs im-bind <id> --app <app-id>
   tobs im-unbind <id> --app <app-id>
   tobs im-reconnect <id> --app <app-id>
-  tobs im-status <id>
+  tobs im-status <id> [--read-mode saved|status]
   tobs channel-connect <channel> --bot <id> --conversation <external-id> [--app <app-id>]
   tobs channel-ingests <channel>
   tobs browser-open <id>
@@ -2620,6 +2621,7 @@ export async function runBotCreateCli(
       out.stdout(BOT_CREATE_HELP.trimEnd());
       return 0;
     }
+    if (!hasCliDeclaration(command)) throw usageError('Unknown command.');
     if (command === 'ssh-tunnel') return await runSshCli(rest, values, out);
     const online = values.host !== undefined || io.env['DEEPSEEKBOT_HOST'] !== undefined;
     const teamChannels = command === 'channels' && (online || rest.length > 0);

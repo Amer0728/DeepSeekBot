@@ -1,3 +1,4 @@
+import { cliEffects, brokerCliEffects } from '../bots/cli-effects.js';
 import { requiresHumanDecision } from './approval-templates.js';
 
 export interface ToolEffects {
@@ -26,6 +27,7 @@ const computerRead: Declaration = { ...read, approval: 'native' };
 const computerAct: Declaration = { ...send, approval: 'native' };
 
 export const FIRST_PARTY_TOOL_EFFECTS = {
+  deepseekbot_cli: write,
   archive_assignment: write,
   ask_secret: { ...write, secrets: true },
   ask_user_question: write,
@@ -144,6 +146,18 @@ function inputText(args: unknown): string {
 }
 
 export function toolEffects(name: string, args: unknown): ToolEffects | undefined {
+  if (name === 'deepseekbot_cli') {
+    if (
+      typeof args !== 'object' ||
+      args === null ||
+      !('argv' in args) ||
+      !Array.isArray(args.argv) ||
+      !args.argv.every((arg): arg is string => typeof arg === 'string')
+    )
+      return undefined;
+    return cliEffects(args.argv);
+  }
+  if (name.startsWith('deepseekbot ')) return brokerCliEffects(name, args);
   const declared = declaration(name);
   if (!declared) return undefined;
   const { approval: _approval, ...effects } = declared;

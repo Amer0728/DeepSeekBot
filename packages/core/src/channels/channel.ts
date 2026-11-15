@@ -314,7 +314,7 @@ export interface ChannelToolAutoApproval {
   input: string;
   template: string;
   templateVersion?: string;
-  outcome: 'allowed' | 'rejected';
+  outcome: 'allowed' | 'rejected' | 'ask-human';
   reason: string;
 }
 
@@ -504,6 +504,7 @@ export interface ChannelMessage {
 
   onboardingWelcome?: { version: 1; kind?: 'tob' };
 
+  tobCliRequestId?: string;
   memorySwitchTarget?: string;
 
   mentions?: ChannelMention[];
@@ -870,6 +871,14 @@ export function isChannelMessage(value: unknown): value is ChannelMessage {
       (message['author'] as ChannelMessageAuthor)?.kind !== 'human')
   )
     return false;
+  const cliRequest = message['tobCliRequestId'];
+  if (
+    cliRequest !== undefined &&
+    (typeof cliRequest !== 'string' ||
+      !/^[a-f0-9-]{36}$/u.test(cliRequest) ||
+      (message['author'] as ChannelMessageAuthor)?.kind !== 'human')
+  )
+    return false;
   const switchTarget = message['memorySwitchTarget'];
   if (
     switchTarget !== undefined &&
@@ -1208,7 +1217,9 @@ export function isChannelMessage(value: unknown): value is ChannelMessage {
         (key) => typeof record[key] !== 'string' || record[key].length === 0,
       ) ||
       typeof record['input'] !== 'string' ||
-      (record['outcome'] !== 'allowed' && record['outcome'] !== 'rejected')
+      (record['outcome'] !== 'allowed' &&
+        record['outcome'] !== 'rejected' &&
+        record['outcome'] !== 'ask-human')
     )
       return false;
   } else if (message['toolAutoApprovalPause'] !== undefined) {

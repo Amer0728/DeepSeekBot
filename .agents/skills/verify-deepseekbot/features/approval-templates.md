@@ -35,3 +35,7 @@ Use the shared device QA lane and T3 device tools. The same synthetic Bot and is
 - `/tmp` may already be writable; an ordinary file write there need not reach an approval gate.
 - Three-part editing, card-rule table and confirmed bulk deletion fallback are separate issues; this journey does not qualify them.
 - Browser screenshots establish Web behavior only. Preserve failed drives and observe before retrying.
+
+## Human result retention (#4211)
+
+After Reviewer asks the Human, verify a compact sent-to-Human row precedes the real request. Open request details, then Allow once, Always allow or Reject: command/tool/folder/input remain, opened details stay open, and the chosen disabled control is identifiable. Reload history and verify the full request remains readable with no resubmission. Mobile uses the existing validated message projection for decided history without one timeline/status RPC per card; malformed/purged content stays unavailable. Historical Reviewer rejection rows remain readable; new ask-human rows cannot be overridden as rejections. Use the public online CLI synthetic missing-secret path on Windows; do not run the native-pwsh journey under the Human no-PowerShell constraint.

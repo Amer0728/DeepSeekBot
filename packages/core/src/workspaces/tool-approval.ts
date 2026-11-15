@@ -938,6 +938,46 @@ export class ChannelToolApproval {
         } catch {}
       }
     };
+    const recordReview = async (
+      outcome: 'allowed' | 'ask-human',
+      reason: string,
+    ): Promise<boolean> => {
+      const key = callKey(tracked.sessionId, tracked.callId);
+      if (signal?.aborted || this.#tracked.get(key) !== tracked) return false;
+      const record: ChannelMessage = {
+        id: randomUUID(),
+        at: new Date().toISOString(),
+        author: { kind: 'system' },
+        body:
+          (outcome === 'allowed' ? 'Auto-approved by ' : 'Sent to Human by ') +
+          template.name +
+          ': ' +
+          reason,
+        toolAutoApproval: {
+          botSlug: tracked.botSlug,
+          sessionId: tracked.sessionId,
+          callId: tracked.callId,
+          toolName: tracked.toolName,
+          input: reviewerCallInput(tracked.toolName, tracked.input),
+          template: template.name,
+          templateVersion,
+          outcome,
+          reason,
+        },
+      };
+      try {
+        const appended = await this.#channels.appendMessage(
+          OWNER_HUMAN_CONTEXT,
+          channelId,
+          record,
+          undefined,
+          () => !signal?.aborted && this.#tracked.get(key) === tracked,
+        );
+        return appended !== undefined && !signal?.aborted && this.#tracked.get(key) === tracked;
+      } catch {
+        return false;
+      }
+    };
     let review: ApprovalReviewResult;
     try {
       review = await auto.review({
@@ -986,6 +1026,7 @@ export class ChannelToolApproval {
       };
       if (typeof failure?.model === 'string') model = failure.model;
       if (typeof failure?.sessionId === 'string') reviewSession = failure.sessionId;
+      await recordReview('ask-human', tracked.approvalReview.reason);
       log('ask-human', code);
       return undefined;
     }
@@ -1002,40 +1043,12 @@ export class ChannelToolApproval {
         version: templateVersion,
         reason: review.reason,
       };
+      await recordReview('ask-human', review.reason);
       log('ask-human', undefined, review.reason);
       return undefined;
     }
-    const key = callKey(tracked.sessionId, tracked.callId);
-    if (this.#tracked.get(key) !== tracked) {
-      log(review.outcome, 'call-changed');
-      return undefined;
-    }
-    const record: ChannelMessage = {
-      id: randomUUID(),
-      at: new Date().toISOString(),
-      author: { kind: 'system' },
-      body: 'Auto-approved by ' + template.name + ': ' + review.reason,
-      toolAutoApproval: {
-        botSlug: tracked.botSlug,
-        sessionId: tracked.sessionId,
-        callId: tracked.callId,
-        toolName: tracked.toolName,
-        input: reviewerCallInput(tracked.toolName, tracked.input),
-        template: template.name,
-        templateVersion,
-        outcome: 'allowed',
-        reason: review.reason,
-      },
-    };
-    try {
-      if (
-        (await this.#channels.appendMessage(OWNER_HUMAN_CONTEXT, channelId, record)) === undefined
-      ) {
-        log(review.outcome, 'record-unavailable');
-        return undefined;
-      }
-    } catch {
-      log(review.outcome, 'record-failed');
+    if (!(await recordReview('allowed', review.reason))) {
+      log(review.outcome, 'record-unavailable');
       return undefined;
     }
     log(review.outcome);

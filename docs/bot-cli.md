@@ -477,6 +477,9 @@ printf '{"token":"…"}' | deepseekbot im-app-add discord --credentials-stdin
 deepseekbot im-app-status discord
 deepseekbot im-bind <bot-id> --app <app-id>
 deepseekbot im-status <bot-id>
+deepseekbot im-status <bot-id> --read-mode saved
+deepseekbot messaging-grants <bot-id> --read-mode status
+deepseekbot channel-bridges <channel-id> --read-mode saved
 deepseekbot channel-ingests <channel>
 deepseekbot channel-connect <channel> --bot <bot-id> --conversation <external-id>
 deepseekbot im-reconnect <bot-id> --app <app-id>
@@ -487,6 +490,8 @@ deepseekbot im-app-remove discord --app <app-id>
 `im-app-add` covers token-based platforms (Discord, Slack, QQ, DingTalk, WeCom, Matrix); Feishu and WeChat keep `im-authorize`. Credentials arrive only on stdin and are never printed; output lists each app's id, name, connection state and error code. `im-bind` binds a connected app (the `id` from `im-app-status`, also the `ref` in `im-status`) to a Bot, and `im-status` shows each binding's `reception`. `channel-connect` attaches an external group conversation to a Channel as context through that Bot's binding; the conversation must already be known to the binding, so mention the app there once and pick the id from the `candidates` in `channel-ingests`. Otherwise the Host refuses with `conversation-unavailable`.
 
 `im-status` and `messaging-grants` include process-local `recovery` metadata: `retrying` with `reason`, `attempt`, `nextRetryAt`, or `action-required` with `reason`. Temporary provider readiness failures retry exponentially from 250 ms to a 30 s cap until recovery. Host restart reconstructs receivers from enabled bindings and grants. `im-reconnect` uses the existing Owner and current revision without changing conversation access. Failed mutations are reported, never automatically replayed.
+
+`im-status`, `messaging-grants` and `channel-bridges` support `--read-mode saved|status`. `saved` returns local configuration promptly with `checks: pending`; capability/availability fields are not verified permissions. `status` checks only bound accounts and grants with `checks: complete`, sharing account inspections only within the current request. Omitting the flag retains full app/setup discovery. Mutations reject this flag and keep their fresh Owner checks. See [ADR-0343](adr/0343-im-settings-project-saved-configuration-before-live-checks.md).
 
 ### IM messaging, approvals and failure alerts from the CLI
 
@@ -2104,3 +2109,23 @@ deepseekbot models allowed [--as <username>]
 ```
 
 Tool effect declarations (E1) preserve the existing tool commands and approval outcomes. Full Access, saved rules, Secrets, device targets and Workspace Grants retain their existing checks; no new route or CLI authority is introduced.
+
+### Command effects and caller authority
+
+The CLI and Tob broker share application-defined command effect declarations. Lint checks actual command registration arrays and entry dispatch branches, independently of the search index. A declaration is not authorization: direct online commands retain authenticated Host owner checks; the broker retains Human DM origin, target ownership, exact argv and stdin hash, confirmation flags, revisions, cancellation and live execution fences. Unknown commands remain undeclared, retain broker approval, and receive the existing CLI refusal. Mixed-purpose commands keep conservative declarations and their existing approval gates; unmigrated Shell text protection remains active.
+
+Effect resolution uses the CLI's strict argument parser. `channels send` and member-device revocation cannot inherit the same family's broker read admission. `bots` aliases resolve by their dispatched action. Arbitrary tool calls and generic `settings-set` remain opaque when their stdin is unavailable in the proposal; a stdin hash binds operation identity and supplies neither authority nor trusted effects.
+
+## Model-free Tob CLI requests
+
+The authenticated Host Owner can run a typed Tob CLI command without a model. Put `{"argv":["approval-templates"],"stdin":""}` in a private JSON file, then run:
+
+```sh
+deepseekbot tob-cli start --args-stdin < request.json
+deepseekbot tob-cli status <request-id>
+deepseekbot tob-cli cancel <request-id>
+```
+
+Start returns `{id,channelId,messageId,state,cancelRequested}`. The Host records a genuine Human DM and accepts it through the existing Source Event/Admission owner. Its live Tob Orchestrator executes the scoped `deepseekbot_cli` Tool and broker without a model request. No actor, Source Event, Session, cwd or permission override is accepted. Writes keep the existing real approval card; use `tool-approval-status` and `tool-approval-decide`, or decide in the Tob DM. Status becomes `completed` with `result:{exitCode,stdout,stderr}`, or `failed` / `cancelled` with a code. A completed invocation can contain a command refusal: inspect exitCode and JSON stdout. Cancellation is a request until settlement; it does not undo an effect already committed.
+
+Only one live CLI request is allowed; `bot-busy` refuses overlap with another request, a model turn or a direct tool. The Host refuses unavailable authority (`tob-authority-required`), a closed runtime (`runtime-closed`), and missing/expired request IDs (`cli-request-unavailable`). Results last at most ten minutes after settlement (sixteen retained entries); restart expires them. Commands time out after ten minutes. Input is limited to 256 argv entries / 64 KiB argv and one MiB stdin, output to one MiB combined. Stdin is never copied into the DM. Keep private request files local. After an uncertain result, read the command owner’s canonical state before starting another request. See [ADR-0345](adr/0345-model-free-tob-cli-uses-the-accepted-human-dm-turn.md).

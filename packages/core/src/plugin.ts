@@ -218,6 +218,7 @@ import {
   type TelemetryCapture,
 } from './telemetry/service.js';
 import { readDailyUsageCounts, startDailyUsage } from './telemetry/daily-usage.js';
+import { startTokenUsage } from './telemetry/token-usage.js';
 import {
   createActiveDay,
   readHumanMessageCounts,
@@ -1761,6 +1762,9 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
         (name, args) => nativeExecutionRoot(core, agent.session, name, args),
         (shellCtx, shell) =>
           installTobCliShell(shellCtx, shell, {
+            nativeCli: () =>
+              core.tob.isTob(core.ownership.resolve(agent.session.id)?.botSlug ?? '') &&
+              agentAdapter.ownsModelFreeTobTurn(agent),
             capture: (execution) => {
               const actor = execution.agent;
               if (
@@ -2152,6 +2156,15 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     );
     ctx.effect(
       () =>
+        startTokenUsage({
+          telemetry,
+          snapshot: () => core.usage?.telemetrySnapshot(),
+          log: (message) => ctx.logger.info(message),
+        }),
+      'botharness: telemetry token usage',
+    );
+    ctx.effect(
+      () =>
         startActiveDayWatch({
           activeDay,
           counts: (since) => readHumanMessageCounts(usageDatabase, since),
@@ -2373,7 +2386,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
   applyCompactionPolicy();
   ctx.on(
     'agent/pre-step',
-    async ({ agent, signal }, next) => {
+    async ({ agent, signal, messages, modelSelection }, next) => {
       applyCompactionPolicy();
       if (isApprovalReviewSession(agent.session.id))
         return reviewing.has(agent.session.id) ? next() : { kind: 'reject' };
@@ -2418,6 +2431,10 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
         return { kind: 'reject' };
       }
       turnRefusals.delete(agent.session.id);
+      if (agentAdapter.ownsModelFreeTobTurn(agent)) {
+        await agentAdapter.runModelFreeTobTurn(agent, messages, signal, modelSelection);
+        return { kind: 'reject' };
+      }
       const contextOwner = core.ownership.resolve(agent.session.id);
       if (contextOwner?.rootRole === 'orchestrator' && contextOwner.parentSessionId === undefined)
         await compactUnknownContext(

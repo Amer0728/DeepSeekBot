@@ -1,3 +1,4 @@
+import type { TobCliCommand, TobCliStatus } from '../tob/cli-request.js';
 import type {
   BotMetadata,
   BotMetadataResult,
@@ -133,7 +134,12 @@ import type { HumanAssignmentContext } from '../runtime/assignment-human-context
 import type { ThreadReceptionInput } from '../messaging/thread-policy.js';
 import type { GroupReceptionInput } from '../messaging/group-policy.js';
 import type { ExternalSource } from '../messaging/inbound.js';
-import type { MessagingSnapshot, MessagingGrant, OutboxIntent } from '../messaging/outbound.js';
+import type {
+  MessagingSnapshot,
+  MessagingGrant,
+  OutboxIntent,
+  MessagingReadMode,
+} from '../messaging/outbound.js';
 import type { MessagingTarget } from '../messaging/provider.js';
 import type { PersonaBotDeletionPreview, PersonaBotDeletion } from '../bots/deletion.js';
 import type { DataResetPreview, DataResetResult } from '../data-reset/reset.js';
@@ -867,8 +873,8 @@ export class BotharnessBridgeService extends TypertRemoteService {
   messagingDefaultsSet(input: MessagingDefaultsInput): Promise<MessagingDefaults> {
     return unwrapAsync(this.methods.messagingDefaultsSet(input));
   }
-  channelBridges(channelId: string): Promise<ChannelBridgeSnapshot> {
-    return unwrapAsync(this.methods.channelBridges({ channelId }));
+  channelBridges(channelId: string, mode?: MessagingReadMode): Promise<ChannelBridgeSnapshot> {
+    return unwrapAsync(this.methods.channelBridges({ channelId, ...(mode ? { mode } : {}) }));
   }
   channelIngests(channelId: string): Promise<ConversationIngestSnapshot> {
     return unwrapAsync(this.methods.channelIngests({ channelId }));
@@ -949,8 +955,8 @@ export class BotharnessBridgeService extends TypertRemoteService {
   messagingApps(): Promise<MessagingAppsView> {
     return unwrapAsync(this.methods.messagingApps());
   }
-  messagingSnapshot(slug: string): Promise<MessagingSnapshot> {
-    return unwrapAsync(this.methods.messagingSnapshot({ slug }));
+  messagingSnapshot(slug: string, mode?: MessagingReadMode): Promise<MessagingSnapshot> {
+    return unwrapAsync(this.methods.messagingSnapshot({ slug, ...(mode ? { mode } : {}) }));
   }
   messagingReachable(
     slug: string,
@@ -2188,6 +2194,16 @@ export class BotharnessBridgeService extends TypertRemoteService {
   channelAllBotPreview(channelId: string): AllBotPreview {
     return unwrap(this.methods.channelAllBotPreview({ channelId }));
   }
+  async tobCli(
+    action: 'start' | 'status' | 'cancel',
+    command?: TobCliCommand,
+    id?: string,
+  ): Promise<TobCliStatus> {
+    return unwrap(
+      await this.methods.tobCli(action === 'start' ? { action, command } : { action, id }),
+    );
+  }
+
   channelSendStatus(channelId: string, messageId: string): ChannelSendStatus {
     return unwrap(this.methods.channelSendStatus({ channelId, messageId }));
   }
@@ -3331,6 +3347,7 @@ markRemoteMethods(BotharnessBridgeService.prototype, [
   'messageSearch',
   'channelUnreadCounts',
   'channelAllBotPreview',
+  'tobCli',
   'channelSend',
   'channelSendStatus',
   'channelGenuiView',
