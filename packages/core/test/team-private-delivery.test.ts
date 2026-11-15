@@ -52,6 +52,7 @@ function fixture() {
   const bobDevice = device(bob.humanId);
   const now = new Date(Date.now() + 10_000).toISOString();
   for (const human of [owner, bob]) {
+    core.team.spaces.ensureAccount(human.humanId);
     const slug = human === owner ? 'owner-bot' : 'bob-bot';
     core.registry.create({ slug, displayName: slug, ownerHumanId: human.humanId });
     core.channels.getOrCreateDm(human, slug, slug);

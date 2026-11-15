@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   existsSync,
   lstatSync,
@@ -7,13 +8,13 @@ import {
   renameSync,
   rmSync,
 } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import type { OperationalDatabaseModulePort } from '../database/owner.js';
+import { OperationalDatabaseError, type OperationalDatabaseModulePort } from '../database/owner.js';
 import { memoryOwnership } from '../bots/deletion.js';
 import { TeamError } from '../team/error.js';
-import { accountMemoryPath } from './space-memory.js';
+import { accountMemoryPath, defaultSpaceMemoryPath } from './space-memory.js';
 import { canonicalPath, within } from './space-paths.js';
 
 export function accountSpacePath(home: string, humanId: string): string {
@@ -59,6 +60,33 @@ const moveSchema = z.object({
   inode: z.number(),
 });
 type Move = z.infer<typeof moveSchema>;
+function addMove(moves: Move[], source: string, target: string): void {
+  if (!existsSync(source)) return;
+  if (canonicalPath(source) !== source || canonicalPath(dirname(target)) !== dirname(target))
+    throw new TeamError('grant-protected-path');
+  if (existsSync(target)) {
+    if (
+      lstatSync(source).isDirectory() &&
+      lstatSync(target).isDirectory() &&
+      canonicalPath(target) === target
+    ) {
+      for (const name of readdirSync(source).sort())
+        addMove(moves, join(source, name), join(target, name));
+      return;
+    }
+    throw new TeamError('space-name-taken');
+  }
+  const stat = lstatSync(source);
+  moves.push({ source, target, device: stat.dev, inode: stat.ino });
+}
+function applyMoves(moves: Move[]): void {
+  for (const move of moves) {
+    mkdirSync(dirname(move.target), { recursive: true });
+    if (realpathSync(dirname(move.target)) !== dirname(move.target))
+      throw new TeamError('grant-protected-path');
+    renameSync(move.source, move.target);
+  }
+}
 function undo(moves: Move[]): void {
   for (const move of [...moves].reverse()) {
     if (existsSync(move.source)) continue;
@@ -99,28 +127,7 @@ export function prepareSpaceTransfer(
   const sourceRoot = accountSpacePath(home, humanId);
   const targetRoot = accountSpacePath(home, targetHumanId);
   const moves: Move[] = [];
-  const add = (source: string, target: string) => {
-    if (!existsSync(source)) return;
-    if (canonicalPath(source) !== source || canonicalPath(dirname(target)) !== dirname(target))
-      throw new TeamError('grant-protected-path');
-    if (existsSync(target)) {
-      if (
-        lstatSync(source).isDirectory() &&
-        lstatSync(target).isDirectory() &&
-        canonicalPath(target) === target
-      ) {
-        for (const name of readdirSync(source).sort()) add(join(source, name), join(target, name));
-        return;
-      }
-      throw new TeamError('space-name-taken');
-    }
-    const stat = lstatSync(source);
-    moves.push({ source, target, device: stat.dev, inode: stat.ino });
-  };
-  if (existsSync(sourceRoot))
-    for (const name of readdirSync(sourceRoot).sort()) {
-      if (name !== 'bots') add(join(sourceRoot, name), join(targetRoot, name));
-    }
+  const add = (source: string, target: string) => addMove(moves, source, target);
   const memories = slugs.map((slug) => {
     const record = z
       .object({ body: z.string() })
@@ -131,8 +138,11 @@ export function prepareSpaceTransfer(
       );
     const memory =
       z.object({ memoryDir: z.string().optional() }).parse(JSON.parse(record.body)).memoryDir ??
-      accountMemoryPath(home, humanId, slug);
-    if (!within(sourceRoot, canonicalPath(memory))) throw new TeamError('grant-protected-path');
+      defaultSpaceMemoryPath(db, home, humanId, slug);
+    const canonical = canonicalPath(memory);
+    const legacy = join(home, 'botharness', 'bots', slug, 'memory');
+    if (!within(sourceRoot, canonical) && within(home, canonical) && canonical !== legacy)
+      throw new TeamError('grant-protected-path');
     const target = accountMemoryPath(home, targetHumanId, slug);
     if (existsSync(memory)) {
       const proof = memoryOwnership(memory);
@@ -143,11 +153,25 @@ export function prepareSpaceTransfer(
       );
       if (!retained || JSON.stringify(proof) !== String(retained.body))
         throw new TeamError('grant-protected-path');
-      if (memory === accountMemoryPath(home, humanId, slug)) add(dirname(memory), dirname(target));
-      else add(memory, target);
     }
-    return { slug, target };
+    return {
+      slug,
+      target,
+      memory,
+      source: memory === accountMemoryPath(home, humanId, slug) ? dirname(memory) : memory,
+      destination: memory === accountMemoryPath(home, humanId, slug) ? dirname(target) : target,
+    };
   });
+  const files = (source: string, target: string) => {
+    if (memories.some((memory) => within(memory.source, source))) return;
+    if (memories.some((memory) => within(source, memory.source))) {
+      for (const name of readdirSync(source).sort()) files(join(source, name), join(target, name));
+    } else add(source, target);
+  };
+  if (existsSync(sourceRoot))
+    for (const name of readdirSync(sourceRoot).sort())
+      if (name !== 'bots') files(join(sourceRoot, name), join(targetRoot, name));
+  for (const memory of memories) add(memory.source, memory.destination);
   db.transaction(
     (connection) =>
       connection
@@ -156,12 +180,7 @@ export function prepareSpaceTransfer(
     ['workspace-spaces'],
   );
   try {
-    for (const move of moves) {
-      mkdirSync(dirname(move.target), { recursive: true });
-      if (realpathSync(dirname(move.target)) !== dirname(move.target))
-        throw new TeamError('grant-protected-path');
-      renameSync(move.source, move.target);
-    }
+    applyMoves(moves);
   } catch (error) {
     undo(moves);
     db.transaction(
@@ -199,4 +218,120 @@ export function prepareSpaceTransfer(
       );
     },
   };
+}
+
+export function relocateTobWorkspaces(db: OperationalDatabaseModulePort, home: string): void {
+  const bots = z
+    .array(z.object({ slug: z.string(), humanId: z.string(), name: z.string(), body: z.string() }))
+    .parse(
+      db.read((connection) =>
+        connection
+          .prepare(
+            `SELECT t.bot_slug AS slug, t.human_id AS humanId, h.display_name AS name, b.body FROM tob_identity t JOIN persona_bots b ON b.slug = t.bot_slug JOIN humans h ON h.human_id = t.human_id`,
+          )
+          .all(),
+      ),
+    );
+  const memoryPaths = z
+    .array(z.object({ memory: z.string() }))
+    .parse(
+      db.read((connection) =>
+        connection
+          .prepare(
+            `SELECT COALESCE(json_extract(b.body, '$.memoryDir'), json_extract(p.body, '$.path'), ?) AS memory FROM persona_bots b LEFT JOIN persona_bot_memory_ownership p USING(slug)`,
+          )
+          .all(''),
+      ),
+    )
+    .map((row) => row.memory)
+    .filter(Boolean)
+    .map((path) => {
+      try {
+        return canonicalPath(path);
+      } catch {
+        return resolve(path);
+      }
+    });
+  for (const bot of bots) {
+    const source = join(home, 'botharness', 'tob-workspaces', bot.slug);
+    const target = join(accountSpacePath(home, bot.humanId), 'files');
+    const record = z.object({ workspaces: z.array(z.string()) }).parse(JSON.parse(bot.body));
+    const oldGrants = z
+      .array(z.object({ id: z.string(), workspace_id: z.string(), orchestrator_write: z.number() }))
+      .parse(
+        db.read((connection) =>
+          connection
+            .prepare(
+              `SELECT id, workspace_id, orchestrator_write FROM workspace_grants WHERE bot_slug = ? AND revoked_at IS NULL AND (workspace_path = ? OR substr(workspace_path,1,length(?)) = ?)`,
+            )
+            .all(bot.slug, source, source + sep, source + sep),
+        ),
+      );
+    if (!record.workspaces.includes(source) && !oldGrants.length) continue;
+    if (canonicalPath(source) !== source || canonicalPath(target) !== target)
+      throw new TeamError('grant-protected-path');
+    mkdirSync(target, { recursive: true });
+    const moves: Move[] = [];
+    const files = (from: string, to: string) => {
+      if (memoryPaths.some((memory) => within(memory, from))) return;
+      if (memoryPaths.some((memory) => within(from, memory))) {
+        for (const name of readdirSync(from).sort()) files(join(from, name), join(to, name));
+      } else addMove(moves, from, to);
+    };
+    if (existsSync(source))
+      for (const name of readdirSync(source).sort()) files(join(source, name), join(target, name));
+    const key = 'tob-workspace/' + bot.slug;
+    db.transaction(
+      (connection) =>
+        connection
+          .prepare('INSERT INTO workspace_file_transfers VALUES (?, ?)')
+          .run(key, JSON.stringify(moves)),
+      ['workspace-spaces'],
+    );
+    try {
+      applyMoves(moves);
+      const replaced = new Set([source, ...oldGrants.map((grant) => grant.workspace_id)]);
+      const workspaces = [
+        ...new Set([...record.workspaces.filter((workspace) => !replaced.has(workspace)), target]),
+      ];
+      db.transaction(
+        (connection) => {
+          connection
+            .prepare(
+              "UPDATE persona_bots SET body = json_set(body, '$.workspaces', json(?)) WHERE slug = ?",
+            )
+            .run(JSON.stringify(workspaces), bot.slug);
+          for (const grant of oldGrants)
+            connection
+              .prepare('UPDATE workspace_grants SET revoked_at = ? WHERE id = ?')
+              .run(new Date().toISOString(), grant.id);
+          if (oldGrants.length) {
+            const write = oldGrants.some((grant) => grant.orchestrator_write === 1);
+            connection
+              .prepare(`INSERT INTO workspace_grants (id,bot_slug,workspace_id,workspace_path,workspace_title,created_at,orchestrator_write,write_revision)
+            SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM workspace_grants WHERE bot_slug = ? AND workspace_id = ?)`)
+              .run(
+                randomUUID(),
+                bot.slug,
+                'spaces/' + bot.humanId,
+                target,
+                bot.name,
+                new Date().toISOString(),
+                Number(write),
+                Number(write),
+                bot.slug,
+                'spaces/' + bot.humanId,
+              );
+          }
+          connection.prepare('DELETE FROM workspace_file_transfers WHERE human_id = ?').run(key);
+        },
+        ['workspace-spaces', 'workspace-grants', 'bot-registry'],
+      );
+    } catch (error) {
+      if (!(error instanceof OperationalDatabaseError && error.code === 'post-commit-interrupted'))
+        undo(moves);
+      throw error;
+    }
+    if (existsSync(source) && !readdirSync(source).length) rmSync(source, { recursive: true });
+  }
 }

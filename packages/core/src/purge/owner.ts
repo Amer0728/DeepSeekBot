@@ -733,7 +733,9 @@ export function mountContentPurge(options: {
         channels: channels.length,
         bots: bots.length,
         messages: rows.length,
-        files: [...files].filter((id) => !retained.has(id)).length,
+        files:
+          [...files].filter((id) => !retained.has(id)).length +
+          accountFiles.filter((file) => file.kind !== 'directory').length,
       };
       return {
         rows,

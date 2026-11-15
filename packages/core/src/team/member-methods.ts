@@ -1,5 +1,6 @@
 export const MEMBER_GLOBAL_METHODS = [
   'spaces',
+  'spaceAudienceDirectory',
   'spaceCreate',
   'spaceUpdate',
   'spaceDelete',

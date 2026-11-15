@@ -56,14 +56,16 @@ async function scenario(missing: boolean) {
           expect(
             nativeFileSpaceDenial(core, session as never, 'read', { file_path: originalPath }),
           ).toBeUndefined();
-          expect(() => native('write')).toThrow(/explicit edit-original/);
-          expect(() =>
+          expect(native('write')).toMatch(/explicit edit-original/);
+          expect(
             nativeFileSpaceDenial(core, session as never, 'write', { file_path: originalPath }),
-          ).toThrow(/explicit edit-original/);
+          ).toMatch(/explicit edit-original/);
           expect(native('write', core.attachments.fileTarget(independent.fileId!).path)).toMatch(
-            /outside/,
+            /grant-protected-path/,
           );
-          expect(native('write', join(dirname(originalPath), 'other.txt'))).toMatch(/outside/);
+          expect(native('write', join(dirname(originalPath), 'other.txt'))).toMatch(
+            /grant-protected-path/,
+          );
           expect(
             core.runtime.originalAttachmentRoot?.('another-session', originalPath, 'read'),
           ).toBeUndefined();
@@ -85,7 +87,7 @@ async function scenario(missing: boolean) {
           const messages = core.channels.readMessages(channelId).length;
           if (missing) {
             rmSync(originalPath);
-            expect(() => native('write')).toThrow(/unavailable/);
+            expect(native('write')).toMatch(/unavailable/);
             await expect(
               call(tools, 'channel_attachment_open', { ...input, access: 'edit-original' }),
             ).rejects.toThrow(/unavailable/);
@@ -115,8 +117,8 @@ async function scenario(missing: boolean) {
               access: 'edit-original',
             });
             await call(tools, 'group_leave', { channel_id: groupId });
-            expect(() => native('read')).toThrow(/not a member/);
-            expect(() => native('write')).toThrow(/not a member/);
+            expect(native('read')).toMatch(/not a member/);
+            expect(native('write')).toMatch(/not a member/);
             await expect(
               call(tools, 'channel_attachment_open', {
                 ...input,

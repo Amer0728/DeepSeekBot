@@ -1,4 +1,8 @@
-import { lstatSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { z } from 'zod';
+import { setImmediate } from 'node:timers/promises';
+import type { Context } from '@deepseek-ai/cordis';
+import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools';
+import { lstatSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import type { Session } from '@deepseek-ai/dsh-session';
@@ -142,42 +146,20 @@ function nativePaths(name: string, args: unknown): { path: string; kind: AccessK
   if (
     typeof args !== 'object' ||
     args === null ||
-    !('patch' in args) ||
-    typeof args.patch !== 'string'
+    !('input' in args) ||
+    typeof args.input !== 'string'
   )
     return [];
   return [
-    ...args.patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gmu),
+    ...args.input.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gmu),
   ].map((match) => ({ path: match[1]!, kind: 'write' }));
 }
 
-function validateSpacePath(
-  core: GrantCore,
-  session: Session,
-  path: string,
-  recursive = false,
-): string | undefined {
+function validateSpacePath(core: GrantCore, session: Session, path: string): string | undefined {
   const owner = core.ownership.resolve(session.id);
   if (!owner || !core.grants.validatePath) return undefined;
   try {
-    if (recursive && core.grants.validateTree) {
-      core.grants.validateTree(owner.botSlug, path);
-      return undefined;
-    }
     core.grants.validatePath?.(owner.botSlug, path);
-    if (recursive && statSync(path).isDirectory()) {
-      const visit = (entry: string): void => {
-        core.grants.validatePath?.(owner.botSlug, entry);
-        const stat = lstatSync(entry);
-        if (stat.isSymbolicLink()) {
-          if (!authorizedPathRoot(currentRoots(core, session, 'read'), entry))
-            throw new Error('grant-protected-path');
-          return;
-        }
-        if (stat.isDirectory()) for (const name of readdirSync(entry)) visit(join(entry, name));
-      };
-      for (const name of readdirSync(path)) visit(join(path, name));
-    }
     return undefined;
   } catch (error) {
     return error instanceof Error ? error.message : 'grant-protected-path';
@@ -205,6 +187,19 @@ export function nativeFileSpaceDenial(
   name: string,
   args: unknown,
 ): string | undefined {
+  try {
+    return nativeFileSpaceDenialImpl(core, session, name, args);
+  } catch (error) {
+    return error instanceof Error ? error.message : 'grant-protected-path';
+  }
+}
+
+function nativeFileSpaceDenialImpl(
+  core: GrantCore,
+  session: Session,
+  name: string,
+  args: unknown,
+): string | undefined {
   if (!core.grants.validatePath) return undefined;
   const requests = nativePaths(name, args);
   if (!requests.length || session.header.cwd === undefined) return 'grant-protected-path';
@@ -214,13 +209,26 @@ export function nativeFileSpaceDenial(
     if (target === undefined)
       return validateSpacePath(core, session, path) ?? 'grant-protected-path';
     if (originalAttachmentRoot(core, session, target, request.kind) !== undefined) continue;
-    const denial = validateSpacePath(core, session, path, name === 'glob' || name === 'grep');
+    const denial = validateSpacePath(core, session, path);
     if (denial) return denial;
   }
   return undefined;
 }
 
 export function nativeFileToolDenial(
+  core: GrantCore,
+  session: Session,
+  name: string,
+  args: unknown,
+): string | undefined {
+  try {
+    return nativeFileToolDenialImpl(core, session, name, args);
+  } catch (error) {
+    return error instanceof Error ? error.message : 'grant-protected-path';
+  }
+}
+
+function nativeFileToolDenialImpl(
   core: GrantCore,
   session: Session,
   name: string,
@@ -238,7 +246,7 @@ export function nativeFileToolDenial(
         validateSpacePath(core, session, path) ?? 'BotHarness Session file path cannot be resolved'
       );
     if (originalAttachmentRoot(core, session, target, request.kind) !== undefined) continue;
-    const spaceDenial = validateSpacePath(core, session, path, name === 'glob' || name === 'grep');
+    const spaceDenial = validateSpacePath(core, session, path);
     if (spaceDenial) return spaceDenial;
     const roots = currentRoots(core, session, request.kind);
     if (
@@ -250,6 +258,66 @@ export function nativeFileToolDenial(
       return "Path is outside this Session's authorized workspace";
   }
   return undefined;
+}
+
+export function installNativeSearchResultGuard(
+  ctx: Context,
+  core: GrantCore,
+  fullAccess: (session: Session) => boolean,
+): () => void {
+  return ctx.on(
+    'tools/execute',
+    async (execution, next) => {
+      const session = execution.agent?.session;
+      if (
+        !session ||
+        !core.ownership.resolve(session.id) ||
+        (execution.name !== 'glob' && execution.name !== 'grep')
+      )
+        return next();
+      const result = await next();
+      await assertNativeSearchResult(
+        core,
+        session,
+        execution.name,
+        result,
+        execution.signal,
+        fullAccess(session),
+      );
+      return result;
+    },
+    { global: true },
+  );
+}
+
+export async function assertNativeSearchResult(
+  core: GrantCore,
+  session: Session,
+  name: string,
+  result: ToolExecutionResult,
+  signal: AbortSignal,
+  fullAccess = false,
+): Promise<void> {
+  if (result.isError || (name !== 'glob' && name !== 'grep')) return;
+  const paths =
+    name === 'glob'
+      ? z.object({ paths: z.array(z.string()) }).parse(result.value).paths
+      : z
+          .object({ matches: z.array(z.object({ path: z.string() })) })
+          .parse(result.value)
+          .matches.map((match) => match.path);
+  let visited = 0;
+  for (const path of new Set(paths)) {
+    signal.throwIfAborted();
+    if (visited++ % 64 === 0) await setImmediate(undefined, { signal });
+    const denial = (fullAccess ? nativeFileSpaceDenial : nativeFileToolDenial)(
+      core,
+      session,
+      'read',
+      { file_path: path },
+    );
+    if (denial) throw new Error(denial);
+  }
 }
 
 export function nativeExecutionRoot(

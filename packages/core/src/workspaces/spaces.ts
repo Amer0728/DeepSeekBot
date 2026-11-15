@@ -8,7 +8,7 @@ import {
   statSync,
   type Stats,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import type { OperationalDatabaseModulePort } from '../database/owner.js';
 import { humanContext, type HumanContext } from '../humans/context.js';
@@ -16,16 +16,34 @@ import type { TeamRoles } from '../team/roles.js';
 import { TeamError } from '../team/error.js';
 import { WorkspaceGrantError, type DshWorkspace, type DshWorkspaceLookup } from './grants.js';
 import { canonicalPath, within } from './space-paths.js';
-import { accountMemoryPath } from './space-memory.js';
+import { accountMemoryPath, defaultSpaceMemoryPath } from './space-memory.js';
 
-function containsFile(root: string, identity: Pick<Stats, 'dev' | 'ino'>): boolean {
-  if (!existsSync(root)) return false;
-  const entry = lstatSync(root);
-  if (entry.isSymbolicLink()) return false;
+function containsFile(
+  root: string,
+  identity: Pick<Stats, 'dev' | 'ino'>,
+  requestedPath = root,
+  seen = new Set<string>(),
+): boolean {
+  let entry: Stats;
+  try {
+    entry = statSync(root);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false;
+    throw new WorkspaceGrantError('grant-protected-path', 'grant-protected-path', {
+      path: requestedPath,
+    });
+  }
   if (entry.isFile()) return entry.dev === identity.dev && entry.ino === identity.ino;
+  if (!Number.isSafeInteger(entry.ino) || entry.ino === 0)
+    throw new WorkspaceGrantError('grant-protected-path', 'grant-protected-path', {
+      path: requestedPath,
+    });
+  const key = entry.dev + ':' + entry.ino;
+  if (seen.has(key)) return false;
+  seen.add(key);
   return (
     entry.isDirectory() &&
-    readdirSync(root).some((name) => containsFile(join(root, name), identity))
+    readdirSync(root).some((name) => containsFile(join(root, name), identity, requestedPath, seen))
   );
 }
 
@@ -286,9 +304,9 @@ export class WorkspaceSpaces {
       (connection) => {
         connection
           .prepare(
-            'UPDATE workspace_grants SET revoked_at = COALESCE(revoked_at, ?) WHERE workspace_id = ? OR workspace_path = ?',
+            'UPDATE workspace_grants SET revoked_at = COALESCE(revoked_at, ?) WHERE workspace_id = ? OR workspace_path = ? OR substr(workspace_path, 1, length(?)) = ?',
           )
-          .run(new Date().toISOString(), spaceId, path);
+          .run(new Date().toISOString(), spaceId, path, path + sep, path + sep);
         connection.prepare('DELETE FROM workspace_spaces WHERE space_id = ?').run(spaceId);
       },
       ['workspace-spaces', 'workspace-grants'],
@@ -308,15 +326,22 @@ export class WorkspaceSpaces {
             .all(),
         ),
       )
-      .map((bot) => ({
-        ...bot,
-        memory: canonicalPath(
+      .map((bot) => {
+        const account = accountMemoryPath(this.home, bot.owner, bot.slug);
+        const legacy = join(this.home, 'botharness', 'bots', bot.slug, 'memory');
+        const raw =
           bot.memory ??
-            (!bot.hostOwner || bot.retained === accountMemoryPath(this.home, bot.owner, bot.slug)
-              ? accountMemoryPath(this.home, bot.owner, bot.slug)
-              : join(this.home, 'botharness', 'bots', bot.slug, 'memory')),
-        ),
-      }));
+          (bot.retained === account || bot.retained === legacy
+            ? bot.retained
+            : bot.hostOwner
+              ? legacy
+              : account);
+        try {
+          return { ...bot, memory: canonicalPath(raw), unavailable: false };
+        } catch {
+          return { ...bot, memory: resolve(raw), unavailable: true };
+        }
+      });
   }
   private refuse(
     code: 'grant-foreign-space' | 'grant-protected-path' | 'grant-outside-audience',
@@ -333,8 +358,9 @@ export class WorkspaceSpaces {
   }
   assertMemoryPath(humanId: string, slug: string, input: string): void {
     if (this.roles.isOwner(humanContext(humanId))) return;
-    const root = this.ensureAccount(humanId);
     const path = canonicalPath(input);
+    if (path === defaultSpaceMemoryPath(this.db, this.home, humanId, slug)) return;
+    const root = this.ensureAccount(humanId);
     if (!within(root, path)) this.refuse('grant-foreign-space', path);
     if (path !== accountMemoryPath(this.home, humanId, slug))
       this.refuse('grant-protected-path', path, 'spaces/' + humanId);
@@ -355,10 +381,13 @@ export class WorkspaceSpaces {
     if (existsSync(root) && statSync(root).isDirectory())
       for (const name of readdirSync(root)) visit(join(root, name));
   }
-  private pathCheck(botSlug: string, grant: boolean): (input: string) => void {
+  assertGrantForHuman(human: HumanContext, path: string): void {
+    this.pathCheck('', true, human.humanId)(path);
+  }
+  private pathCheck(botSlug: string, grant: boolean, humanId?: string): (input: string) => void {
     const bots = this.memories();
     const bot = bots.find((entry) => entry.slug === botSlug);
-    const owner = bot?.owner ?? this.roles.ownerContext().humanId;
+    const owner = humanId ?? bot?.owner ?? this.roles.ownerContext().humanId;
     const hostOwner = this.roles.isOwner(humanContext(owner));
     const rows = this.rows();
     const roleIds = this.roleIds(owner);
@@ -369,7 +398,7 @@ export class WorkspaceSpaces {
       } catch {
         return this.refuse('grant-protected-path', resolve(input));
       }
-      if (!bot) this.refuse('grant-protected-path', path);
+      if ((!bot && !humanId) || bot?.unavailable) this.refuse('grant-protected-path', path);
       for (const memory of bots)
         if ((grant || memory.slug !== botSlug) && within(memory.memory, path))
           this.refuse(
@@ -377,11 +406,52 @@ export class WorkspaceSpaces {
             path,
             rows.find((row) => within(this.path(row.space_id), memory.memory))?.space_id,
           );
+      if (grant) {
+        for (const row of rows)
+          if (
+            row.kind === 'account' &&
+            row.owner_human_id !== owner &&
+            (within(this.path(row.space_id), path) || within(path, this.path(row.space_id)))
+          )
+            this.refuse('grant-foreign-space', path, row.space_id);
+        const managed = rows.some((row) => within(this.path(row.space_id), path));
+        if ((!managed && within(this.home, path)) || within(path, this.home))
+          this.refuse('grant-protected-path', path);
+        for (const memory of bots)
+          if (within(path, memory.memory)) this.refuse('grant-protected-path', path);
+      }
       if (hostOwner) {
+        for (const row of rows)
+          if (
+            row.kind === 'account' &&
+            row.owner_human_id !== owner &&
+            within(this.path(row.space_id), path)
+          )
+            this.refuse('grant-foreign-space', path, row.space_id);
+        const ownMemory = !grant && bot !== undefined && within(bot.memory, path);
+        const managed = rows.some((row) => within(this.path(row.space_id), path));
+        if (!ownMemory && !managed && within(this.home, path))
+          this.refuse('grant-protected-path', path);
         if (existsSync(path) && statSync(path).isFile() && statSync(path).nlink > 1) {
           const identity = statSync(path);
+          for (const row of rows)
+            if (
+              row.kind === 'account' &&
+              row.owner_human_id !== owner &&
+              containsFile(this.path(row.space_id), identity, path)
+            )
+              this.refuse('grant-foreign-space', path, row.space_id);
+          if (
+            readdirSync(this.home).some(
+              (name) =>
+                name !== 'spaces' &&
+                name !== 'shared' &&
+                containsFile(join(this.home, name), identity, path),
+            )
+          )
+            this.refuse('grant-protected-path', path);
           for (const memory of bots)
-            if ((grant || memory.slug !== botSlug) && containsFile(memory.memory, identity))
+            if ((grant || memory.slug !== botSlug) && containsFile(memory.memory, identity, path))
               this.refuse('grant-protected-path', path);
         }
         return;
@@ -430,7 +500,7 @@ export class WorkspaceSpaces {
         );
       if (existsSync(path) && statSync(path).isFile() && statSync(path).nlink > 1) {
         const identity = statSync(path);
-        const scan = (root: string): boolean => containsFile(root, identity);
+        const scan = (root: string): boolean => containsFile(root, identity, path);
         for (const row of rows) {
           if (
             row.kind === 'account' &&

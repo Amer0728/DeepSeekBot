@@ -8341,9 +8341,16 @@ function buildBridgeMethods(
           : [];
         const native =
           !deps.team || isHostOwner()
-            ? (deps.grants?.availableWorkspaces() ?? []).filter(
-                ({ id }) => !deps.team || !/^(spaces|shared)\//u.test(id),
-              )
+            ? (deps.grants?.availableWorkspaces() ?? []).filter(({ id, path }) => {
+                if (!deps.team) return true;
+                if (/^(spaces|shared)\//u.test(id)) return false;
+                try {
+                  deps.team.spaces.assertGrantForHuman(human, path);
+                  return true;
+                } catch {
+                  return false;
+                }
+              })
             : [];
         return {
           ok: true,

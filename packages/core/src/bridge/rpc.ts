@@ -404,6 +404,9 @@ export class BotharnessBridgeService extends TypertRemoteService {
     this.invocationMethods = methods;
   }
 
+  spaceAudienceDirectory() {
+    return unwrapAsync(this.methods.spaceAudienceDirectory({}));
+  }
   spaces() {
     return unwrapAsync(this.methods.spaces({}));
   }
@@ -3102,6 +3105,7 @@ export class BotharnessBridgeService extends TypertRemoteService {
 
 markRemoteMethods(BotharnessBridgeService.prototype, [
   'spaces',
+  'spaceAudienceDirectory',
   'spaceCreate',
   'spaceUpdate',
   'spaceDelete',

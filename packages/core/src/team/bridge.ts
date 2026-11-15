@@ -38,6 +38,8 @@ export function createTeamBridge(human: HumanContext, team: TeamService | undefi
     }
   };
   return {
+    spaceAudienceDirectory: (_payload: unknown) =>
+      call((service) => service.spaceAudienceDirectory(human)),
     spaces: (_payload: unknown) => call((service) => service.spaces.list(human)),
     spaceCreate: (payload: unknown) =>
       call((service) => {

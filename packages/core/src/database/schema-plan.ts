@@ -3565,7 +3565,7 @@ const WORKSPACE_SPACES_MIGRATION: SchemaMigration = {
         SELECT b.slug FROM persona_bots b
         WHERE b.owner_human_id <> (SELECT owner_human_id FROM team_settings WHERE singleton = 1)
           AND NOT EXISTS (SELECT 1 FROM persona_bot_deletions d WHERE d.slug = b.slug
-          AND json_extract(d.body, '$.memory') = 'erased');
+          AND (json_extract(d.body, '$.memory') = 'erased' OR json_extract(d.body, '$.eraseMemory') = 1));
     `);
   },
 };

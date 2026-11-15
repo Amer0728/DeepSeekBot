@@ -40,7 +40,7 @@ export const TEAM_COMMANDS = [
   {
     command: 'spaces',
     description:
-      'list | create --name --audience | update <spaceId> [--name] [--audience] | delete <spaceId> --confirm',
+      'list | audience-directory | create --name --audience | update <spaceId> [--name] [--audience] | delete <spaceId> --confirm',
   },
   {
     command: 'roles',
@@ -173,6 +173,8 @@ export async function runTeamCommand(
       return parsed.data;
     };
     if (action === 'list' && rest.length === 1) return rpc('spaces', {});
+    if (action === 'audience-directory' && rest.length === 1)
+      return rpc('spaceAudienceDirectory', {});
     if (action === 'create' && rest.length === 1 && values.name && values.audience)
       return rpc('spaceCreate', { name: values.name, audience: audience() });
     if (

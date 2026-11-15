@@ -14,7 +14,11 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
-import { attachOperationalModule, type OperationalDatabaseOwner } from '../database/owner.js';
+import {
+  OperationalDatabaseError,
+  attachOperationalModule,
+  type OperationalDatabaseOwner,
+} from '../database/owner.js';
 import { deriveAvatarAppearance } from './avatar-snapshot.js';
 import {
   isPersonaBotAvatar,
@@ -44,7 +48,7 @@ import {
   readSharedPrimaryColor,
 } from './shared-presentation.js';
 import { isValidSlug } from './slug.js';
-import { recordMemoryOwnership, transferMemoryOwnership } from './deletion.js';
+import { memoryOwnership, recordMemoryOwnership, transferMemoryOwnership } from './deletion.js';
 import {
   memoryRepositoryMatchesCommit,
   type HttpsFallback,
@@ -350,7 +354,7 @@ export function createPersonaBotRegistry(options: PersonaBotRegistryOptions): Pe
       return row === undefined ? undefined : decode(String(row['body']), slug);
     });
   };
-  const write = (record: PersonaBotRecord, creating = false): void => {
+  const write = (record: PersonaBotRecord, creating = false, ownershipPath?: string): void => {
     const slug = record.slug;
     if (!isPersonaBotRecord(record, slug))
       throw new Error(`Refusing to persist an invalid PersonaBot Registry record: ${slug}`);
@@ -364,6 +368,17 @@ export function createPersonaBotRegistry(options: PersonaBotRegistryOptions): Pe
             JSON.stringify(recordSnapshot(record)),
             record.ownerHumanId ?? 'local-human',
           );
+        if (ownershipPath) {
+          let proof: ReturnType<typeof memoryOwnership>;
+          try {
+            proof = memoryOwnership(ownershipPath);
+          } catch {
+            proof = { path: '', device: -1, inode: -1 };
+          }
+          database
+            .prepare('INSERT OR IGNORE INTO persona_bot_memory_ownership VALUES (?, ?)')
+            .run(record.slug, JSON.stringify(proof));
+        }
         if (creating) options.onCreated?.(record, database);
       },
       ['bot-registry', ...(creating ? (options.creationTopics ?? []) : [])],
@@ -510,6 +525,7 @@ export function createPersonaBotRegistry(options: PersonaBotRegistryOptions): Pe
       if (existsSync(memoryDir)) return { ok: false, reason: 'invalid-memory-dir' };
     }
     const chosenLocation = memoryLocation !== undefined && memoryLocation.length > 0;
+    const managedDefault = !explicitMemoryDir && !chosenLocation;
 
     const displayName = input.displayName.trim();
     const roles = normalizeRoles(input.roles);
@@ -575,13 +591,15 @@ export function createPersonaBotRegistry(options: PersonaBotRegistryOptions): Pe
       };
     }
     try {
-      write(record, true);
+      write(record, true, newMemoryDirectory || managedDefault ? targetMemoryDir : undefined);
     } catch (error) {
-      if (newMemoryDirectory) rmSync(targetMemoryDir, { recursive: true, force: true });
+      if (
+        newMemoryDirectory &&
+        !(error instanceof OperationalDatabaseError && error.code === 'post-commit-interrupted')
+      )
+        rmSync(targetMemoryDir, { recursive: true, force: true });
       throw error;
     }
-    if (newMemoryDirectory || memoryDir === undefined)
-      recordMemoryOwnership(port, record.slug, targetMemoryDir);
     if (sync) syncDescriptor(record);
     return { ok: true, record };
   };

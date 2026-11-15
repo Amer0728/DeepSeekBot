@@ -142,6 +142,7 @@ describe('Team CLI', () => {
   });
   it.each([
     { args: ['spaces', 'list'], method: 'spaces', payload: {} },
+    { args: ['spaces', 'audience-directory'], method: 'spaceAudienceDirectory', payload: {} },
     {
       args: ['spaces', 'create', '--name', 'Finance', '--audience', 'roles:admin,finance'],
       method: 'spaceCreate',

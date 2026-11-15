@@ -3,9 +3,15 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import type { OperationalDatabaseModulePort } from '../database/owner.js';
 import { memoryOwnership } from '../bots/deletion.js';
+import {
+  memoryProofSchema,
+  relocationProofSchema,
+  prepareMemoryCopy,
+  retireMemoryCopy,
+} from './space-memory-copy.js';
 import { canonicalPath } from './space-paths.js';
 
-const proofSchema = z.object({ path: z.string(), device: z.number(), inode: z.number() });
+const proofSchema = memoryProofSchema;
 const moveSchema = z.object({
   slug: z.string(),
   source: z.string().nullable(),
@@ -38,8 +44,9 @@ export function defaultSpaceMemoryPath(
       ),
     );
   const account = accountMemoryPath(home, humanId, slug);
-  if (humanId !== owner.owner_human_id || owner.existing === account) return account;
-  return join(home, 'botharness', 'bots', slug, 'memory');
+  const legacy = join(home, 'botharness', 'bots', slug, 'memory');
+  if (owner.existing === account || owner.existing === legacy) return owner.existing;
+  return humanId === owner.owner_human_id ? legacy : account;
 }
 
 export function relocateSpaceMemories(db: OperationalDatabaseModulePort, home: string): void {
@@ -74,6 +81,14 @@ export function relocateSpaceMemories(db: OperationalDatabaseModulePort, home: s
       ['workspace-spaces'],
     );
   }
+  db.transaction(
+    (connection) =>
+      connection
+        .prepare(`DELETE FROM workspace_memory_moves WHERE slug IN
+    (SELECT slug FROM persona_bot_deletions WHERE json_extract(body, '$.eraseMemory') = 1)`)
+        .run(),
+    ['workspace-spaces'],
+  );
   const moves = z
     .array(moveSchema)
     .parse(
@@ -126,17 +141,28 @@ export function relocateSpaceMemories(db: OperationalDatabaseModulePort, home: s
         ['workspace-spaces'],
       );
     }
-    if (proofJson !== null) {
-      const proof = proofSchema.parse(JSON.parse(proofJson));
-      const current = memoryOwnership(existsSync(source) ? source : target);
-      if (current.device !== proof.device || current.inode !== proof.inode)
-        throw new Error('space-memory-ownership-invalid');
-      if (existsSync(source) && source !== target) {
-        if (existsSync(target)) throw new Error('space-memory-target-exists');
-        mkdirSync(dirname(target), { recursive: true });
-        if (realpathSync(dirname(target)) !== dirname(target))
-          throw new Error('space-memory-target-unsafe');
-        renameSync(source, target);
+    let relocationProof =
+      proofJson === null ? undefined : relocationProofSchema.parse(JSON.parse(proofJson));
+    if (relocationProof) {
+      if (relocationProof.copy)
+        relocationProof = prepareMemoryCopy(db, move.slug, source, target, relocationProof);
+      else {
+        const current = memoryOwnership(existsSync(source) ? source : target);
+        if (current.device !== relocationProof.device || current.inode !== relocationProof.inode)
+          throw new Error('space-memory-ownership-invalid');
+        if (existsSync(source) && source !== target) {
+          if (existsSync(target)) throw new Error('space-memory-target-exists');
+          mkdirSync(dirname(target), { recursive: true });
+          if (realpathSync(dirname(target)) !== dirname(target))
+            throw new Error('space-memory-target-unsafe');
+          try {
+            renameSync(source, target);
+          } catch (error) {
+            if (!(error instanceof Error) || !('code' in error) || error.code !== 'EXDEV')
+              throw error;
+            relocationProof = prepareMemoryCopy(db, move.slug, source, target, relocationProof);
+          }
+        }
       }
     } else if (existsSync(target)) throw new Error('space-memory-target-exists');
     const finalProof = proofJson === null ? undefined : memoryOwnership(target);
@@ -161,9 +187,11 @@ export function relocateSpaceMemories(db: OperationalDatabaseModulePort, home: s
               "UPDATE persona_bot_deletions SET body = json_set(body, '$.ownership', json(?)) WHERE slug = ?",
             )
             .run(JSON.stringify(finalProof), move.slug);
-        connection.prepare('DELETE FROM workspace_memory_moves WHERE slug = ?').run(move.slug);
+        if (!relocationProof?.copy)
+          connection.prepare('DELETE FROM workspace_memory_moves WHERE slug = ?').run(move.slug);
       },
       ['workspace-spaces', 'bot-registry'],
     );
+    if (relocationProof?.copy) retireMemoryCopy(db, move.slug, source, relocationProof);
   }
 }

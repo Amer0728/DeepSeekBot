@@ -1,5 +1,5 @@
-import { currentRoots } from './workspaces/grant-native-tools.js';
-import { recoverSpaceTransfers } from './workspaces/space-lifecycle.js';
+import { installNativeSearchResultGuard, currentRoots } from './workspaces/grant-native-tools.js';
+import { relocateTobWorkspaces, recoverSpaceTransfers } from './workspaces/space-lifecycle.js';
 import { WorkspaceSpaces } from './workspaces/spaces.js';
 import { defaultSpaceMemoryPath, relocateSpaceMemories } from './workspaces/space-memory.js';
 import { questionAnswerReceipts } from './channels/question-answer-receipts.js';
@@ -742,6 +742,11 @@ function initializeCore(
       recoverSpaceTransfers(attachOperationalModule(operationalDatabase, 'workspace-spaces'));
     if (operationalDatabase.mode === 'ready')
       relocateSpaceMemories(
+        attachOperationalModule(operationalDatabase, 'workspace-spaces'),
+        realpathSync(dshHome),
+      );
+    if (operationalDatabase.mode === 'ready')
+      relocateTobWorkspaces(
         attachOperationalModule(operationalDatabase, 'workspace-spaces'),
         realpathSync(dshHome),
       );
@@ -2960,6 +2965,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     { global: true },
   );
 
+  installNativeSearchResultGuard(ctx, core, (session) => sessionHasFullAccess(core, session.id));
   ctx.tools.guard(({ agent, name, arguments: args, token }) => {
     const approvalGuard = approvedCalls.get(token);
     if (approvalGuard && !approvalGuard(name, args))

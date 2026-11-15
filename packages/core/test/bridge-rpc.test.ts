@@ -690,6 +690,7 @@ describe('bridge typert service', () => {
 
     expect(remoteMethods(service).map((marker) => marker.exportName ?? marker.method)).toEqual([
       'spaces',
+      'spaceAudienceDirectory',
       'spaceCreate',
       'spaceUpdate',
       'spaceDelete',

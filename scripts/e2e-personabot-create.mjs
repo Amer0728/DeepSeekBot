@@ -138,6 +138,41 @@ function creationCli(instance, command, input) {
   }
 }
 
+function audienceDirectoryCli(instance, as) {
+  const login = new URL(instance.url);
+  const token = login.searchParams.get('token');
+  const result = spawnSync(
+    process.execPath,
+    [
+      join(root, 'packages/deepseekbot/dist/deepseekbot.mjs'),
+      '--host',
+      login.origin,
+      ...(as ? ['--as', as] : []),
+      'spaces',
+      'audience-directory',
+    ],
+    {
+      cwd: root,
+      env: { ...env, DEEPSEEKBOT_HOST_TOKEN: token },
+      encoding: 'utf8',
+      timeout: 30_000,
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+    },
+  );
+  if (result.error) throw new Error('Audience directory CLI did not settle');
+  return { status: result.status, value: JSON.parse(result.stdout) };
+}
+function minimalAudienceDirectory(value) {
+  return (
+    Array.isArray(value?.roles) &&
+    Array.isArray(value?.members) &&
+    Object.keys(value).sort().join(',') === 'members,roles' &&
+    value.roles.every((role) => Object.keys(role).sort().join(',') === 'name,roleId') &&
+    value.members.every((member) => Object.keys(member).sort().join(',') === 'displayName,humanId')
+  );
+}
+
 function gitPreviewCli(instance, gitUrl) {
   const login = new URL(instance.url);
   const token = login.searchParams.get('token');
@@ -291,6 +326,16 @@ try {
   try {
     const ownerTob = await seed.tob.ensure(owner);
     const memberHuman = humanContext(member.member.humanId);
+    await seed.team.changePassword(
+      memberHuman,
+      member.initialPassword,
+      'smoke-' + randomUUID(),
+      false,
+    );
+    const manager = seed.team.roles.create(owner, 'Space audience manager', [
+      'workspaces.manageShared',
+    ]).role;
+    seed.team.roles.set(owner, memberHuman.humanId, [manager.roleId]);
     const memberTob = await seed.tob.ensure(memberHuman);
     const custom = seed.registry.get(customCli.bot.id);
     const privateMember = seed.registry.create({
@@ -357,6 +402,26 @@ try {
   }
   current = launch(port, false);
   pid = current.pid;
+  const ownerDirectory = audienceDirectoryCli(current);
+  const memberDirectory = audienceDirectoryCli(current, 'memory-member');
+  if (
+    ownerDirectory.status !== 0 ||
+    memberDirectory.status !== 0 ||
+    !minimalAudienceDirectory(ownerDirectory.value) ||
+    !minimalAudienceDirectory(memberDirectory.value)
+  )
+    throw new Error('Audience directory CLI returned an invalid minimal directory');
+  await rpc(port, 'botharness', 'memberRolesSet', {
+    humanId: member.member.humanId,
+    roleIds: ['member'],
+  });
+  const refusedDirectory = audienceDirectoryCli(current, 'memory-member');
+  if (
+    refusedDirectory.status === 0 ||
+    refusedDirectory.value?.error?.code !== 'permission-required' ||
+    refusedDirectory.value.error.details?.permission !== 'workspaces.manageShared'
+  )
+    throw new Error('Audience directory CLI bypassed member permission checks');
   for (const [step, enabled] of [false, true, false, true].entries()) {
     await rpc(port, 'botharness', 'teamModeSet', { enabled });
     stop(pid);
@@ -580,6 +645,7 @@ try {
       result: 'pass',
       workspaceCreated: true,
       ownerNativeGrantsInBothModes: true,
+      spaceAudienceDirectoryCliParity: true,
       memoryStableAcrossTeamSwitchesAndRestarts: true,
       personaBotCreated: true,
       persistedAfterRestart: true,

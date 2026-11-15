@@ -13,7 +13,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { z } from 'zod';
 import type { PeerScope, Principal } from '@deepseek-ai/dsh-typert-protocol';
-import type { OperationalDatabaseModulePort } from '../database/owner.js';
+import { OperationalDatabaseError, type OperationalDatabaseModulePort } from '../database/owner.js';
 import { humanContext, type HumanContext } from '../humans/context.js';
 import type { ChannelStore } from '../channels/store.js';
 import {
@@ -151,6 +151,27 @@ export class TeamService {
   }
   isOwner(human: HumanContext): boolean {
     return this.roles.isOwner(human);
+  }
+  spaceAudienceDirectory(human: HumanContext) {
+    this.roles.require(human, 'workspaces.manageShared');
+    return this.db.read((connection) => ({
+      roles: z
+        .array(z.object({ roleId: z.string(), name: z.string() }).strict())
+        .parse(
+          connection
+            .prepare('SELECT role_id AS roleId, name FROM host_roles ORDER BY role_id')
+            .all(),
+        ),
+      members: z
+        .array(z.object({ humanId: z.string(), displayName: z.string() }).strict())
+        .parse(
+          connection
+            .prepare(
+              'SELECT human_id AS humanId, display_name AS displayName FROM humans ORDER BY human_id',
+            )
+            .all(),
+        ),
+    }));
   }
   private readonly passwordCaller = new AsyncLocalStorage<{
     principal: MemberPrincipal;
@@ -986,7 +1007,13 @@ export class TeamService {
         ],
       );
     } catch (error) {
-      spaceTransfer?.rollback();
+      if (error instanceof OperationalDatabaseError && error.code === 'post-commit-interrupted') {
+        await Promise.allSettled([
+          Promise.resolve().then(() => this.pairing?.closeStreams?.()),
+          this.disposePeers(),
+          Promise.resolve().then(() => this.stopBots?.(preview.bots.map((bot) => bot.slug))),
+        ]);
+      } else spaceTransfer?.rollback();
       throw error;
     }
     this.accessChanged(true);

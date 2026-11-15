@@ -189,6 +189,7 @@ describe('plugin entry', () => {
         .prepare("INSERT INTO member_credentials VALUES ('bob', 'bob', '{}', '[]', 0)")
         .run();
     });
+    core.team.spaces.ensureAccount('bob');
     expect(
       core.registry.create({
         slug: 'bob-private',
@@ -786,6 +787,7 @@ describe('plugin entry', () => {
       remoteMethods(bridge as object).map((marker) => marker.exportName ?? marker.method),
     ).toEqual([
       'spaces',
+      'spaceAudienceDirectory',
       'spaceCreate',
       'spaceUpdate',
       'spaceDelete',
