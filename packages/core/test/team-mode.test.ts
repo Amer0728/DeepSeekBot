@@ -1068,6 +1068,8 @@ describe('member confidentiality', { timeout: 60_000 }, () => {
             code: 'permission-required',
             details: { permission: 'workspaces.manageShared' },
           });
+        else if (method === 'voiceProviders')
+          expect(error).toMatchObject({ code: 'voice-unavailable' });
         else if (method === 'usageByMember')
           expect(error).toMatchObject({
             code: 'permission-required',
@@ -1235,6 +1237,43 @@ async function memberHttp(
 }
 
 describe('member HTTP carrier', { timeout: 60_000 }, () => {
+  it('routes only Memory images through the authenticated member Gateway', async () => {
+    const f = await enabledFixture();
+    await f.team.changePassword(f.human, f.initialPassword, 'member-password-1');
+    const http = await memberHttp(f);
+    const cookie = (await http.signIn('bob', 'member-password-1')).headers.get('set-cookie') ?? '';
+    const bytes = Buffer.from('bounded-image');
+    const invoke = vi
+      .spyOn(f.gateway, 'invoke')
+      .mockResolvedValue({ mime: 'image/png', dataBase64: bytes.toString('base64') });
+    const imageUrl = `${http.origin}${TEAM_PATH}/api/botharness/memory/image?slug=own&path=image.png&source=worktree&revision=${'a'.repeat(64)}`;
+    const response = await fetch(imageUrl, { headers: { cookie } });
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+    expect(response.headers.get('content-security-policy')).toContain('sandbox');
+    expect(invoke).toHaveBeenCalledWith(
+      expect.objectContaining({
+        namespace: 'botharness',
+        method: 'memoryImage',
+        args: { slug: 'own', path: 'image.png', source: 'worktree', revision: 'a'.repeat(64) },
+        peer: expect.objectContaining({
+          principal: expect.objectContaining({ humanId: f.human.humanId }),
+        }),
+      }),
+    );
+    invoke.mockRejectedValue(new TeamError('bot-not-found'));
+    const refused = await fetch(imageUrl, { headers: { cookie } });
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ code: 'bot-not-found' });
+    invoke.mockClear();
+    expect((await fetch(imageUrl)).status).toBe(401);
+    const native = await fetch(`${http.origin}${TEAM_PATH}/api/dsh-session/read`, {
+      headers: { cookie },
+    });
+    expect(native.status).toBe(403);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it.each(['member', 'admin'])(
     'never exposes Host relationships to an authenticated %s carrier',
     async (role) => {
@@ -1823,12 +1862,14 @@ describe('M3 Host Roles and devices', { timeout: 60_000 }, () => {
       'privateAccounts',
       'privateMcpServerRemove',
       'privateMcpServerEnable',
-      'voiceProviders',
       'voiceProviderAdd',
       'voiceProviderRemove',
       'voiceProviderTest',
     ];
     for (const peer of [f.bobLogin.peer, second.peer]) {
+      await expect(f.invoke('voiceProviders', {}, peer)).rejects.toMatchObject({
+        code: 'voice-unavailable',
+      });
       for (const method of sensitive)
         await expect(f.invoke(method, {}, peer), method).rejects.toMatchObject({
           code: 'remote-access/denied',
