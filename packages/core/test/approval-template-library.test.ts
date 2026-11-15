@@ -65,6 +65,28 @@ function fakeRegistry(records: Partial<PersonaBotRecord>[]) {
 }
 
 describe('Approval Template library', () => {
+  it('accepts structured guidance with Windows line endings', () => {
+    const parts = { alwaysAsk: ['Ask'], alwaysAllow: ['Read'], freeText: 'Supplement' };
+    expect(
+      decodeApprovalTemplateGuidance(
+        encodeApprovalTemplateGuidance(parts).replaceAll('\n', '\r\n'),
+      ),
+    ).toEqual(parts);
+  });
+  it.each([
+    '<!-- botharness:approval-guidance:v1 -->',
+    '<!-- botharness:approval-guidance:v1 -->\r\n{}',
+    '<!-- botharness:approval-guidance:v1 -->\r\n{broken',
+    '<!-- botharness:approval-guidance:v2 -->\n{}',
+  ])('refuses malformed marked guidance rather than legacy fallback: %j', (input) => {
+    expect(() => decodeApprovalTemplateGuidance(input)).toThrow();
+    const dir = tempDir();
+    const library = createApprovalTemplateLibrary(dir);
+    expect(library.create('invalid', input)).toEqual({ ok: false, reason: 'invalid-text' });
+    writeFileSync(join(dir, 'external.md'), input);
+    expect(library.get('external')).toBeUndefined();
+  });
+
   it('round-trips three-part guidance and preserves every byte of legacy Markdown on conversion', () => {
     const legacy = '# Legacy\r\n\r\n## Allow\r\n- Read.\r\n<!-- custom -->\r\n';
     const parts = decodeApprovalTemplateGuidance(legacy);
@@ -572,6 +594,20 @@ describe('deepseekbot approval-template', () => {
         () => false,
       ),
     ).toBe(true);
+  });
+
+  it.each([
+    ['--from', 'cautious', '--blank'],
+    ['--from', 'cautious', '--parts-file', 'missing-guidance.json'],
+    ['--from', 'cautious', '--blank', '--apply-to', 'ada'],
+    ['--from', 'cautious', '--parts-file', 'missing-guidance.json', '--apply-to', 'ada'],
+    ['--from', '   ', '--apply-to', 'ada'],
+  ])('refuses ambiguous or empty creation sources before save/apply: %j', async (...options) => {
+    const live = await host();
+    const result = await invoke(['approval-template', 'create', 'copy', ...options], live.url);
+    expect(result).toMatchObject({ json: { error: { code: 'usage' } } });
+    expect(result.code).not.toBe(0);
+    expect(live.calls).toEqual([]);
   });
 
   it('refuses bad usage before calling the Host', async () => {

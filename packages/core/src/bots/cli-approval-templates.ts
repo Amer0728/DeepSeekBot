@@ -158,15 +158,15 @@ export async function runApprovalTemplateCommand(
   };
   if (subcommand === 'create') {
     const from = values.from?.trim();
-    if (from !== undefined && (values.file !== undefined || values['text-stdin'] === true))
-      usage('approval-template create takes --from, or the text with --file or --text-stdin.');
-    if (
-      values.blank === true &&
-      (values.file !== undefined ||
-        values['parts-file'] !== undefined ||
-        values['text-stdin'] === true)
-    )
-      usage('--blank cannot take content input.');
+    const inputs = [
+      values.from !== undefined,
+      values.blank === true,
+      values['parts-file'] !== undefined,
+      values.file !== undefined,
+      values['text-stdin'] === true,
+    ];
+    if (inputs.filter(Boolean).length !== 1 || from === '')
+      usage('Choose one source: --from, --blank, --parts-file, --file or --text-stdin.');
     const text =
       from !== undefined
         ? undefined

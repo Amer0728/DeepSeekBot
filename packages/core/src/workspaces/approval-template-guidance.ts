@@ -4,7 +4,8 @@ export interface ApprovalTemplateGuidance {
   freeText: string;
 }
 
-const PREFIX = '<!-- botharness:approval-guidance:v1 -->\n';
+const MARKER = '<!-- botharness:approval-guidance:v1 -->';
+const PREFIX = MARKER + '\n';
 
 export function parseApprovalTemplateGuidance(
   value: unknown,
@@ -23,8 +24,13 @@ export function parseApprovalTemplateGuidance(
 }
 
 export function decodeApprovalTemplateGuidance(text: string): ApprovalTemplateGuidance {
-  if (!text.startsWith(PREFIX)) return { alwaysAsk: [], alwaysAllow: [], freeText: text };
-  const guidance = parseApprovalTemplateGuidance(JSON.parse(text.slice(PREFIX.length)));
+  if (!text.startsWith('<!-- botharness:approval-guidance:'))
+    return { alwaysAsk: [], alwaysAllow: [], freeText: text };
+  if (!text.startsWith(MARKER)) throw new Error('Invalid approval template guidance');
+  const afterMarker = text.slice(MARKER.length);
+  const newline = afterMarker.startsWith('\r\n') ? 2 : afterMarker.startsWith('\n') ? 1 : 0;
+  if (newline === 0) throw new Error('Invalid approval template guidance');
+  const guidance = parseApprovalTemplateGuidance(JSON.parse(afterMarker.slice(newline)));
   if (guidance === undefined) throw new Error('Invalid approval template guidance');
   return guidance;
 }
