@@ -69,11 +69,34 @@ const nativeAudit = async () => {
   const bytes = readFileSync(matches[0]);
   if (bytes.length > 16 * 1024 * 1024) throw new Error('Native audit exceeds capture bound');
   const counts = {};
-  for (const line of zstdDecompressSync(bytes).toString('utf8').split('\n').filter(Boolean)) {
-    const event = JSON.parse(line);
-    counts[event.type] = (counts[event.type] ?? 0) + 1;
+  let offset = 0,
+    outputBytes = 0,
+    frames = 0;
+  while (offset < bytes.length) {
+    const decoded = zstdDecompressSync(bytes.subarray(offset), {
+      info: true,
+      maxOutputLength: 16 * 1024 * 1024,
+    });
+    const consumed = decoded.engine.bytesWritten;
+    if (!Number.isSafeInteger(consumed) || consumed <= 0 || consumed > bytes.length - offset)
+      throw new Error('Native audit frame boundary unavailable');
+    offset += consumed;
+    outputBytes += decoded.buffer.length;
+    if (++frames > 100000 || outputBytes > 64 * 1024 * 1024)
+      throw new Error('Native audit exceeds decoded capture bound');
+    for (const line of decoded.buffer.toString('utf8').split('\n').filter(Boolean)) {
+      const event = JSON.parse(line);
+      counts[event.type] = (counts[event.type] ?? 0) + 1;
+    }
   }
-  return { sessionId: id, counts, sha256: hash(bytes) };
+  return {
+    sessionId: id,
+    counts,
+    frames,
+    compressedBytes: bytes.length,
+    outputBytes,
+    sha256: hash(bytes),
+  };
 };
 const auditBefore = await nativeAudit();
 const samples = [],
