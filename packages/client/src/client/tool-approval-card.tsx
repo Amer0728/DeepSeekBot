@@ -10,7 +10,8 @@ import {
 import { errorMessage, type ToolApprovalExecutionState } from './bridge.js';
 import type { BridgeActions } from './actions.js';
 import type { BotHarnessTranslate } from './locale.js';
-import { store, type ChannelMessage } from './store.js';
+import type { ChannelMessage } from './store.js';
+import { useConversationStore } from './use-client-store.js';
 import { useMountedResource } from './mounted-resource.js';
 import { subscribeWorkspaceGrantChanges } from './workspace-grant-events.js';
 import type { CompanionRequestTarget } from './companion-requests.js';
@@ -47,6 +48,7 @@ export function ToolApprovalCard({
   t: BotHarnessTranslate;
   companionTarget?: (CompanionRequestTarget & { callId: string }) | undefined;
 }): ReactElement {
+  const store = useConversationStore();
   const request = message.toolApprovalRequest!;
   const secretCli = request.toolName === 'secret_cli';
   const canAlwaysAllow = request.allowAlways ?? false;
