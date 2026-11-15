@@ -152,7 +152,8 @@ for (let round = 0; round < rounds; round++) {
   } finally {
     if (id)
       try {
-        await run(['tob-cli', 'cancel', id]);
+        const cancelled = await run(['tob-cli', 'cancel', id]);
+        if (cancelled.code !== 0) failures.push('cancel-request-failed');
       } catch {
         failures.push('cancel-request-failed');
       }
