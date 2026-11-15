@@ -22,6 +22,8 @@ import { TeamService } from '../src/team/service.js';
 import { createTeamBridge } from '../src/team/bridge.js';
 import { memberPolicy } from '../src/team/policy.js';
 import { auditRecordSchema } from '../src/team/private-contract.js';
+import type { PrivateObject } from '../src/team/private-contract.js';
+import type { ChannelMessageAuthor } from '../src/channels/message-author.js';
 import { createTobHostCliOperations } from '../src/tob/cli-host-commands.js';
 import { runBotCreateCli } from '../src/bots/bot-create-cli.js';
 import { createTempRoot } from './helpers.js';
@@ -451,6 +453,84 @@ describe('M11 private-content audit', () => {
     expect(bots).not.toHaveBeenCalled();
     expect(channels).not.toHaveBeenCalled();
     expect(reads.mock.calls.every((call) => call[1]?.limit === 50)).toBe(true);
+  });
+
+  it('projects only current or retained Bot names on message and reply authors across private pages', async () => {
+    const f = await fixture();
+    const channel = f.core.channels.createGroup(alice, {
+      name: 'Private replies',
+      members: ['alice-bot'],
+    });
+    const botAuthor = { kind: 'bot', slug: 'alice-bot' } satisfies ChannelMessageAuthor;
+    const humanAuthor = {
+      kind: 'human',
+      humanId: alice.humanId,
+      displayName: 'alice',
+    } satisfies ChannelMessageAuthor;
+    const append = (id: string, author: ChannelMessageAuthor, replyTo?: string) =>
+      f.core.channels.appendMessage(alice, channel.id, {
+        id,
+        author,
+        body: id,
+        at: '2026-11-15T00:01:00Z',
+        ...(replyTo ? { replyTo } : {}),
+      });
+    await append('target', botAuthor);
+    await append('reply', humanAuthor, 'target');
+    for (let index = 0; index < 51; index++) await append('filler-' + index, botAuthor);
+    await append('new-reply', botAuthor, 'target');
+    f.core.registry.update('alice-bot', { displayName: 'Diary' });
+    const current = vi.spyOn(f.core.registry, 'get');
+    const historical = vi.spyOn(f.core.registry, 'getHistorical');
+    const target = { kind: 'channel', objectId: channel.id } satisfies Pick<
+      PrivateObject,
+      'kind' | 'objectId'
+    >;
+    const opened = f.team.privateAccess.open(owner, target);
+    expect(opened.messages).toHaveLength(50);
+    for (const message of opened.messages)
+      expect(message.author).toEqual({ ...botAuthor, displayName: 'Diary' });
+    expect(
+      opened.messages.find((message) => message.id === 'new-reply')?.replyToPreview?.author,
+    ).toEqual({ ...botAuthor, displayName: 'Diary' });
+    expect(current).toHaveBeenCalledOnce();
+    expect(historical).not.toHaveBeenCalled();
+    const before = opened.messages.at(-1)?.id;
+    if (!before) throw new Error('missing-page-cursor');
+    f.core.registry.update('alice-bot', { displayName: 'Renamed Diary' });
+    const page = () => f.team.privateAccess.page(owner, { viewId: opened.viewId, before });
+    const assertPage = () => {
+      const messages = page().messages;
+      expect(messages).toHaveLength(4);
+      expect(messages.find((message) => message.id === 'target')?.author).toEqual({
+        ...botAuthor,
+        displayName: 'Renamed Diary',
+      });
+      const reply = messages.find((message) => message.id === 'reply');
+      expect(reply?.author).toEqual(humanAuthor);
+      expect(reply?.replyToPreview?.author).toEqual({
+        ...botAuthor,
+        displayName: 'Renamed Diary',
+      });
+      expect(reply?.replyToPreview?.body).toBe('target');
+    };
+    current.mockClear();
+    assertPage();
+    expect(current).toHaveBeenCalledOnce();
+    const preview = f.core.deletions.preview('alice-bot');
+    await f.core.deletions.confirm('alice-bot', preview.token, false);
+    expect(f.core.registry.get('alice-bot')).toBeUndefined();
+    current.mockClear();
+    historical.mockClear();
+    assertPage();
+    expect(current).toHaveBeenCalledOnce();
+    expect(historical).toHaveBeenCalledOnce();
+    expect(
+      f.core.channels
+        .readMessages(channel.id, { before })
+        .find((message) => message.id === 'target')?.author,
+    ).toEqual(botAuthor);
+    expect(f.log().records).toHaveLength(1);
   });
   it.each([undefined, 'carol'])(
     'records exactly once per CLI open as %s and routes all commands with that identity',

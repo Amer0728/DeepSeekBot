@@ -7,6 +7,7 @@ import { z } from 'zod';
 import type { OperationalDatabaseModulePort } from '../database/owner.js';
 import type { PersonaBotRegistry } from '../bots/registry.js';
 import type { ChannelStore } from '../channels/store.js';
+import type { ChannelMessageAuthor } from '../channels/message-author.js';
 import type { HumanContext } from '../humans/context.js';
 import type { MemoryAcceptance } from '../memory/accepted.js';
 import type { TeamRoles } from './roles.js';
@@ -231,10 +232,38 @@ export class TeamPrivateContent {
   }
 
   private messages(object: PrivateObject, before?: string) {
-    return this.channels.readMessages(
-      object.kind === 'bot' ? `dm-${object.objectId}` : object.objectId,
-      { limit: PAGE_SIZE, ...(before === undefined ? {} : { before }) },
-    );
+    const names = new Map<string, string | undefined>();
+    const author = (value: ChannelMessageAuthor): ChannelMessageAuthor => {
+      if (value.kind !== 'bot') return value;
+      if (!names.has(value.slug)) {
+        const bot =
+          this.provider?.registry.get(value.slug) ??
+          this.provider?.registry.getHistorical(value.slug);
+        names.set(value.slug, bot?.displayName || undefined);
+      }
+      return {
+        kind: 'bot',
+        slug: value.slug,
+        displayName: names.get(value.slug) ?? value.displayName ?? value.slug,
+      };
+    };
+    return this.channels
+      .readMessages(object.kind === 'bot' ? `dm-${object.objectId}` : object.objectId, {
+        limit: PAGE_SIZE,
+        ...(before === undefined ? {} : { before }),
+      })
+      .map((message) => ({
+        ...message,
+        author: author(message.author),
+        ...(message.replyToPreview
+          ? {
+              replyToPreview: {
+                ...message.replyToPreview,
+                author: author(message.replyToPreview.author),
+              },
+            }
+          : {}),
+      }));
   }
 
   open(human: HumanContext, payload: unknown) {
