@@ -3,6 +3,8 @@ import { list, record, unwrap } from './team-bridge.js';
 
 export const PRIVATE_VIEW = 'privateContent.view';
 export const AUDIT_VIEW = 'audit.view';
+export const AUDIT_PAGE_SIZE = 50;
+export const PRIVATE_PAGE_SIZE = 50;
 
 export type PrivateKind = 'bot' | 'channel' | 'dm' | 'bot-dm';
 const KINDS: readonly PrivateKind[] = ['bot', 'channel', 'dm', 'bot-dm'];
@@ -11,6 +13,7 @@ export interface PrivateObject {
   readonly objectId: string;
   readonly kind: PrivateKind;
   readonly name: string;
+  readonly ownerNames: readonly string[];
 }
 
 export interface PrivateMessage {
@@ -44,7 +47,12 @@ export function parsePrivateObject(value: unknown): PrivateObject | undefined {
   const kind = row?.['kind'];
   const name = text(row?.['name']);
   return objectId !== undefined && KINDS.includes(kind as PrivateKind)
-    ? { objectId, kind: kind as PrivateKind, name: name ?? objectId }
+    ? {
+        objectId,
+        kind: kind as PrivateKind,
+        name: name ?? objectId,
+        ownerNames: list(row?.['ownerNames'], text),
+      }
     : undefined;
 }
 
@@ -109,10 +117,22 @@ export function auditActionKey(action: string): AuditActionKey {
 
 export async function loadPrivateObjects(
   call: BridgeCall,
-  humanId: string,
+  humanId: string | undefined,
   signal?: AbortSignal,
 ): Promise<PrivateObject[]> {
-  return list(await unwrap(call, 'privateObjects', { humanId }, signal), parsePrivateObject);
+  return list(
+    await unwrap(call, 'privateObjects', humanId === undefined ? {} : { humanId }, signal),
+    parsePrivateObject,
+  );
+}
+
+export async function loadPrivatePage(
+  call: BridgeCall,
+  viewId: string,
+  before: string,
+): Promise<PrivateMessage[]> {
+  const value = record(await unwrap(call, 'privateContentPage', { viewId, before }));
+  return list(value?.['messages'], parsePrivateMessage);
 }
 
 export async function openPrivateContent(
@@ -132,10 +152,28 @@ export async function openPrivateContent(
   return { viewId, messages: list(value?.['messages'], parsePrivateMessage) };
 }
 
-export async function loadAuditLog(call: BridgeCall, signal?: AbortSignal): Promise<AuditRecord[]> {
-  const value = await unwrap(call, 'auditLog', { limit: 50 }, signal);
+export interface AuditPage {
+  readonly records: readonly AuditRecord[];
+  readonly next?: string;
+}
+
+export async function loadAuditLog(
+  call: BridgeCall,
+  after: string | undefined,
+  signal?: AbortSignal,
+): Promise<AuditPage> {
+  const value = await unwrap(
+    call,
+    'auditLog',
+    { limit: AUDIT_PAGE_SIZE, ...(after === undefined ? {} : { after }) },
+    signal,
+  );
   const page = record(value);
-  return list(page?.['records'] ?? page?.['items'] ?? value, parseAuditRecord);
+  const next = text(page?.['next']);
+  return {
+    records: list(page?.['records'] ?? page?.['items'] ?? value, parseAuditRecord),
+    ...(next === undefined ? {} : { next }),
+  };
 }
 
 export async function verifyAudit(call: BridgeCall): Promise<boolean> {

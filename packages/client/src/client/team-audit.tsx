@@ -16,9 +16,12 @@ import {
   auditActionKey,
   loadAuditLog,
   loadPrivateObjects,
+  loadPrivatePage,
   openPrivateContent,
+  PRIVATE_PAGE_SIZE,
   verifyAudit,
   type AuditRecord,
+  type PrivateMessage,
   type PrivateObject,
   type PrivateView,
 } from './team-audit-bridge.js';
@@ -76,13 +79,17 @@ export function AuditLogSection({
   t: BotHarnessTranslate;
 }): ReactElement {
   const [rows, setRows] = useState<readonly AuditRecord[]>();
+  const [next, setNext] = useState<string>();
+  const [loadingMore, setLoadingMore] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [verified, setVerified] = useState<boolean>();
+  const [verified, setVerified] = useState<'intact' | 'broken' | 'failed'>();
   const mount = useMountedResource<HTMLDivElement>(() => {
     const controller = new AbortController();
-    loadAuditLog(call, controller.signal)
-      .then((next) => {
-        if (!controller.signal.aborted) setRows(next);
+    loadAuditLog(call, undefined, controller.signal)
+      .then((page) => {
+        if (controller.signal.aborted) return;
+        setRows(page.records);
+        setNext(page.next);
       })
       .catch(() => {
         if (!controller.signal.aborted) setFailed(true);
@@ -94,16 +101,23 @@ export function AuditLogSection({
       <div ref={mount}>
         <SettingsRow
           title={t('team.audit.integrity')}
-          description={
+          description={t(
             verified === undefined
-              ? t('team.audit.integrityHint')
-              : t(verified ? 'team.audit.intact' : 'team.audit.broken')
-          }
+              ? 'team.audit.integrityHint'
+              : verified === 'failed'
+                ? 'team.audit.verifyFailed'
+                : `team.audit.${verified}`,
+          )}
           data={{ 'data-team-row': 'audit-verify' }}
           control={
             <Button
               variant="outline"
-              onClick={() => void verifyAudit(call).then(setVerified, () => setVerified(false))}
+              onClick={() =>
+                void verifyAudit(call).then(
+                  (ok) => setVerified(ok ? 'intact' : 'broken'),
+                  () => setVerified('failed'),
+                )
+              }
             >
               {t('team.audit.verify')}
             </Button>
@@ -138,7 +152,53 @@ export function AuditLogSection({
             );
           })}
         </div>
+        {next === undefined ? null : (
+          <div>
+            <Button
+              variant="outline"
+              disabled={loadingMore}
+              onClick={() => {
+                setLoadingMore(true);
+                setFailed(false);
+                loadAuditLog(call, next)
+                  .then((page) => {
+                    setRows((current) => [...(current ?? []), ...page.records]);
+                    setNext(page.next);
+                  })
+                  .catch(() => setFailed(true))
+                  .finally(() => setLoadingMore(false));
+              }}
+            >
+              {t('team.audit.more')}
+            </Button>
+          </div>
+        )}
       </div>
+    </SettingsSection>
+  );
+}
+
+export function PrivateContentSection({
+  call,
+  t,
+}: {
+  call: BridgeCall;
+  t: BotHarnessTranslate;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  return (
+    <SettingsSection title={t('team.private.title')}>
+      <SettingsRow
+        title={t('team.private.open')}
+        description={t('team.private.listBody')}
+        data={{ 'data-team-row': 'private-content' }}
+        control={
+          <Button variant="outline" onClick={() => setOpen(true)}>
+            {t('team.private.view')}
+          </Button>
+        }
+      />
+      {open ? <PrivateContentDialog call={call} t={t} onClose={() => setOpen(false)} /> : null}
     </SettingsSection>
   );
 }
@@ -171,7 +231,13 @@ export function PrivateContentEntry({
 type Step =
   | { kind: 'list' }
   | { kind: 'confirm'; object: PrivateObject }
-  | { kind: 'view'; object: PrivateObject; view: PrivateView };
+  | {
+      kind: 'view';
+      object: PrivateObject;
+      view: PrivateView;
+      messages: readonly PrivateMessage[];
+      more: boolean;
+    };
 
 function PrivateContentDialog({
   call,
@@ -181,9 +247,10 @@ function PrivateContentDialog({
 }: {
   call: BridgeCall;
   t: BotHarnessTranslate;
-  member: TeamMember;
+  member?: TeamMember;
   onClose(): void;
 }): ReactElement {
+  const humanId = member?.humanId;
   const [objects, setObjects] = useState<readonly PrivateObject[]>();
   const [step, setStep] = useState<Step>({ kind: 'list' });
   const [reason, setReason] = useState('');
@@ -191,7 +258,7 @@ function PrivateContentDialog({
   const [error, setError] = useState<string>();
   const mount = useMountedResource<HTMLDivElement>(() => {
     const controller = new AbortController();
-    loadPrivateObjects(call, member.humanId, controller.signal)
+    loadPrivateObjects(call, humanId, controller.signal)
       .then((next) => {
         if (!controller.signal.aborted) setObjects(next);
       })
@@ -199,13 +266,15 @@ function PrivateContentDialog({
         if (!controller.signal.aborted) setError(teamErrorText(t, failure));
       });
     return () => controller.abort();
-  }, [call, member.humanId]);
+  }, [call, humanId]);
+  const owners = (object: PrivateObject): string =>
+    member?.displayName ?? object.ownerNames.join(', ');
   const errorNote = error === undefined ? undefined : <Note tone="danger">{error}</Note>;
   if (step.kind === 'confirm')
     return (
       <FormDialog
         title={t('team.private.confirmTitle', { name: step.object.name })}
-        description={t('team.private.confirmBody', { name: member.displayName })}
+        description={t('team.private.confirmBody', { name: owners(step.object) })}
         labels={{ close: t('common.close'), cancel: t('common.cancel') }}
         submitLabel={t('team.private.view')}
         busy={busy}
@@ -216,7 +285,15 @@ function PrivateContentDialog({
           setBusy(true);
           setError(undefined);
           openPrivateContent(call, step.object, reason)
-            .then((view) => setStep({ kind: 'view', object: step.object, view }))
+            .then((view) =>
+              setStep({
+                kind: 'view',
+                object: step.object,
+                view,
+                messages: view.messages,
+                more: view.messages.length >= PRIVATE_PAGE_SIZE,
+              }),
+            )
             .catch((failure: unknown) => setError(teamErrorText(t, failure)))
             .finally(() => setBusy(false));
         }}
@@ -244,11 +321,38 @@ function PrivateContentDialog({
         onSubmit={onClose}
       >
         <Note tone="warning">{t('team.private.recorded')}</Note>
-        {step.view.messages.length === 0 ? (
+        {errorNote}
+        {step.more ? (
+          <div>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                const oldest = step.messages.at(-1);
+                if (oldest === undefined) return;
+                setBusy(true);
+                setError(undefined);
+                loadPrivatePage(call, step.view.viewId, oldest.id)
+                  .then((older) =>
+                    setStep({
+                      ...step,
+                      messages: [...step.messages, ...older],
+                      more: older.length >= PRIVATE_PAGE_SIZE,
+                    }),
+                  )
+                  .catch((failure: unknown) => setError(teamErrorText(t, failure)))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              {t('team.private.earlier')}
+            </Button>
+          </div>
+        ) : null}
+        {step.messages.length === 0 ? (
           <Note>{t('team.private.noMessages')}</Note>
         ) : (
           <ul {...stylex.props(styles.list)} data-private-view={step.view.viewId}>
-            {[...step.view.messages].reverse().map((message) => (
+            {[...step.messages].reverse().map((message) => (
               <li key={message.id} {...stylex.props(styles.message)}>
                 <span
                   {...stylex.props(styles.meta)}
@@ -262,7 +366,11 @@ function PrivateContentDialog({
     );
   return (
     <FormDialog
-      title={t('team.private.listTitle', { name: member.displayName })}
+      title={
+        member === undefined
+          ? t('team.private.title')
+          : t('team.private.listTitle', { name: member.displayName })
+      }
       description={t('team.private.listBody')}
       size="medium"
       scroll
@@ -289,7 +397,14 @@ function PrivateContentDialog({
             >
               <SettingsRow
                 title={object.name}
-                description={t(`team.private.kind.${object.kind}`)}
+                description={
+                  member === undefined && object.ownerNames.length > 0
+                    ? t('team.private.kindOwners', {
+                        kind: t(`team.private.kind.${object.kind}`),
+                        owners: object.ownerNames.join(', '),
+                      })
+                    : t(`team.private.kind.${object.kind}`)
+                }
                 control={
                   <Button
                     variant="outline"

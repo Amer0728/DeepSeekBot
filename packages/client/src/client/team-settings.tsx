@@ -14,8 +14,8 @@ import type { BotHarnessKey, BotHarnessTranslate } from './locale.js';
 import { TeamUsageSection } from './team-usage-section.js';
 import { USAGE_VIEW } from './team-usage.js';
 import { useMountedResource } from './mounted-resource.js';
-import { AuditLogSection } from './team-audit.js';
-import { AUDIT_VIEW } from './team-audit-bridge.js';
+import { AuditLogSection, PrivateContentSection } from './team-audit.js';
+import { AUDIT_VIEW, PRIVATE_VIEW } from './team-audit-bridge.js';
 import { SpacesSection } from './team-spaces.js';
 import {
   TEAM_ENTRY_PATH,
@@ -255,6 +255,10 @@ export function TeamSection({ call, t }: TeamSectionProps): ReactElement {
     view.enabled && canManage(viewer, USAGE_VIEW) ? <TeamUsageSection call={call} t={t} /> : null;
   const auditView =
     view.enabled && canManage(viewer, AUDIT_VIEW) ? <AuditLogSection call={call} t={t} /> : null;
+  const privateView =
+    view.enabled && !manageMembers && !manageRoles && canManage(viewer, PRIVATE_VIEW) ? (
+      <PrivateContentSection call={call} t={t} />
+    ) : null;
   const sheetMember =
     dialog?.kind === 'member' ? members?.find((row) => row.humanId === dialog.humanId) : undefined;
   const admin =
@@ -398,6 +402,7 @@ export function TeamSection({ call, t }: TeamSectionProps): ReactElement {
         {admin}
         {spacesView}
         {usage}
+        {privateView}
         {auditView}
         {dialog?.kind === 'my-devices' ? (
           <MyDevicesDialog
@@ -501,6 +506,7 @@ export function TeamSection({ call, t }: TeamSectionProps): ReactElement {
       {admin}
       {spacesView}
       {usage}
+      {privateView}
       {auditView}
 
       {dialog?.kind === 'owner-password' ? (
