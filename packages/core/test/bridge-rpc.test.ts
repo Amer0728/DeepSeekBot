@@ -730,6 +730,7 @@ describe('bridge typert service', () => {
       'channelAdminsSet',
       'channelPolicySet',
       'channelHumanAdd',
+      'channelMemberCandidates',
       'channelDescriptionSet',
       'teamDirectory',
       'humanDm',

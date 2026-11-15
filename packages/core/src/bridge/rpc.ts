@@ -549,6 +549,14 @@ export class BotharnessBridgeService extends TypertRemoteService {
       }),
     );
   }
+  channelMemberCandidates(channelId: string, query?: string) {
+    return unwrapAsync(
+      this.methods.channelMemberCandidates({
+        channelId,
+        ...(query === undefined ? {} : { query }),
+      }),
+    );
+  }
   channelHumanAdd(channelId: string, humanId: string) {
     return unwrapAsync(this.methods.channelHumanAdd({ channelId, humanId }));
   }
@@ -3187,6 +3195,7 @@ markRemoteMethods(BotharnessBridgeService.prototype, [
   'channelAdminsSet',
   'channelPolicySet',
   'channelHumanAdd',
+  'channelMemberCandidates',
   'channelDescriptionSet',
   'teamDirectory',
   'humanDm',

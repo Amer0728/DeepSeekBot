@@ -2112,3 +2112,13 @@ deepseekbot models allowed [--as <username>]
 ```
 
 Tool effect declarations (E1) preserve the existing tool commands and approval outcomes. Full Access, saved rules, Secrets, device targets and Workspace Grants retain their existing checks; no new route or CLI authority is introduced.
+
+### Channel invitations (M14)
+
+```sh
+deepseekbot channels member-candidates <channel-id> --query Alice
+deepseekbot --as bob channels member-candidates <channel-id> --query alice
+deepseekbot --as bob channels add-member <channel-id> alice
+```
+
+Candidate listing returns up to 100 active people outside the Channel, with `humanId`, `displayName` and nullable `username`. Search matches names and usernames. Both commands enforce the calling Human's `addMembers` right, including Channel owner/admin and `channels.manageAll`; refusal is `permission-required` with `details.permission: 'addMembers'`. Invitations grant access immediately for every visibility and survive role revocation. Browse-and-join memberships depend on allowed roles and leave when that access is revoked. See [M14 runtime notes](architecture/team-mode.md#m14-runtime-invitations-and-membership-basis) for upgrade classification.
