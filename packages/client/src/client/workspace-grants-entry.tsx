@@ -142,7 +142,16 @@ function secretCliRuleLabel(input: string): { program: string; account: string }
 
 function approvalRulePath(rule: ToolApprovalRuleView): string {
   try {
-    const scope = JSON.parse(rule.scopeKey) as unknown;
+    let scope: unknown = JSON.parse(rule.scopeKey);
+    if (
+      Array.isArray(scope) &&
+      typeof scope[0] === 'string' &&
+      ((scope.length === 2 && scope[1] === 'explicit-approval') ||
+        (scope.length === 3 &&
+          (scope[1] === 'browser' || scope[1] === 'computer' || scope[1] === null) &&
+          typeof scope[2] === 'string'))
+    )
+      scope = JSON.parse(scope[0]);
     if (Array.isArray(scope) && typeof scope[1] === 'string') return scope[1];
   } catch {}
   return rule.scopeKey;
