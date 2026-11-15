@@ -4,6 +4,7 @@ import { Pressable, ScrollView, SectionList, View } from 'react-native';
 import {
   errorText,
   folderBrowsingUnavailable,
+  INHERIT_APPROVAL_TEMPLATE,
   type AccessScope,
   type ApprovalTemplate,
   type ApprovalTemplates,
@@ -98,6 +99,14 @@ export function templateTitle(template: Pick<ApprovalTemplate, 'name' | 'title'>
   if (template.name === 'cautious') return t.autoApprovalCautious;
   if (template.name === 'get-work-done') return t.autoApprovalGetWorkDone;
   return template.title;
+}
+
+function inheritedTemplateLabel(selection: ApprovalTemplates): string {
+  const name = selection.globalDefault;
+  if (name === undefined) return t.contextUnavailable;
+  if (name === null) return t.autoApprovalOff;
+  const template = selection.templates.find((template) => template.name === name);
+  return template === undefined ? t.autoApprovalUnavailable(name) : templateTitle(template);
 }
 
 export function templateDescription(template: ApprovalTemplate): string {
@@ -610,6 +619,18 @@ export function WorkspaceSheet({
       : templates.status === 'failed'
         ? [{ kind: 'failed', key: 'templates-failed', text: templates.error }]
         : [
+            ...(templates.value.globalDefault === undefined
+              ? []
+              : [
+                  {
+                    kind: 'template' as const,
+                    key: `template:${INHERIT_APPROVAL_TEMPLATE}`,
+                    name: INHERIT_APPROVAL_TEMPLATE,
+                    title: t.autoApprovalInherit,
+                    detail: t.autoApprovalInherited(inheritedTemplateLabel(templates.value)),
+                    selected: templates.value.selected === INHERIT_APPROVAL_TEMPLATE,
+                  },
+                ]),
             {
               kind: 'template',
               key: `template:${OFF}`,
@@ -811,6 +832,9 @@ export function WorkspaceSheet({
       case 'template':
         return (
           <SettingsRow
+            testID={
+              item.name === INHERIT_APPROVAL_TEMPLATE ? 'approval-template-inherit' : undefined
+            }
             title={item.title}
             detail={item.detail}
             selected={item.selected}
