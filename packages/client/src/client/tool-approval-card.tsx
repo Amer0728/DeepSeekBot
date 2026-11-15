@@ -454,7 +454,13 @@ export function ToolApprovalCard({
             />
           )}
           {request.approvalReview === undefined ? null : (
-            <div className="bh-note">{request.approvalReview.reason}</div>
+            <div className="bh-note">
+              {request.approvalReview.kind === 'template-unavailable'
+                ? t('autoApproval.unavailable')
+                : request.approvalReview.fallback === undefined
+                  ? request.approvalReview.reason
+                  : t('autoApproval.reviewUnavailable')}
+            </div>
           )}
           {details}
         </>

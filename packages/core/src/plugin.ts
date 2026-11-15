@@ -2514,15 +2514,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     reviewLogs = undefined;
   }
   ctx.effect(() => () => reviewLogs?.close(), 'botharness: approval review logs');
-  const specificTemplateInUse = approvalTemplateInUse(core.registry);
-  const templateInUse = (name: string) => {
-    const global = approvalTemplates.global();
-    return (
-      specificTemplateInUse(name) ||
-      global.kind === 'invalid' ||
-      (global.kind === 'selected' && global.name === name)
-    );
-  };
+  const templateInUse = approvalTemplateInUse(core.registry);
   const autoApproval: ToolAutoApproval = {
     template: (slug) => {
       const selection = core.registry.get(slug)?.approvalTemplate;

@@ -14,6 +14,7 @@ import type { BotSummary, ChannelMessage } from './store.js';
 
 const OFF = 'off';
 const INHERIT = '@global';
+const UNKNOWN = '@unknown';
 
 export function templateTitle(
   t: BotHarnessTranslate,
@@ -76,7 +77,7 @@ function useApprovalTemplates<E extends HTMLElement>(botSlug: string, actions: T
       });
   }, [actions, botSlug]);
   const choose = (name: string | null): void => {
-    if (actions.setBotApprovalTemplate === undefined || busy) return;
+    if (actions.setBotApprovalTemplate === undefined || !loaded || busy) return;
     const previous = selected;
     setSelected(name);
     setBusy(true);
@@ -89,10 +90,12 @@ function useApprovalTemplates<E extends HTMLElement>(botSlug: string, actions: T
         setSelected(next.selected);
         setGlobalDefault(next.globalDefault ?? null);
         setTemplates(next.templates);
+        setLoaded(true);
       })
       .catch((cause: unknown) => {
         if (current.current !== botSlug) return;
         setSelected(previous);
+        setLoaded(false);
         setError(errorMessage(cause));
       })
       .finally(() => {
@@ -136,25 +139,43 @@ export function ApprovalTemplateEntry({
           data={{ 'data-approval-template': '' }}
           title={t('autoApproval.title')}
           description={
-            state.effective !== null && chosen === undefined
-              ? t('autoApproval.unavailable')
-              : state.selected === INHERIT
-                ? t('autoApproval.inherited', {
-                    template:
-                      chosen === undefined
-                        ? t('autoApproval.off')
-                        : templateTitle(t, chosen.name, chosen.title),
-                  })
-                : chosen === undefined
-                  ? t('autoApproval.hintOff')
-                  : t('autoApproval.hintOn', { description: templateDescription(t, chosen) })
+            !state.loaded
+              ? t(
+                  state.error === undefined
+                    ? 'autoApproval.selectionLoading'
+                    : 'autoApproval.selectionUnreadable',
+                )
+              : state.effective !== null && chosen === undefined
+                ? t('autoApproval.unavailable')
+                : state.selected === INHERIT
+                  ? t('autoApproval.inherited', {
+                      template:
+                        chosen === undefined
+                          ? t('autoApproval.off')
+                          : templateTitle(t, chosen.name, chosen.title),
+                    })
+                  : chosen === undefined
+                    ? t('autoApproval.hintOff')
+                    : t('autoApproval.hintOn', { description: templateDescription(t, chosen) })
           }
           control={
             <Select
               label={t('autoApproval.title')}
-              value={state.selected ?? OFF}
-              disabled={disabled || state.busy || state.templates.length === 0}
+              value={state.loaded ? (state.selected ?? OFF) : UNKNOWN}
+              disabled={disabled || !state.loaded || state.busy || state.templates.length === 0}
               options={[
+                ...(!state.loaded
+                  ? [
+                      {
+                        value: UNKNOWN,
+                        label: t(
+                          state.error === undefined
+                            ? 'autoApproval.loading'
+                            : 'autoApproval.unreadable',
+                        ),
+                      },
+                    ]
+                  : []),
                 { value: INHERIT, label: t('autoApproval.inherit') },
                 { value: OFF, label: t('autoApproval.off') },
                 ...state.templates.map((template) => ({
@@ -193,7 +214,7 @@ export function AutoApprovalBadge({ botSlug, actions, t }: ChannelSidebarEntryPr
       {state.loaded ? (
         <Tag tone="neutral">
           {chosen === undefined
-            ? t('autoApproval.off')
+            ? t(state.effective === null ? 'autoApproval.off' : 'autoApproval.unreadable')
             : templateTitle(t, chosen.name, chosen.title)}
         </Tag>
       ) : null}

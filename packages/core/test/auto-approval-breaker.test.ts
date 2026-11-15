@@ -15,7 +15,7 @@ afterEach(async () => {
   for (const close of closers.splice(0)) await close();
 });
 
-function fixture() {
+function fixture(fullAccess?: () => boolean) {
   const runs: OrchestratorAgentRun[] = [];
   const agents: BotAgentAdapter = {
     async runOrchestrator(run) {
@@ -56,6 +56,7 @@ function fixture() {
       review,
       log: () => undefined,
     },
+    fullAccess,
   );
   const methods = createBridgeMethods(OWNER_HUMAN_CONTEXT, { ...core, toolApproval: broker });
   core.registry.create({ slug: 'ada', displayName: 'Ada' });
@@ -101,6 +102,35 @@ function fixture() {
 }
 
 describe('two-outcome Reviewer Human control', () => {
+  it('keeps a native global-policy edit behind Human approval despite Full Access and a broad tool rule', async () => {
+    let fullAccess = false;
+    const f = fixture(() => fullAccess);
+    const ordinary = f.call('ordinary operation');
+    await vi.waitFor(() =>
+      expect(f.messages().filter((message) => message.toolApprovalRequest)).toHaveLength(1),
+    );
+    const first = f.messages().find((message) => message.toolApprovalRequest)!;
+    expect(await f.broker.decide(OWNER_HUMAN_CONTEXT, 'ada', first.id, 'allowed-always-tool')).toBe(
+      true,
+    );
+    expect(await ordinary).toBe('allowed-once');
+    f.review.mockClear();
+    f.verdicts.push('allow');
+    fullAccess = true;
+    const policy = f.call(
+      String.raw`Set-Content -LiteralPath 'C:\dsh\botharness\approval-templates\.selection.json' -Value '{"template":"get-work-done"}'`,
+    );
+    await vi.waitFor(() =>
+      expect(f.messages().filter((message) => message.toolApprovalRequest)).toHaveLength(2),
+    );
+    expect(f.review).not.toHaveBeenCalled();
+    const card = f
+      .messages()
+      .find((message) => message.toolApprovalRequest?.input.includes('.selection.json'))!;
+    expect(await f.broker.decide(OWNER_HUMAN_CONTEXT, 'ada', card.id, 'rejected')).toBe(true);
+    expect(await policy).toBe('rejected');
+  });
+
   it('uses a Human-saved deterministic tool rule before template lookup or Reviewer calls', async () => {
     const f = fixture();
     expect(f.methods.approvalTemplates({ slug: 'ada' })).toMatchObject({

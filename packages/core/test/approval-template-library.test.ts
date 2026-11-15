@@ -159,6 +159,27 @@ describe('self-escalation guard for Approval Templates', () => {
     );
   });
 
+  it.each(['\\', '/'])(
+    'protects native policy paths with %s separators through the public Shell seam',
+    (separator) => {
+      const file = ['C:', 'dsh', 'botharness', 'approval-templates', '.selection.json'].join(
+        separator,
+      );
+      const command = `Set-Content -LiteralPath '${file}' -Value '{"template":"get-work-done"}'`;
+      expect(changesApprovalPolicy(command, () => false)).toBe(true);
+      expect(requiresHumanToolApproval('pwsh', { command }, () => false)).toBe(true);
+    },
+  );
+
+  it('protects active Windows template files while keeping unused drafts separate', () => {
+    const command = (name: string) =>
+      `Set-Content -LiteralPath 'C:\\dsh\\botharness\\approval-templates\\${name}.md' -Value 'policy'`;
+    expect(requiresHumanToolApproval('pwsh', { command: command('night-shift') }, inUse)).toBe(
+      true,
+    );
+    expect(requiresHumanToolApproval('pwsh', { command: command('my-draft') }, inUse)).toBe(false);
+  });
+
   it('turns a Shell edit of a template a Bot uses into a Human approval', () => {
     const registry = fakeRegistry([{ slug: 'ada', approvalTemplate: 'night-shift' }]);
     const templateInUse = approvalTemplateInUse(registry);

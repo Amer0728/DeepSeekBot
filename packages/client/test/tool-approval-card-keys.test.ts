@@ -94,6 +94,27 @@ afterEach(() => {
 });
 
 describe('Tool approval card layout', () => {
+  it.each([
+    { kind: 'template-unavailable', reason: 'The selected approval template could not be read.' },
+    {
+      kind: 'review',
+      template: 'cautious',
+      version: 'version',
+      reason: 'Automatic review unavailable (settings-invalid).',
+      fallback: 'settings-invalid',
+    },
+  ] as const)(
+    'localizes system fallback guidance for $kind without exposing diagnostic codes',
+    async (review) => {
+      const value = message();
+      value.toolApprovalRequest!.approvalReview = review;
+      const card = await render(value);
+      expect(card.textContent).not.toContain(review.reason);
+      expect(card.textContent).toContain('审批');
+      expect(card.textContent).not.toContain('settings-invalid');
+    },
+  );
+
   it('leads with the key phrase and keeps details, extra choices and key hints out of the way', async () => {
     const card = await render(
       message(

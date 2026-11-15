@@ -284,7 +284,7 @@ export function deletesMarketplaceBot(input: string): boolean {
 }
 
 const CHANGING_SUBCOMMANDS = new Set(['set', 'edit', 'update', 'delete', 'rm', 'remove']);
-const TEMPLATE_FILE = /approval-templates\/+([^\s"'`;&|)\\/]*)/giu;
+const TEMPLATE_FILE = /approval-templates[\\/]+([^\s"'`;&|)\\/]*)/giu;
 
 export function changesApprovalPolicy(
   input: string,

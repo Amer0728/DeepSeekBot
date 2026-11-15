@@ -1,0 +1,72 @@
+// @vitest-environment jsdom
+import { act, createElement, type PropsWithChildren } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { ApprovalTemplateEntry } from '../src/client/approval-template-entry.js';
+import { zhTranslate as t } from '../src/client/locale.js';
+
+vi.mock('@deepseek-ai/dsh-client-ui-primitives', async () => ({
+  ...(await import('./primitive-mocks.js')).comboboxPrimitives(),
+  Tag: ({ children }: PropsWithChildren) => createElement('span', null, children),
+}));
+vi.mock('../src/client/avatar.js', () => ({ PersonaBotAvatar: () => null }));
+vi.mock('../src/client/channel-sidebar-icon.js', () => ({ ChannelSidebarIcon: () => null }));
+
+let root: Root;
+let host: HTMLDivElement;
+beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+});
+afterEach(async () => {
+  await act(async () => root.unmount());
+  host.remove();
+  vi.unstubAllGlobals();
+});
+
+it('keeps a failed selection read unknown instead of claiming the Bot is Off', async () => {
+  const actions = {
+    approvalTemplates: async () => {
+      throw new Error('Approval template selection could not be read.');
+    },
+    setBotApprovalTemplate: vi.fn(async () => {}),
+  };
+  await act(async () =>
+    root.render(
+      createElement(ApprovalTemplateEntry, {
+        botSlug: 'ada',
+        actions,
+        disabled: false,
+        t,
+      }),
+    ),
+  );
+  const choice = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]');
+  expect(choice?.textContent).toContain('无法读取');
+  expect(choice?.textContent).not.toContain(t('autoApproval.off'));
+  expect(choice?.disabled).toBe(true);
+  expect(host.textContent).not.toContain(t('autoApproval.hintOff'));
+  expect(actions.setBotApprovalTemplate).not.toHaveBeenCalled();
+});
+
+it('still displays Off after a successful explicit empty-selection read', async () => {
+  const actions = {
+    approvalTemplates: async () => ({ templates: [], selected: null, globalDefault: null }),
+    setBotApprovalTemplate: vi.fn(async () => {}),
+  };
+  await act(async () =>
+    root.render(
+      createElement(ApprovalTemplateEntry, {
+        botSlug: 'ada',
+        actions,
+        disabled: false,
+        t,
+      }),
+    ),
+  );
+  const choice = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]');
+  expect(choice?.textContent).toContain(t('autoApproval.off'));
+  expect(host.textContent).toContain(t('autoApproval.hintOff'));
+});
