@@ -24,7 +24,8 @@ export function cliDispatchInventory(root) {
       if (
         ts.isVariableDeclaration(n) &&
         ts.isIdentifier(n.name) &&
-        n.name.text.endsWith('COMMANDS')
+        n.name.text.endsWith('COMMANDS') &&
+        !n.name.text.endsWith('SUBCOMMANDS')
       ) {
         function visit(a) {
           if (ts.isArrayLiteralExpression(a)) {
