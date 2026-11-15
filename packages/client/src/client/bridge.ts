@@ -1,3 +1,4 @@
+import { parseToolEffects } from '../../../core/src/workspaces/tool-effects-contract.js';
 import {
   approvalTemplateDeletionPreviewSchema,
   type ApprovalTemplateDeletionPreview,
@@ -1218,29 +1219,7 @@ export function parseChannelMessage(value: unknown): ChannelMessage | undefined 
               : {}),
           }
         : undefined;
-    const effect = asRecord(request['effects']);
-    let effects: import('../../../core/src/workspaces/tool-effects.js').ToolEffects | undefined;
-    if (
-      effect &&
-      (effect['changes'] === 'none' ||
-        effect['changes'] === 'reversible' ||
-        effect['changes'] === 'irreversible') &&
-      (effect['reach'] === 'local' ||
-        effect['reach'] === 'memory' ||
-        effect['reach'] === 'workspace' ||
-        effect['reach'] === 'external') &&
-      typeof effect['personalData'] === 'boolean' &&
-      (effect['authority'] === undefined || effect['authority'] === 'management') &&
-      (effect['secrets'] === undefined || typeof effect['secrets'] === 'boolean')
-    ) {
-      effects = {
-        changes: effect['changes'],
-        reach: effect['reach'],
-        personalData: effect['personalData'],
-        ...(effect['authority'] === 'management' ? { authority: 'management' } : {}),
-        ...(typeof effect['secrets'] === 'boolean' ? { secrets: effect['secrets'] } : {}),
-      };
-    }
+    const effects = parseToolEffects(request['effects']);
     const review = asRecord(request['approvalReview']);
     let approvalReview:
       | import('../../../core/src/workspaces/tool-approval.js').ToolApprovalReview

@@ -1,13 +1,8 @@
 import { cliEffects, brokerCliEffects } from '../bots/cli-effects.js';
 import { requiresHumanDecision } from './approval-templates.js';
 
-export interface ToolEffects {
-  readonly changes: 'none' | 'reversible' | 'irreversible';
-  readonly reach: 'local' | 'memory' | 'workspace' | 'external';
-  readonly personalData: boolean;
-  readonly authority?: 'management';
-  readonly secrets?: boolean;
-}
+import type { ToolEffects } from './tool-effects-contract.js';
+export type { ToolEffects } from './tool-effects-contract.js';
 
 type Declaration = ToolEffects & {
   readonly approval: 'native' | 'existing' | 'always' | 'attachment';
