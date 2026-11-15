@@ -7,6 +7,7 @@ A Bot inherits the optional global default, selects one complete shared template
 - `library`: Bot settings → Auto approval → Global default template (DSH Select), existing template library and Reviewer model. No global default means inherited review is off. Read failures remain errors.
 - `cli`: `approval-template list --bot <bot>`, `approval-template-global-set <name|off>`, `approval-template-set <bot> <inherit|name|off>`; library create/edit commands retain existing Markdown contents.
 - `select`: Channel settings → Auto approval, or composer Workspace Grants panel → Auto approval, uses the same DSH Select. Inheritance shows its effective global source. Specific selection replaces global; Off retains deterministic rules.
+- `mobile`: Bot profile → Settings → Permissions → Workspace grants → Auto approval template, inside the existing iOS sheet / Android `ModalBottomSheet`. Inherit global shows the resolved global template (or Off); selecting Off then Inherit global writes null then @global through the same Host owner. Legacy Hosts without a global-selection field retain their supported choices.
 - `reviewer`: a covered call leaves an auto-approved record with template identity/version; an uncovered or failed review posts a Human card with the reason and captured version when available. No new model rejection or rejection pause occurs.
 - `guard`: effective template/global/Bot policy changes bypass Full Access and model review, retaining Human or explicit management-scope authorization and execution fences (ADR-0249).
 
@@ -24,6 +25,10 @@ Use an isolated Host and its own authenticated CLI. Confirm health and Client co
 4. Trigger an existing approval through the native tool path. A deterministic saved rule makes zero Reviewer calls. An uncovered call uses the effective template and leaves either the versioned auto-approved record or Human card; answer that card through the normal owner.
 5. Edit/switch during an injected Reviewer wait at the Channel Tool Approval seam: this Review retains the old identity/version, the next uses the new one. Missing/unreadable template or model timeout/malformed response posts Human with a reason, even if diagnostics fail. Check canonical Channel records and developer logs.
 6. Exercise a policy-management approval under Full Access; Reviewer calls remain zero and only Human or an explicit management rule can authorize effects. Revoke the rule before execution and verify refusal.
+
+## Native mobile qualification
+
+Use the shared device QA lane and T3 device tools. The same synthetic Bot and isolated QA Host must be used for before/after, with the current PR/source/build identities recorded. In Bot profile → Settings → Permissions → Workspace grants, verify the inherited row is checked and names the global template or Off. Choose Off, return to Inherit global, then choose one specific template; read back each selection using the authenticated CLI. A global switch updates the inherited row after refresh while a specific choice remains specific. Read failures stay visible failures. Capture default/intermediate/maximum system text in light/dark, keep the last choice reachable, and distinguish Android, iOS and Human acceptance. Web screenshots do not qualify this journey.
 
 ## Gotchas
 
