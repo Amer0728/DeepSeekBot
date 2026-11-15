@@ -1,3 +1,4 @@
+import { hasIrreversibleExternalEffect, toolEffects } from '../workspaces/tool-effects.js';
 import { createChannelActionTool } from './channel-action-tool.js';
 import {
   executeNativeTool,
@@ -4027,6 +4028,24 @@ class DshBotAgentAdapter implements BotAgentAdapter {
             result.error.message,
           );
         value = result.value;
+      } else if (
+        hasIrreversibleExternalEffect(toolEffects(name, args)) ||
+        toolEffects(name, args)?.authority === 'management'
+      ) {
+        const handle = await this.#orchestratorHandle(run);
+        const result = await executeNativeTool(handle.agent.ctx, {
+          callId: ToolCallId(run.sessionId),
+          name,
+          arguments: args,
+          agent: handle.agent,
+          signal,
+        });
+        if (result.isError)
+          throw new DirectBotToolError(
+            result.error.info?.code ?? 'tool-failed',
+            result.error.message,
+          );
+        value = result.value;
       } else {
         value = await tool.execute(args, {
           callId: run.sessionId,
@@ -4050,6 +4069,7 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       throw error;
     } finally {
       this.#runs.delete(run.sessionId);
+      await this.releaseSession(run.sessionId);
     }
   }
 

@@ -16,6 +16,7 @@ import type {
   TimelineMessage,
   TimelinePage,
   ToolApprovalOutcome,
+  ToolApprovalRequestCard,
   ToolApprovalStatus,
   UserQuestionStatus,
 } from './wire';
@@ -30,6 +31,7 @@ export interface RequestRef {
 }
 
 export interface ApprovalRequest extends RequestRef {
+  effects?: ToolApprovalRequestCard['effects'];
   toolName: string;
   role: 'orchestrator' | 'assignment';
   cwd: string;
@@ -107,6 +109,7 @@ export async function loadApproval(client: HostClient, ref: RequestRef): Promise
   return {
     ...ref,
     toolName: card.toolName,
+    ...(card.effects === undefined ? {} : { effects: card.effects }),
     role: card.role,
     cwd: card.cwd,
     input: card.input,

@@ -4,6 +4,14 @@ import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots';
 export const LOCALE_NS = 'botharness';
 
 export const zh = {
+  'approval.effect.changes.none': '只读',
+  'approval.effect.changes.reversible': '可撤销更改',
+  'approval.effect.changes.irreversible': '不可撤销',
+  'approval.effect.reach.local': '本机',
+  'approval.effect.reach.memory': '记忆',
+  'approval.effect.reach.workspace': '工作区',
+  'approval.effect.reach.external': '外部影响',
+
   'environment.title': '环境',
   'environment.create.target': '创建到环境',
   'environment.create.choose': '选择环境',
@@ -5717,6 +5725,14 @@ export function zhTranslate(key: BotHarnessKey | string, params?: Record<string,
 }
 
 export const en = {
+  'approval.effect.changes.none': 'Read only',
+  'approval.effect.changes.reversible': 'Reversible changes',
+  'approval.effect.changes.irreversible': 'Irreversible',
+  'approval.effect.reach.local': 'Local',
+  'approval.effect.reach.memory': 'Memory',
+  'approval.effect.reach.workspace': 'Workspace',
+  'approval.effect.reach.external': 'External effect',
+
   'environment.title': 'Environments',
   'environment.create.target': 'Create in environment',
   'environment.create.choose': 'Choose an environment',

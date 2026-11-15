@@ -1,3 +1,4 @@
+import { hasIrreversibleExternalEffect, toolEffects } from './workspaces/tool-effects.js';
 import { installNativeSearchResultGuard, currentRoots } from './workspaces/grant-native-tools.js';
 import { relocateTobWorkspaces, recoverSpaceTransfers } from './workspaces/space-lifecycle.js';
 import { WorkspaceSpaces } from './workspaces/spaces.js';
@@ -311,7 +312,6 @@ import {
   changesApprovalPolicy,
   deletesMarketplaceBot,
   publishesBotMemory,
-  requiresHumanDecision,
   createApprovalTemplateLibrary,
 } from './workspaces/approval-templates.js';
 import {
@@ -2694,6 +2694,9 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
   ctx.on(
     'tools/pre-execute',
     async (execution, next) => {
+      const irreversibleExternal = hasIrreversibleExternalEffect(
+        toolEffects(execution.name, execution.arguments),
+      );
       const agent = execution.agent;
       if (agent === undefined || core.ownership.resolve(agent.session.id) === undefined)
         return next();
@@ -2734,7 +2737,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
           agent.session.id,
           sessionHasFullAccess(core, agent.session.id),
         );
-        if (computerAuthorization === 'authorized') return next();
+        if (computerAuthorization === 'authorized' && !irreversibleExternal) return next();
         if (computerAuthorization === 'changed')
           return {
             kind: 'deny',
@@ -2764,7 +2767,11 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
           };
         }
         try {
-          const outcome = await computerApproval.request({
+          const outcome = await (
+            irreversibleExternal
+              ? toolApproval.ask.bind(toolApproval)
+              : computerApproval.request.bind(computerApproval)
+          )({
             agent,
             toolName: execution.name,
             callId: execution.callId,
@@ -2834,7 +2841,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
           agent.session.id,
           sessionHasFullAccess(core, agent.session.id),
         );
-        if (browserAuthorization === 'authorized') return next();
+        if (browserAuthorization === 'authorized' && !irreversibleExternal) return next();
         if (browserAuthorization === 'changed')
           return {
             kind: 'deny',
@@ -2865,7 +2872,11 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
           };
         }
         try {
-          const outcome = await browserApproval.request({
+          const outcome = await (
+            irreversibleExternal
+              ? toolApproval.ask.bind(toolApproval)
+              : browserApproval.request.bind(browserApproval)
+          )({
             agent,
             toolName: execution.name,
             callId: execution.callId,
@@ -2917,12 +2928,6 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
       if (!requiresHumanToolApproval(execution.name, execution.arguments, templateInUse))
         return next();
       const eachUse = execution.name === 'secret_cli' || execution.name === 'secret_mcp_connect';
-      const fullAccess = sessionHasFullAccess(core, agent.session.id);
-      if (
-        fullAccess &&
-        !requiresHumanDecision(JSON.stringify(execution.arguments) ?? '', templateInUse)
-      )
-        return next();
       const approval = ctx.get('approval') as ApprovalService | undefined;
       const owner = core.ownership.resolve(agent.session.id);
       const untrack = toolApproval.track(
@@ -2941,34 +2946,37 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
         };
       }
       try {
-        const outcome = eachUse
-          ? ((await toolApproval.ask({
-              agent,
-              toolName: execution.name,
-              callId: execution.callId,
-              signal: execution.signal,
-            })) ?? 'unavailable')
-          : await approval.request({
-              agent,
-              toolName: execution.name,
-              callId: execution.callId,
-              reason:
-                execution.name === 'channel_attachment_open'
-                  ? 'This PersonaBot wants to edit the selected original attachment. All references to this file will show its current contents.'
-                  : execution.name === 'bot_create'
-                    ? 'This PersonaBot wants to create a new PersonaBot with a new Memory folder. The new Bot gets no grants, accesses or secrets from it.'
-                    : publishesBotMemory(JSON.stringify(execution.arguments) ?? '')
-                      ? 'This PersonaBot wants to upload a Bot to the Bot Marketplace. Its Memory files become public. Check them for secrets and private details first.'
-                      : deletesMarketplaceBot(JSON.stringify(execution.arguments) ?? '')
-                        ? 'This PersonaBot wants to delete one of your Uploaded Bots from the Bot Marketplace. Its files and counts are erased and cannot be restored.'
-                        : changesApprovalPolicy(
-                              JSON.stringify(execution.arguments) ?? '',
-                              templateInUse,
-                            )
-                          ? 'This PersonaBot wants to change persistent permissions or its approval policy. A Human can approve once or save Always allow for this tool in the current scope.'
-                          : 'This PersonaBot wants to run a command-line tool with a secret you entered. The program receives the secret and could reveal it. Check the program and every argument.',
-              signal: execution.signal,
-            });
+        const outcome =
+          eachUse ||
+          irreversibleExternal ||
+          toolEffects(execution.name, execution.arguments)?.authority === 'management'
+            ? ((await toolApproval.ask({
+                agent,
+                toolName: execution.name,
+                callId: execution.callId,
+                signal: execution.signal,
+              })) ?? 'unavailable')
+            : await approval.request({
+                agent,
+                toolName: execution.name,
+                callId: execution.callId,
+                reason:
+                  execution.name === 'channel_attachment_open'
+                    ? 'This PersonaBot wants to edit the selected original attachment. All references to this file will show its current contents.'
+                    : execution.name === 'bot_create'
+                      ? 'This PersonaBot wants to create a new PersonaBot with a new Memory folder. The new Bot gets no grants, accesses or secrets from it.'
+                      : publishesBotMemory(JSON.stringify(execution.arguments) ?? '')
+                        ? 'This PersonaBot wants to upload a Bot to the Bot Marketplace. Its Memory files become public. Check them for secrets and private details first.'
+                        : deletesMarketplaceBot(JSON.stringify(execution.arguments) ?? '')
+                          ? 'This PersonaBot wants to delete one of your Uploaded Bots from the Bot Marketplace. Its files and counts are erased and cannot be restored.'
+                          : changesApprovalPolicy(
+                                JSON.stringify(execution.arguments) ?? '',
+                                templateInUse,
+                              )
+                            ? 'This PersonaBot wants to change persistent permissions or its approval policy. A Human can approve once or save Always allow for this tool in the current scope.'
+                            : 'This PersonaBot wants to run a command-line tool with a secret you entered. The program receives the secret and could reveal it. Check the program and every argument.',
+                signal: execution.signal,
+              });
         if (outcome !== 'allowed-once') {
           const reviewed = toolApproval.takeReviewRejection(agent.session.id, execution.callId);
           return {

@@ -41,6 +41,7 @@ export type ToolApprovalReview =
   | { kind: 'review'; template: string; version: string; reason: string; fallback?: string };
 
 export interface ToolApprovalRequestCard {
+  effects?: ToolEffects;
   approvalReview?: ToolApprovalReview;
   opaque?: boolean;
   decidedBy?: ApprovalDecider;
@@ -106,7 +107,7 @@ type TrackedCall = ToolApprovalRequestCard & {
   rememberable?: boolean;
   remembered?: boolean;
   execution: ToolExecution;
-  effects: ToolEffects | undefined;
+
   authorized?: () => boolean;
   device?: 'computer' | 'browser';
 };
@@ -247,6 +248,7 @@ export class ChannelToolApproval {
     const scopeKey = this.#scope(agent, owner);
     if (scopeKey === undefined) return undefined;
     const key = callKey(agent.session.id, execution.callId);
+    const effects = toolEffects(execution.name, execution.arguments);
     const tracked: TrackedCall = {
       agent,
       botSlug: owner.botSlug,
@@ -259,7 +261,7 @@ export class ChannelToolApproval {
       scopeKey,
       ...(options?.authorizationScope ? { authorizationScope: options.authorizationScope } : {}),
       execution,
-      effects: toolEffects(execution.name, execution.arguments),
+      ...(effects === undefined ? {} : { effects }),
       externalDecision,
       ...(options?.requireExplicitApproval ? { requireExplicitApproval: true } : {}),
       ...(rememberable && !options?.requireExplicitApproval ? { rememberable } : {}),
@@ -376,6 +378,7 @@ export class ChannelToolApproval {
         role: tracked.role,
         cwd: tracked.cwd,
         input: tracked.input,
+        ...(tracked.effects === undefined ? {} : { effects: tracked.effects }),
         ...(tracked.approvalReview === undefined ? {} : { approvalReview: tracked.approvalReview }),
         externalDecision: tracked.externalDecision ?? 'operation',
         allowAlways: policy.rememberable,

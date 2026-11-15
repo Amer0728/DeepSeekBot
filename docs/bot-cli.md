@@ -236,6 +236,8 @@ deepseekbot folder-browse [<folder-path>] [--offset <n>]
 deepseekbot grant-create <bot-id> --workspace <workspace-id>
 ```
 
+Trusted irreversible external tool calls enter common approval even with Full Access. `bot-tool` uses the same Host admission without a model; a valid saved authorization is checked before any Reviewer call. Read `toolApprovalRequest.effects` and bilingual `effectLabels.en` / `effectLabels.zh` on approval messages from online `channel-messages`. These labels describe trusted declarations, not claims in tool input or output. Management operations still require their dedicated explicit authorization (ADR-0249).
+
 `tool-approval-status` returns `status` and, while the card is still `pending`, its `expiresAt`, the time the Web card counts down to. `--outcome allowed-always-kind` is the `secret_cli` card's "Always allow this kind": it allows this call and saves a rule for the same program, account and environment variable names, which `tool-approval-rules` lists with kind `secret-cli`; any other card refuses it.
 
 `user-question-answer` accepts the same offered selections as the Web card. A durable timed

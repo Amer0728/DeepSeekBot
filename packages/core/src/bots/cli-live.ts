@@ -1,3 +1,5 @@
+import { toolEffectLabels } from '../workspaces/tool-effect-labels.js';
+import type { ChannelMessage } from '../channels/channel.js';
 import { isLanAddress } from '../devices/lan-address.js';
 import { TEAM_COMMANDS, TEAM_OPTIONS, runTeamCommand } from './cli-team.js';
 import { runDeviceActivity } from './cli-live-activity.js';
@@ -1646,11 +1648,26 @@ export async function runLiveCli(
     const limit = values.limit === undefined ? undefined : Number(values.limit);
     if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 200))
       usage('--limit must be 1–200.');
-    return rpc('channelMessages', {
+    const result = await rpc<{ messages: ChannelMessage[]; revision: number }>('channelMessages', {
       channelId: target,
       ...(limit === undefined ? {} : { limit }),
       ...(values.before === undefined ? {} : { before: values.before }),
     });
+    return {
+      ...result,
+      messages: result.messages.map((message) => {
+        const effects = message.toolApprovalRequest?.effects;
+        return effects === undefined
+          ? message
+          : {
+              ...message,
+              effectLabels: {
+                en: toolEffectLabels(effects, 'en'),
+                zh: toolEffectLabels(effects, 'zh'),
+              },
+            };
+      }),
+    };
   }
   if (command === 'tool-approval-status')
     return rpc('toolApprovalStatus', { channelId: target, messageId });

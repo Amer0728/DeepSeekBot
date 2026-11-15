@@ -1,3 +1,4 @@
+import { hasIrreversibleExternalEffect, toolEffects } from '../workspaces/tool-effects.js';
 import { TeamError } from '../team/error.js';
 import { botOwner } from '../team/bot-access.js';
 import { humanContext } from '../humans/context.js';
@@ -4975,6 +4976,18 @@ class BotRuntimeImplementation implements BotRuntime {
         observeReads: false,
       }),
     };
+    if (
+      hasIrreversibleExternalEffect(toolEffects(tool, args)) ||
+      toolEffects(tool, args)?.authority === 'management'
+    ) {
+      this.#ownership.claim({
+        sessionId,
+        botSlug,
+        rootRole: 'orchestrator',
+        provenance: 'created',
+        at: this.#now().toISOString(),
+      });
+    }
     const started = this.#now();
     const record = (outcome: 'ok' | 'error', result: string) => {
       const calls = this.#directToolCalls.get(bot.slug) ?? [];
