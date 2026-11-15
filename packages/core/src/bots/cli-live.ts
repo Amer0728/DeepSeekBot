@@ -40,6 +40,7 @@ import { dmChannelId } from '../channels/channel.js';
 import type { BotCreateCliIo } from './bot-create-cli.js';
 import { CliLiveError } from './cli-live-error.js';
 import { CONNECTION_COMMANDS, runConnectionCommand } from './cli-connection.js';
+import { TOB_CLI_COMMANDS, runTobCli } from './cli-tob.js';
 import { BOT_TOOL_COMMANDS, runBotToolCommand } from './cli-bot-tool.js';
 import {
   CALL_TIMELINE_COMMANDS,
@@ -225,6 +226,7 @@ export const LIVE_COMMANDS = [
   ...BROWSER_COMPUTER_COMMANDS,
   ...PROFILE_COMMANDS,
   ...BOT_TOOL_COMMANDS,
+  ...TOB_CLI_COMMANDS,
   ...TAKEOVER_COMMANDS,
   ...TODO_COMMANDS,
   ...APPROVAL_TEMPLATE_COMMANDS,
@@ -1150,6 +1152,10 @@ export async function runLiveCli(
     );
   if (isTakeoverCommand(command))
     return runTakeoverCommand(command, rest, values, () =>
+      connectLiveHost(values, io, AbortSignal.timeout(timeoutMs(values.timeout))),
+    );
+  if (command === 'tob-cli')
+    return runTobCli(rest, values, io, () =>
       connectLiveHost(values, io, AbortSignal.timeout(timeoutMs(values.timeout))),
     );
   if (BOT_TOOL_COMMANDS.some((entry) => entry.command === command))

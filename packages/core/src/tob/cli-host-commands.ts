@@ -14,7 +14,7 @@ import type { PrepareTobOperation, TobCliCapability } from './cli-operations.js'
 import { TobError } from './service.js';
 
 const REFUSED_OPTIONS = ['--host', '--token-file', '--home', '--as', '--administration'];
-const REFUSED_COMMANDS = new Set(['ssh-tunnel', 'voice-local-kit', 'audit', 'private']);
+const REFUSED_COMMANDS = new Set(['ssh-tunnel', 'voice-local-kit', 'audit', 'private', 'tob-cli']);
 const MAX_ARGS = 256;
 const MAX_ARG_BYTES = 64 * 1024;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;

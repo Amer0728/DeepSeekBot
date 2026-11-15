@@ -503,6 +503,7 @@ export interface ChannelMessage {
 
   onboardingWelcome?: { version: 1; kind?: 'tob' };
 
+  tobCliRequestId?: string;
   memorySwitchTarget?: string;
 
   mentions?: ChannelMention[];
@@ -866,6 +867,14 @@ export function isChannelMessage(value: unknown): value is ChannelMessage {
   if (
     voiceCall !== undefined &&
     (!isChannelVoiceCallMessage(voiceCall) ||
+      (message['author'] as ChannelMessageAuthor)?.kind !== 'human')
+  )
+    return false;
+  const cliRequest = message['tobCliRequestId'];
+  if (
+    cliRequest !== undefined &&
+    (typeof cliRequest !== 'string' ||
+      !/^[a-f0-9-]{36}$/u.test(cliRequest) ||
       (message['author'] as ChannelMessageAuthor)?.kind !== 'human')
   )
     return false;

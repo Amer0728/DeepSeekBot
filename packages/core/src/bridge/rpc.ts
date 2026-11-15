@@ -1,3 +1,4 @@
+import type { TobCliCommand, TobCliStatus } from '../tob/cli-request.js';
 import type {
   BotMetadata,
   BotMetadataResult,
@@ -2181,6 +2182,16 @@ export class BotharnessBridgeService extends TypertRemoteService {
   channelAllBotPreview(channelId: string): AllBotPreview {
     return unwrap(this.methods.channelAllBotPreview({ channelId }));
   }
+  async tobCli(
+    action: 'start' | 'status' | 'cancel',
+    command?: TobCliCommand,
+    id?: string,
+  ): Promise<TobCliStatus> {
+    return unwrap(
+      await this.methods.tobCli(action === 'start' ? { action, command } : { action, id }),
+    );
+  }
+
   channelSendStatus(channelId: string, messageId: string): ChannelSendStatus {
     return unwrap(this.methods.channelSendStatus({ channelId, messageId }));
   }
@@ -3324,6 +3335,7 @@ markRemoteMethods(BotharnessBridgeService.prototype, [
   'messageSearch',
   'channelUnreadCounts',
   'channelAllBotPreview',
+  'tobCli',
   'channelSend',
   'channelSendStatus',
   'channelGenuiView',

@@ -390,3 +390,16 @@ it('covers the landed im-reconnect owner without inventing permission changes', 
     }),
   ).toEqual({ changes: 'reversible', reach: 'external', personalData: true });
 });
+
+it('shares typed native CLI effects while keeping unknown command provenance opaque', () => {
+  const argv = ['approval-template-set', 'fixture-bot', 'fixture-template'];
+  expect(toolEffects('deepseekbot_cli', { argv, stdin: '' })).toEqual(
+    toolEffects('deepseekbot approval-template-set', { patch: { argv } }),
+  );
+  expect(toolEffects('deepseekbot_cli', { argv: ['unknown-family'], stdin: '' })).toBeUndefined();
+  expect(
+    toolEffects('deepseekbot_cli', {
+      argv: ['marketplace-upload', 'fixture-bot', '--out=fixture.json'],
+    }),
+  ).toMatchObject({ changes: 'irreversible', reach: 'external' });
+});

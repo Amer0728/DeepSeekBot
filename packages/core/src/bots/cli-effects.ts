@@ -29,6 +29,7 @@ const destructiveSecretManagement = {
 } satisfies ToolEffects;
 
 export const CLI_EFFECTS = {
+  'tob-cli': { effects: management, brokerRead: false },
   access: { effects: read, brokerRead: true },
   'access-set': { effects: management, brokerRead: false },
   acknowledge: { effects: write, brokerRead: false },
@@ -619,6 +620,8 @@ function familyEffects(
       return values.review === undefined ? externalRead : externalWrite;
     case 'voice-provider-add':
       return { ...write, ...(values['key-stdin'] ? { secrets: true } : {}) };
+    case 'tob-cli':
+      return action === 'status' ? read : action === 'cancel' ? write : undefined;
     case 'bot-tool':
     case 'browser-tool':
     case 'computer-tool':

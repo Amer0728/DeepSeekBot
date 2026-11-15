@@ -2113,3 +2113,17 @@ Tool effect declarations (E1) preserve the existing tool commands and approval o
 The CLI and Tob broker share application-defined command effect declarations. Lint checks actual command registration arrays and entry dispatch branches, independently of the search index. A declaration is not authorization: direct online commands retain authenticated Host owner checks; the broker retains Human DM origin, target ownership, exact argv and stdin hash, confirmation flags, revisions, cancellation and live execution fences. Unknown commands remain undeclared, retain broker approval, and receive the existing CLI refusal. Mixed-purpose commands keep conservative declarations and their existing approval gates; unmigrated Shell text protection remains active.
 
 Effect resolution uses the CLI's strict argument parser. `channels send` and member-device revocation cannot inherit the same family's broker read admission. `bots` aliases resolve by their dispatched action. Arbitrary tool calls and generic `settings-set` remain opaque when their stdin is unavailable in the proposal; a stdin hash binds operation identity and supplies neither authority nor trusted effects.
+
+## Model-free Tob CLI requests
+
+The authenticated Host Owner can run a typed Tob CLI command without a model. Put `{"argv":["approval-templates"],"stdin":""}` in a private JSON file, then run:
+
+```sh
+deepseekbot tob-cli start --args-stdin < request.json
+deepseekbot tob-cli status <request-id>
+deepseekbot tob-cli cancel <request-id>
+```
+
+Start returns `{id,channelId,messageId,state,cancelRequested}`. The Host records a genuine Human DM and accepts it through the existing Source Event/Admission owner. Its live Tob Orchestrator executes the scoped `deepseekbot_cli` Tool and broker without a model request. No actor, Source Event, Session, cwd or permission override is accepted. Writes keep the existing real approval card; use `tool-approval-status` and `tool-approval-decide`, or decide in the Tob DM. Status becomes `completed` with `result:{exitCode,stdout,stderr}`, or `failed` / `cancelled` with a code. A completed invocation can contain a command refusal: inspect exitCode and JSON stdout. Cancellation is a request until settlement; it does not undo an effect already committed.
+
+Only one live CLI request is allowed; `bot-busy` refuses overlap with another request, a model turn or a direct tool. The Host refuses unavailable authority (`tob-authority-required`), a closed runtime (`runtime-closed`), and missing/expired request IDs (`cli-request-unavailable`). Results last at most ten minutes after settlement (sixteen retained entries); restart expires them. Commands time out after ten minutes. Input is limited to 256 argv entries / 64 KiB argv and one MiB stdin, output to one MiB combined. Stdin is never copied into the DM. Keep private request files local. After an uncertain result, read the command owner’s canonical state before starting another request. See [ADR-0343](adr/0343-model-free-tob-cli-uses-the-accepted-human-dm-turn.md).
