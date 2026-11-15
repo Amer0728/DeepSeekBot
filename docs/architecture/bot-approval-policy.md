@@ -111,3 +111,11 @@ The User confirmed the design after questions Q1–Q18 and a complete summary. T
 Future delivery must demonstrate inherited versus specific/Off behavior, Reviewer conflict/uncertainty routing, deterministic bypass without an LLM call, Bot-only card-rule scope, disclosed deletion fallback, captured policy versions, failure routing and management refusal without valid authority. These are acceptance requirements, not claims that tests or the runtime already implement them.
 
 Performance assessment: this change edits documentation only, introduces no dependency and changes no runtime hot path, so no runtime benchmark is warranted. Future E2/E3 work must separately budget added admission work and model calls, prove deterministic hits make no Reviewer call, and verify the affected real journey under the repository's performance policy.
+
+The #4244 editor retains the template-file owner and 32 KiB bounded reads. ADR-0342 records the v1 content representation; legacy Markdown maps intact to free text. Copies contain only content. Save and apply are separate choices, shared-original editing shows global inheritors among actual users, and content edits affect future Reviews.
+
+## Human approval result presentation
+
+A Reviewer handoff appends an explicit `ask-human` result to the canonical Channel before the Human request, with its captured template identity/version, sanitized input and reason. Record failure still routes to Human; cancellation and owner changes cannot grant authorization. Historical autonomous rejection records remain readable; the historical rejection override cannot accept an `ask-human` record.
+
+The Web and mobile Human approval card keeps its full request content after Allow once, Always allow or Reject. Only the operation area becomes the selected, disabled result. Open details remain open across a decision, and historical cards retain the original content on reload. Mobile projects validated display-only request content from the existing Channel message, without per-card history/status reads; cached content never authorizes a decision. Missing or malformed historical content is shown as unavailable.

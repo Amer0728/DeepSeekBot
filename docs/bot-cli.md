@@ -475,6 +475,9 @@ printf '{"token":"…"}' | deepseekbot im-app-add discord --credentials-stdin
 deepseekbot im-app-status discord
 deepseekbot im-bind <bot-id> --app <app-id>
 deepseekbot im-status <bot-id>
+deepseekbot im-status <bot-id> --read-mode saved
+deepseekbot messaging-grants <bot-id> --read-mode status
+deepseekbot channel-bridges <channel-id> --read-mode saved
 deepseekbot channel-ingests <channel>
 deepseekbot channel-connect <channel> --bot <bot-id> --conversation <external-id>
 deepseekbot im-reconnect <bot-id> --app <app-id>
@@ -485,6 +488,8 @@ deepseekbot im-app-remove discord --app <app-id>
 `im-app-add` covers token-based platforms (Discord, Slack, QQ, DingTalk, WeCom, Matrix); Feishu and WeChat keep `im-authorize`. Credentials arrive only on stdin and are never printed; output lists each app's id, name, connection state and error code. `im-bind` binds a connected app (the `id` from `im-app-status`, also the `ref` in `im-status`) to a Bot, and `im-status` shows each binding's `reception`. `channel-connect` attaches an external group conversation to a Channel as context through that Bot's binding; the conversation must already be known to the binding, so mention the app there once and pick the id from the `candidates` in `channel-ingests`. Otherwise the Host refuses with `conversation-unavailable`.
 
 `im-status` and `messaging-grants` include process-local `recovery` metadata: `retrying` with `reason`, `attempt`, `nextRetryAt`, or `action-required` with `reason`. Temporary provider readiness failures retry exponentially from 250 ms to a 30 s cap until recovery. Host restart reconstructs receivers from enabled bindings and grants. `im-reconnect` uses the existing Owner and current revision without changing conversation access. Failed mutations are reported, never automatically replayed.
+
+`im-status`, `messaging-grants` and `channel-bridges` support `--read-mode saved|status`. `saved` returns local configuration promptly with `checks: pending`; capability/availability fields are not verified permissions. `status` checks only bound accounts and grants with `checks: complete`, sharing account inspections only within the current request. Omitting the flag retains full app/setup discovery. Mutations reject this flag and keep their fresh Owner checks. See [ADR-0343](adr/0343-im-settings-project-saved-configuration-before-live-checks.md).
 
 ### IM messaging, approvals and failure alerts from the CLI
 
@@ -2107,3 +2112,21 @@ deepseekbot models allowed [--as <username>]
 ```
 
 Tool effect declarations (E1) preserve the existing tool commands and approval outcomes. Full Access, saved rules, Secrets, device targets and Workspace Grants retain their existing checks; no new route or CLI authority is introduced.
+
+### Three-part approval guidance
+
+Create an empty draft explicitly with `deepseekbot approval-template create my-draft --blank`, or an independent copy with `deepseekbot approval-template create my-copy --from cautious`. No source is selected implicitly; copies retain no origin link. Existing `--file` / `--text-stdin` Markdown input remains supported.
+
+For three-part editing, write a UTF-8 JSON file:
+
+```json
+{
+  "alwaysAsk": ["Send messages or spend money"],
+  "alwaysAllow": ["Read local project files"],
+  "freeText": "Ask me when unsure."
+}
+```
+
+Run `deepseekbot approval-template edit my-draft --parts-file guidance.json`. Read it back with `deepseekbot approval-template show my-draft`; `text` contains the versioned representation. Add `--apply-to <bot-id>` to create/edit to save and then select it for that Bot. Without that flag, saving changes no selection. Applying uses the existing Bot selection authorization; if applying fails, the saved draft remains and can be selected separately.
+
+Editing a shared original affects future Reviews for every Bot in its `usedBy` list, including global inheritors. Copy first to work independently. Always ask has priority over Always allow, then free text supplements both. These are fallible natural-language instructions, never deterministic Tool Approval Rules. Conflicts, missing coverage or uncertainty ask the Human. Legacy Markdown remains intact as free text when converted; already-started Reviews retain their captured content/version.

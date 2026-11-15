@@ -1,3 +1,8 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createApprovalTemplateLibrary } from '../src/workspaces/approval-templates.js';
+import { encodeApprovalTemplateGuidance } from '../src/workspaces/approval-template-guidance.js';
 import { OWNER_HUMAN_CONTEXT } from '../src/humans/context.js';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -76,6 +81,9 @@ function fixture(
   const channels = {
     get: vi.fn((id: string) => (id === channelId ? channel : undefined)),
     getOrCreateDm: vi.fn(() => channel),
+    message: vi.fn((_id: string, messageId: string) =>
+      messages.find((message) => message.id === messageId),
+    ),
     appendMessage: vi.fn(async (_human: unknown, id: string, message: ChannelMessage) => {
       if (id !== channelId) return undefined;
       messages.push(message);
@@ -120,7 +128,7 @@ function fixture(
   const execution = (args: Record<string, unknown> = { todos: [] }, name = 'todo_write') =>
     ({ agent, name, callId: 'call-1', arguments: args, token: Symbol('call') }) as ToolExecution;
   const ask = (name = 'todo_write') => broker.ask({ agent, toolName: name, callId: 'call-1' });
-  return { broker, messages, review, log, execution, ask };
+  return { broker, messages, channels, review, log, execution, ask };
 }
 
 describe('Full Access approval composition', () => {
@@ -221,6 +229,28 @@ describe('Approval Templates', () => {
 });
 
 describe('Approval Reviewer input', () => {
+  it('assembles ask, allow and supplemental guidance in priority order without compiling rules', () => {
+    const prompt = reviewerUserPrompt({
+      botSlug,
+      template: {
+        name: 'three-parts',
+        version: 'captured',
+        text: encodeApprovalTemplateGuidance({
+          alwaysAsk: ['Never send without asking'],
+          alwaysAllow: ['Read local files'],
+          freeText: '# Legacy\nKeep all markup.',
+        }),
+      },
+      call: { toolName: 'read_file', input: '{}', cwd: '/', role: 'orchestrator', channelId },
+      excerpt: { humanMessages: [], toolCalls: [] },
+    });
+    expect(prompt.indexOf('Never send without asking')).toBeLessThan(
+      prompt.indexOf('Read local files'),
+    );
+    expect(prompt.indexOf('Read local files')).toBeLessThan(prompt.indexOf('# Legacy'));
+    expect(prompt).toContain('version="captured"');
+    expect(REVIEWER_SYSTEM_PROMPT).toContain('Never reject a call or save a rule');
+  });
   it('keeps the Human messages and earlier tool calls, and leaves out results and Bot prose', () => {
     const excerpt = approvalSessionExcerpt(events, 'call-1');
     expect(excerpt.humanMessages).toEqual(['Plan the release, but do not send anything yet.']);
@@ -449,6 +479,48 @@ describe('Approval Reviewer input', () => {
 });
 
 describe('Approval Reviewer in the tool approval gate', () => {
+  it('uses saved three-part content for a captured Review and leaves later file edits for the next Review', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'saved-guidance-review-'));
+    try {
+      const library = createApprovalTemplateLibrary(dir);
+      const original = encodeApprovalTemplateGuidance({
+        alwaysAsk: ['Send messages'],
+        alwaysAllow: ['Keep a plan'],
+        freeText: '# Legacy\nAsk if unsure.',
+      });
+      library.create('saved', original);
+      let finish!: (review: ApprovalReview) => void;
+      const state = fixture({
+        lookup: () => library.get('saved'),
+        review: async (request) => {
+          expect(reviewerUserPrompt(request)).toContain('Keep a plan');
+          return new Promise((resolve) => {
+            finish = resolve;
+          });
+        },
+      });
+      state.broker.track(state.execution());
+      const answer = state.ask();
+      await vi.waitFor(() => expect(state.review).toHaveBeenCalledTimes(1));
+      library.update(
+        'saved',
+        encodeApprovalTemplateGuidance({
+          alwaysAsk: ['Everything'],
+          alwaysAllow: [],
+          freeText: '',
+        }),
+      );
+      expect(state.review.mock.calls[0]?.[0].template.text).toBe(original);
+      finish({ outcome: 'allow', reason: 'Planning is covered.' });
+      expect(await answer).toBe('allowed-once');
+      expect(state.messages[0]?.toolAutoApproval?.templateVersion).toBe(
+        state.review.mock.calls[0]?.[0].template.version,
+      );
+      expect(library.get('saved')?.text).not.toBe(original);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it('posts a Human card even when selected-template lookup and diagnostics both fail', async () => {
     const state = fixture({
       lookup: () => {
@@ -489,8 +561,14 @@ describe('Approval Reviewer in the tool approval gate', () => {
       });
       state.broker.track(state.execution());
       const answer = state.ask();
-      await vi.waitFor(() => expect(state.messages).toHaveLength(1));
-      expect(state.messages[0]?.toolApprovalRequest?.approvalReview).toMatchObject({
+      await vi.waitFor(() => expect(state.messages).toHaveLength(2));
+      expect(state.messages[0]?.toolAutoApproval).toMatchObject({
+        outcome: 'ask-human',
+        template: 'original',
+        templateVersion: state.review.mock.calls[0]?.[0].template.version,
+      });
+      expect(JSON.stringify(state.messages[0])).not.toContain('private diagnostics');
+      expect(state.messages[1]?.toolApprovalRequest?.approvalReview).toMatchObject({
         kind: 'review',
         template: 'original',
         version: expect.stringMatching(/^[a-f0-9]{64}$/),
@@ -503,7 +581,7 @@ describe('Approval Reviewer in the tool approval gate', () => {
           templateVersion: state.review.mock.calls[0]?.[0].template.version,
         }),
       );
-      await state.broker.decide(OWNER_HUMAN_CONTEXT, botSlug, state.messages[0]!.id, 'rejected');
+      await state.broker.decide(OWNER_HUMAN_CONTEXT, botSlug, state.messages[1]!.id, 'rejected');
       expect(await answer).toBe('rejected');
     },
   );
@@ -580,10 +658,10 @@ describe('Approval Reviewer in the tool approval gate', () => {
       const state = fixture({ review });
       state.broker.track(state.execution());
       const answer = state.ask();
-      await vi.waitFor(() => expect(state.messages).toHaveLength(1));
-      expect(state.messages[0]!.toolApprovalRequest?.toolName).toBe('todo_write');
+      await vi.waitFor(() => expect(state.messages).toHaveLength(2));
+      expect(state.messages[1]!.toolApprovalRequest?.toolName).toBe('todo_write');
       expect(
-        await state.broker.decide(OWNER_HUMAN_CONTEXT, botSlug, state.messages[0]!.id, 'rejected'),
+        await state.broker.decide(OWNER_HUMAN_CONTEXT, botSlug, state.messages[1]!.id, 'rejected'),
       ).toBe(true);
       expect(await answer).toBe('rejected');
       expect(state.broker.takeReviewRejection(sessionId, 'call-1')).toBeUndefined();
@@ -712,10 +790,10 @@ describe('Approval Reviewer in the tool approval gate', () => {
     });
     state.broker.track(state.execution(secretArgs, 'secret_cli'));
     const answer = state.ask('secret_cli');
-    await vi.waitFor(() => expect(state.messages).toHaveLength(1));
+    await vi.waitFor(() => expect(state.messages).toHaveLength(2));
     expect(state.review.mock.calls[0]![0].template.name).toBe('cautious');
-    expect(state.messages[0]!.toolApprovalRequest?.toolName).toBe('secret_cli');
-    await state.broker.decide(OWNER_HUMAN_CONTEXT, botSlug, state.messages[0]!.id, 'rejected');
+    expect(state.messages[1]!.toolApprovalRequest?.toolName).toBe('secret_cli');
+    await state.broker.decide(OWNER_HUMAN_CONTEXT, botSlug, state.messages[1]!.id, 'rejected');
     expect(await answer).toBe('rejected');
   });
 
@@ -747,5 +825,62 @@ describe('Approval Reviewer in the tool approval gate', () => {
     expect(allowWork).toContain('secret_cli');
     expect(allowWork).toContain('known program');
     expect(allowWork).toContain('Browser Authorization');
+  });
+});
+
+describe('Reviewer handoff records', () => {
+  it('still asks the Human when recording the handoff fails', async () => {
+    const state = fixture({
+      review: async () => ({ outcome: 'ask-human', reason: 'Please confirm.' }),
+    });
+    const append = vi.mocked(state.channels.appendMessage).getMockImplementation()!;
+    vi.spyOn(state.channels, 'appendMessage').mockImplementation(async (...args) => {
+      if (args[2].toolAutoApproval !== undefined) throw new Error('record unavailable');
+      return append(...args);
+    });
+    state.broker.track(state.execution());
+    const answer = state.ask();
+    await vi.waitFor(() => expect(state.messages).toHaveLength(1));
+    expect(state.messages[0]?.toolApprovalRequest).toBeDefined();
+    await state.broker.decide(OWNER_HUMAN_CONTEXT, botSlug, state.messages[0]!.id, 'rejected');
+    expect(await answer).toBe('rejected');
+  });
+
+  it('records ask-human before the Human card, with the captured template and no legacy override', async () => {
+    const template = { name: 'private-policy', text: 'Review snapshot one' };
+    const state = fixture({
+      lookup: () => template,
+      review: async () => {
+        template.text = 'Edited during review';
+        return { outcome: 'ask-human', reason: 'Human should confirm this command.' };
+      },
+    });
+    state.broker.track(state.execution());
+    const answer = state.ask();
+    await vi.waitFor(() =>
+      expect(state.messages.some((message) => message.toolApprovalRequest)).toBe(true),
+    );
+    const record = state.messages[0]!;
+    const request = state.messages[1]!;
+    expect(record.toolAutoApproval).toMatchObject({
+      outcome: 'ask-human',
+      template: 'private-policy',
+      reason: 'Human should confirm this command.',
+    });
+    const snapshot = request.toolApprovalRequest?.approvalReview;
+    if (snapshot?.kind !== 'review') throw new Error('Missing Review snapshot');
+    expect(record.toolAutoApproval?.templateVersion).toBe(snapshot.version);
+    expect(request.toolApprovalRequest?.approvalReview).toMatchObject({
+      template: 'private-policy',
+      reason: 'Human should confirm this command.',
+    });
+    expect(await state.broker.overrideRejection(OWNER_HUMAN_CONTEXT, channelId, record.id)).toEqual(
+      { ok: false, code: 'not-rejected' },
+    );
+    expect(await state.broker.decide(OWNER_HUMAN_CONTEXT, botSlug, request.id, 'rejected')).toBe(
+      true,
+    );
+    expect(await answer).toBe('rejected');
+    expect(request.toolApprovalRequest?.input).toContain('todos');
   });
 });

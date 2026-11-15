@@ -5,6 +5,7 @@ A Bot inherits the optional global default, selects one complete shared template
 ## Sub-features
 
 - `library`: Bot settings → Auto approval → Global default template (DSH Select), existing template library and Reviewer model. No global default means inherited review is off. Read failures remain errors.
+- `editor`: New template requires Blank or one selected source; edit Always ask/Always allow rows and free text, save alone or apply to a named Bot. Copy a custom or built-in template independently; shared-original editing lists actual users including global inheritors. Read back full content and selection through CLI.
 - `cli`: `approval-template list --bot <bot>`, `approval-template-global-set <name|off>`, `approval-template-set <bot> <inherit|name|off>`; library create/edit commands retain existing Markdown contents.
 - `select`: Channel settings → Auto approval, or composer Workspace Grants panel → Auto approval, uses the same DSH Select. Inheritance shows its effective global source. Specific selection replaces global; Off retains deterministic rules.
 - `mobile`: Bot profile → Settings → Permissions → Workspace grants → Auto approval template, inside the existing iOS sheet / Android `ModalBottomSheet`. Inherit global shows the resolved global template (or Off); selecting Off then Inherit global writes null then @global through the same Host owner. Legacy Hosts without a global-selection field retain their supported choices.
@@ -35,5 +36,9 @@ Use the shared device QA lane and T3 device tools. The same synthetic Bot and is
 ## Gotchas
 
 - `/tmp` may already be writable; an ordinary file write there need not reach an approval gate.
-- Three-part editing and the card-rule table are separate issues; deletion qualification does not substitute for those journeys.
+- Three-part editing, confirmed bulk deletion and the card-rule table have distinct journeys. Verify legacy Markdown conversion, next-Review snapshot behavior and deletion fallback separately.
 - Browser screenshots establish Web behavior only. Preserve failed drives and observe before retrying.
+
+## Human result retention (#4211)
+
+After Reviewer asks the Human, verify a compact sent-to-Human row precedes the real request. Open request details, then Allow once, Always allow or Reject: command/tool/folder/input remain, opened details stay open, and the chosen disabled control is identifiable. Reload history and verify the full request remains readable with no resubmission. Mobile uses the existing validated message projection for decided history without one timeline/status RPC per card; malformed/purged content stays unavailable. Historical Reviewer rejection rows remain readable; new ask-human rows cannot be overridden as rejections. Use the public online CLI synthetic missing-secret path on Windows; do not run the native-pwsh journey under the Human no-PowerShell constraint.

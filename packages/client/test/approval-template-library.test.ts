@@ -64,9 +64,9 @@ function trigger(): HTMLButtonElement {
   if (!found) throw new Error('Missing global selection');
   return found;
 }
-async function render(call: BridgeCall): Promise<void> {
+async function render(call: BridgeCall, store = createStore()): Promise<void> {
   await act(async () =>
-    root.render(createElement(ApprovalTemplateLibrarySettings, { call, store: createStore(), t })),
+    root.render(createElement(ApprovalTemplateLibrarySettings, { call, store, t })),
   );
 }
 
@@ -416,4 +416,120 @@ it('reads canonical deletion after the confirmation dialog closes during the wri
   expect(writes).toBe(1);
   expect(host.querySelector('[data-approval-template="night-shift"]')).toBeNull();
   expect(trigger().textContent).toContain(t('autoApproval.off'));
+});
+
+async function clickText(label: string): Promise<void> {
+  const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+    (item) => item.textContent === label,
+  );
+  if (!button) throw new Error('Missing button: ' + label);
+  await act(async () => button.click());
+}
+
+it('requires an explicit source before showing the blank three-part editor and does not apply on opening', async () => {
+  const calls: string[] = [];
+  const call: BridgeCall = async (endpoint) => {
+    calls.push(endpoint);
+    return { ok: true, value: { templates, globalDefault: null } };
+  };
+  await render(call);
+  await clickText(t('autoApproval.library.create'));
+  expect(document.querySelector('textarea')).toBeNull();
+  await clickText(t('autoApproval.library.chooseSource'));
+  await clickText(t('autoApproval.library.blank'));
+  expect(document.body.textContent).toContain(t('autoApproval.library.freeText'));
+  expect(document.body.textContent).toContain(t('autoApproval.library.saveOnly'));
+  expect(document.querySelector('textarea')?.value).toBe('');
+  await clickText(
+    t('autoApproval.library.addRow', { section: t('autoApproval.library.alwaysAsk') }),
+  );
+  expect(document.body.textContent).toContain(t('autoApproval.library.alwaysAsk') + ' 1');
+  expect(calls).toEqual(['approvalTemplates']);
+});
+
+it('starts an independent copy with save-only even after choosing apply for the shared original', async () => {
+  const store = createStore();
+  store.setRoster(
+    [
+      {
+        slug: 'qa',
+        displayName: 'QA',
+        roles: [],
+        aggregateState: 'idle',
+        workspaces: [],
+        createdAt: '2026-11-16',
+      },
+    ],
+    [],
+  );
+  store.select({ kind: 'bot', slug: 'qa' });
+  const calls: string[] = [];
+  const call: BridgeCall = async (endpoint) => {
+    calls.push(endpoint);
+    return {
+      ok: true,
+      value: {
+        templates: [
+          {
+            name: 'legacy',
+            title: 'Legacy',
+            description: '',
+            builtIn: false,
+            usedBy: ['qa'],
+            text: '# Legacy\r\nKeep this.',
+          },
+        ],
+        globalDefault: null,
+      },
+    };
+  };
+  await render(call, store);
+  const button = host.querySelector<HTMLButtonElement>('[data-approval-template="legacy"] button');
+  if (!button) throw new Error('Missing shared original');
+  await act(async () => button.click());
+  const choice = () =>
+    document.querySelector<HTMLButtonElement>(
+      'button[aria-label="' + t('autoApproval.library.saveChoice') + '"]',
+    );
+  await act(async () => choice()?.click());
+  await clickText(t('autoApproval.library.saveApply', { name: 'QA' }));
+  expect(choice()?.textContent).toContain('QA');
+  await clickText(t('autoApproval.library.copy'));
+  expect(choice()?.textContent).toContain(t('autoApproval.library.saveOnly'));
+  expect(document.querySelector('textarea')?.value).toBe(
+    '# Legacy\r\nKeep this.'.replaceAll('\r\n', '\n'),
+  );
+  expect(calls).toEqual(['approvalTemplates']);
+});
+
+it('identifies the selected source when independent templates have the same heading', async () => {
+  const call: BridgeCall = async () => ({
+    ok: true,
+    value: {
+      globalDefault: null,
+      templates: ['alpha', 'beta'].map((name) => ({
+        name,
+        title: 'Shared heading',
+        description: '',
+        builtIn: false,
+        usedBy: [],
+        text: '# ' + name,
+      })),
+    },
+  });
+  await render(call);
+  await clickText(t('autoApproval.library.create'));
+  await clickText(t('autoApproval.library.chooseSource'));
+  await clickText('Shared heading · beta');
+  expect(document.querySelector('textarea')?.value).toBe('# beta');
+});
+
+it('keeps the visible View action in accessible template names', async () => {
+  await render(async () => ({ ok: true, value: { templates, globalDefault: null } }));
+  const buttons = [...host.querySelectorAll<HTMLButtonElement>('[data-approval-template] button')];
+  expect(buttons).toHaveLength(2);
+  for (const button of buttons) {
+    expect(button.textContent).toBe(t('autoApproval.library.view'));
+    expect(button.getAttribute('aria-label')).toContain(button.textContent);
+  }
 });
