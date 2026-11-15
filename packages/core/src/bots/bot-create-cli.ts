@@ -14,8 +14,8 @@ import {
   unlinkSync,
 } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { parseArgs } from 'node:util';
-import { ZIP_UPLOAD_COMMANDS, ZIP_UPLOAD_OPTIONS, runZipUploadCli } from './cli-zip-upload.js';
+import { parseBotCliArgs } from './cli-options.js';
+import { ZIP_UPLOAD_COMMANDS, runZipUploadCli } from './cli-zip-upload.js';
 import { isMap, isScalar, parseDocument } from 'yaml';
 import { parseCredentialsDocument } from '@deepseek-ai/dsh-credentials-local';
 
@@ -80,11 +80,11 @@ import { personaBotAvatarFromBytes, type PersonaBotRecord } from './persona-bot.
 import { createPersonaBotRegistry, type PersonaBotRegistry } from './registry.js';
 import { ZipArchiveError, writeZip, type ZipEntry } from './zip-archive.js';
 import { INBOX_HOST_COMMANDS } from './cli-inbox.js';
-import { CliLiveError, LIVE_COMMANDS, LIVE_OPTIONS, runLiveCli } from './cli-live.js';
+import { CliLiveError, LIVE_COMMANDS, runLiveCli } from './cli-live.js';
 import { isActivityCommandName } from './cli-inbox.js';
 import { hasAgentCliContext, runAgentCli } from './cli-agent.js';
 import { runVoiceLocalKit, VOICE_LOCAL_KIT_HELP } from './cli-voice.js';
-import { runSshCli, SSH_COMMANDS, SSH_OPTIONS } from './cli-ssh.js';
+import { runSshCli, SSH_COMMANDS } from './cli-ssh.js';
 import { PROFILE_ONLINE_COMMANDS } from './cli-profile.js';
 import {
   isScheduleCommand,
@@ -541,70 +541,7 @@ const SECRET_ARGV = new Set([
   'verification-code',
 ]);
 
-const CREATE_OPTIONS = {
-  administration: { type: 'boolean' },
-  name: { type: 'string' },
-  persona: { type: 'string' },
-  'persona-stdin': { type: 'boolean' },
-  'core-memory-stdin': { type: 'boolean' },
-  description: { type: 'string' },
-  role: { type: 'string', multiple: true },
-  preset: { type: 'string' },
-  'preset-revision': { type: 'string' },
-  'operation-key': { type: 'string' },
-  ...ZIP_UPLOAD_OPTIONS,
-  'expected-profile': { type: 'string' },
-  'erase-memory': { type: 'boolean' },
-  'from-zip': { type: 'string' },
-  'from-dir': { type: 'string' },
-  'from-git': { type: 'string' },
-  'expected-commit': { type: 'string' },
-  'memory-location': { type: 'string' },
-  home: { type: 'string' },
-  'orchestrator-provider': { type: 'string' },
-  'orchestrator-model': { type: 'string' },
-  'orchestrator-effort': { type: 'string' },
-  'assignment-provider': { type: 'string' },
-  'assignment-model': { type: 'string' },
-  'assignment-effort': { type: 'string' },
-  nickname: { type: 'string' },
-  clear: { type: 'boolean' },
-  path: { type: 'string' },
-  body: { type: 'string' },
-  'body-stdin': { type: 'boolean' },
-  'expected-head': { type: 'string' },
-  'edit-id': { type: 'string' },
-  limit: { type: 'string' },
-  sha: { type: 'string' },
-  before: { type: 'string' },
-  cursor: { type: 'string' },
-  state: { type: 'string' },
-  'confirmation-stdin': { type: 'boolean' },
-  grant: { type: 'string' },
-  enabled: { type: 'boolean' },
-  disabled: { type: 'boolean' },
-  locked: { type: 'boolean' },
-  unlocked: { type: 'boolean' },
-  title: { type: 'string' },
-  prompt: { type: 'string' },
-  sid: { type: 'string' },
-  every: { type: 'string' },
-  daily: { type: 'string' },
-  weekly: { type: 'string' },
-  weekdays: { type: 'string' },
-  'once-date': { type: 'string' },
-  'once-time': { type: 'string' },
-  cron: { type: 'string' },
-  timezone: { type: 'string' },
-  ...LIVE_OPTIONS,
-  ...SSH_OPTIONS,
-  compact: { type: 'boolean' },
-  help: { type: 'boolean', short: 'h' },
-} as const;
-
-export type CreateValues = ReturnType<
-  typeof parseArgs<{ options: typeof CREATE_OPTIONS; allowPositionals: true }>
->['values'];
+export type CreateValues = ReturnType<typeof parseBotCliArgs>['values'];
 
 class CliFailure extends Error {
   readonly code: string;
@@ -2648,12 +2585,7 @@ export async function runBotCreateCli(
   };
   try {
     rejectSecretArgv(argv);
-    const { values, positionals } = parseArgs({
-      args: [...argv],
-      options: CREATE_OPTIONS,
-      allowPositionals: true,
-      strict: true,
-    });
+    const { values, positionals } = parseBotCliArgs(argv);
     let [command, ...rest] = positionals;
     if (command === 'bots') {
       const [action, ...targets] = rest;

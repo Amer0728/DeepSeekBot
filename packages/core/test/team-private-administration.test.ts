@@ -488,6 +488,11 @@ it.each([
   ['model-plan', 'alice-bot'],
   ['bot-avatar-set', 'dm-alice-bot'],
   ['members', 'transfer', 'alice', '--to', 'bob'],
+  ['members', '--compact', 'transfer', 'alice', '--to', 'owner'],
+  ['members', '--name', 'ignored', 'transfer', 'alice', '--to=owner'],
+  ['members', '--compact', 'purge', 'alice', '--confirm'],
+  ['members', '--to', 'owner', 'purge', 'alice', '--confirm'],
+  ['members', '--', 'purge', 'alice'],
 ])(
   'refuses generic Owner Tob delegation of %j to foreign private Bot administration',
   async (...argv) => {
@@ -608,13 +613,14 @@ it.each([
   'targetBotSlug',
   'sourceChannelId',
   'targetChannelId',
+  'members',
 ])('denies private content selectors at the Tob dispatch boundary: %s', async (field) => {
   const f = await fixture();
   const value = field.toLowerCase().includes('channel') ? 'dm-alice-bot' : 'alice-bot';
   for (const id of [value, ` ${value} `])
     expect(() =>
       authorizeTobBotTargets(
-        { [field]: id },
+        { [field]: field === 'members' ? ['owner-bot', id] : id },
         { registry: f.core.registry, channels: f.core.channels, human: owner },
       ),
     ).toThrow(expect.objectContaining({ code: 'permission-required' }));
@@ -646,4 +652,27 @@ it.each([
     error: { code, message: code, ...(details ? { details } : {}) },
   });
   expect(JSON.stringify(result)).not.toContain(SECRET);
+});
+
+it('allows parsed member reads and rechecks every group-create member after approval', async () => {
+  const f = await fixture();
+  const deps = { registry: f.core.registry, channels: f.core.channels, human: owner };
+  expect(() => authorizeTobHostCli(['members', '--name', 'transfer', 'list'], deps)).not.toThrow();
+  const args = { name: 'Group', members: ['owner-bot'] };
+  expect(() => authorizeTobBotTargets(args, deps)).not.toThrow();
+  const reads = vi.spyOn(f.core.registry, 'getHistorical');
+  expect(() =>
+    authorizeTobBotTargets({ members: Array.from({ length: 101 }, () => 'owner-bot') }, deps),
+  ).toThrow(expect.objectContaining({ code: 'invalid-request' }));
+  expect(reads).not.toHaveBeenCalled();
+  f.db.transaction((db) =>
+    db
+      .prepare(
+        "UPDATE persona_bots SET owner_human_id = 'alice', body = json_set(body, '$.ownerHumanId', 'alice') WHERE slug = 'owner-bot'",
+      )
+      .run(),
+  );
+  expect(() => authorizeTobBotTargets(args, deps)).toThrow(
+    expect.objectContaining({ code: 'permission-required' }),
+  );
 });

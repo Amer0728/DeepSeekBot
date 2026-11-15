@@ -21,6 +21,7 @@ import {
   privateOpenSchema,
   privatePageSchema,
   type PrivateObject,
+  type PrivateObjectListing,
 } from './private-contract.js';
 
 const VIEW_TTL = 30 * 60 * 1000;
@@ -83,7 +84,7 @@ export class TeamPrivateContent {
         )
         .map((row) => [row.channel_id, row.owner_human_id]),
     );
-    const bySlug = new Map(bots.map((bot) => [bot.slug, bot]));
+    const bySlug = new Map(provider.registry.listHistorical().map((bot) => [bot.slug, bot]));
     for (const channel of this.channels.list()) {
       if (channel.deletedAt || channel.remoteBot) continue;
       if (channel.type === 'group') {
@@ -147,7 +148,7 @@ export class TeamPrivateContent {
     );
   }
 
-  objects(human: HumanContext, payload: unknown): PrivateObject[] {
+  objects(human: HumanContext, payload: unknown): PrivateObjectListing[] {
     this.require(human, 'privateContent.view');
     const input = privateListSchema.parse(payload);
     if (input.humanId !== undefined && input.username !== undefined)
@@ -167,7 +168,7 @@ export class TeamPrivateContent {
       : input.humanId;
     const blocked = this.blockedOwners(human);
     const readable = this.channelAccess.visibleIds(human, false);
-    return this.candidates().filter(
+    const objects = this.candidates().filter(
       (object) =>
         !object.ownerHumanIds.includes(human.humanId) &&
         !(object.kind === 'channel' && readable.has(object.objectId)) &&
@@ -175,6 +176,25 @@ export class TeamPrivateContent {
         (input.kind === undefined || object.kind === input.kind) &&
         (humanId === undefined || object.ownerHumanIds.includes(humanId)),
     );
+    const owners = [...new Set(objects.flatMap((object) => object.ownerHumanIds))];
+    const names = new Map(
+      z
+        .array(z.object({ human_id: z.string(), display_name: z.string() }))
+        .parse(
+          this.db.read((db) =>
+            db
+              .prepare(
+                'SELECT human_id, display_name FROM humans WHERE human_id IN (SELECT value FROM json_each(?))',
+              )
+              .all(JSON.stringify(owners)),
+          ),
+        )
+        .map((row) => [row.human_id, row.display_name]),
+    );
+    return objects.map((object) => ({
+      ...object,
+      ownerNames: object.ownerHumanIds.map((id) => names.get(id) ?? ''),
+    }));
   }
 
   private resolve(
@@ -211,7 +231,7 @@ export class TeamPrivateContent {
           const owners =
             channel.humanParticipants ??
             channel.members.flatMap((slug) => {
-              const bot = this.provider?.registry.get(slug);
+              const bot = this.provider?.registry.getHistorical(slug);
               return bot ? [botOwner(bot)] : [];
             });
           if (kind === actualKind && owners.length)
@@ -289,10 +309,14 @@ export class TeamPrivateContent {
       ownerHumanIds: object.ownerHumanIds,
       ...(input.reason === undefined ? {} : { reason: input.reason }),
     });
+    const content = this.load(object);
     this.views.set(viewId, { humanId: human.humanId, expires: this.now() + VIEW_TTL, object });
+    return { viewId, ...content };
+  }
+
+  private load(object: PrivateObject) {
     const provider = this.provider;
-    if (object.kind !== 'bot' || !provider)
-      return { viewId, object, messages: this.messages(object) };
+    if (object.kind !== 'bot' || !provider) return { object, messages: this.messages(object) };
     const bot = provider.registry.get(object.objectId);
     const profile = bot && { ...bot };
     const memoryFiles = provider.memory
@@ -300,7 +324,6 @@ export class TeamPrivateContent {
       .files.map((path) => provider.memory.readAccepted(object.objectId, path))
       .filter((file) => file !== undefined);
     return {
-      viewId,
       object: {
         ...object,
         profile,

@@ -1,3 +1,4 @@
+import { parseBotCliArgs } from '../bots/cli-options.js';
 import { ownsBot } from '../team/bot-access.js';
 import type { PersonaBotRegistry } from '../bots/registry.js';
 import type { ChannelStore } from '../channels/store.js';
@@ -221,6 +222,7 @@ export function authorizeTobBotTargets(
     human: HumanContext;
   },
 ): void {
+  const targets: unknown[] = [];
   for (const field of [
     'slug',
     'botSlug',
@@ -231,7 +233,13 @@ export function authorizeTobBotTargets(
     'sourceChannelId',
     'targetChannelId',
   ]) {
-    const value = args[field];
+    targets.push(args[field]);
+  }
+  if (Array.isArray(args['members'])) {
+    if (args['members'].length > 100) throw new TobError('invalid-request');
+    targets.push(...args['members']);
+  }
+  for (const value of targets) {
     if (typeof value !== 'string') continue;
     const id = value.trim();
     const bot = deps.registry.getHistorical(id);
@@ -256,8 +264,15 @@ export function authorizeTobHostCli(
     human: HumanContext;
   },
 ): void {
-  if (argv[0] === 'members' && ['transfer', 'purge'].includes(argv[1] ?? ''))
-    throw new TobError('permission-required');
+  if (argv[0] === 'members') {
+    let action: string | undefined;
+    try {
+      action = parseBotCliArgs(argv).positionals[1];
+    } catch {
+      throw new TobError('invalid-request');
+    }
+    if (action === 'transfer' || action === 'purge') throw new TobError('permission-required');
+  }
   for (const token of argv.slice(1)) {
     const value = token.includes('=') ? token.slice(token.indexOf('=') + 1) : token;
     authorizeTobBotTargets({ slug: value }, deps);

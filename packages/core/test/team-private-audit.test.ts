@@ -227,6 +227,112 @@ async function cliHost(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe('M11 private-content audit', () => {
+  it('lists ordered current owner display names without member-management permission, content or audit records', async () => {
+    const f = await fixture();
+    const viewer = f.team.roles.create(owner, 'Picker viewer', ['privateContent.view']).role;
+    f.team.roles.set(owner, carol.humanId, ['member', viewer.roleId]);
+    f.db.transaction((db) => {
+      db.prepare("UPDATE humans SET display_name = 'Zoe Display' WHERE human_id = 'alice'").run();
+      db.prepare("UPDATE humans SET display_name = 'Aaron Display' WHERE human_id = 'bob'").run();
+    });
+    expect(f.team.roles.permissions(carol)).not.toContain('members.manage');
+    const run = await cliHost(f);
+    const output = await run(['--as', 'carol', 'private', 'list']);
+    expect(output.status).toBe(0);
+    const rows = z
+      .array(
+        z
+          .object({
+            objectId: z.string(),
+            ownerHumanIds: z.array(z.string()),
+            ownerNames: z.array(z.string()),
+          })
+          .passthrough(),
+      )
+      .parse(output.output);
+    const names = new Map([
+      ['alice', 'Zoe Display'],
+      ['bob', 'Aaron Display'],
+    ]);
+    for (const row of rows) {
+      expect(Object.keys(row).sort()).toEqual(
+        ['objectId', 'kind', 'name', 'ownerHumanIds', 'ownerNames'].sort(),
+      );
+      expect(row.ownerNames).toEqual(row.ownerHumanIds.map((id) => names.get(id)));
+    }
+    expect(rows.find((row) => row.ownerHumanIds.length === 2)).toMatchObject({
+      ownerHumanIds: ['alice', 'bob'],
+      ownerNames: ['Zoe Display', 'Aaron Display'],
+    });
+    f.db.transaction((db) =>
+      db
+        .prepare("UPDATE humans SET display_name = 'Updated Display' WHERE human_id = 'alice'")
+        .run(),
+    );
+    expect(f.team.privateAccess.objects(carol, { kind: 'bot', humanId: 'alice' })).toMatchObject([
+      { ownerHumanIds: ['alice'], ownerNames: ['Updated Display'] },
+    ]);
+    expect(JSON.stringify(rows)).not.toContain('private profile');
+    expect(JSON.stringify(rows)).not.toContain('private-51');
+    expect(f.log().records).toHaveLength(0);
+  });
+
+  it('retains every DM owner after an interrupted Bot deletion and still protects Owner content', async () => {
+    const f = await fixture();
+    expect(f.core.registry.create({ slug: 'owner-private', displayName: 'Owner private' }).ok).toBe(
+      true,
+    );
+    const dm = f.core.channels.getOrCreateBotDm(alice, 'alice-bot', 'owner-private', 'Retained DM');
+    if (!dm) throw new Error('missing-dm');
+    f.db.transaction((db) =>
+      db.prepare('INSERT INTO persona_bot_deletions VALUES (?, ?)').run(
+        'owner-private',
+        JSON.stringify({
+          slug: 'owner-private',
+          displayName: 'Owner private',
+          acceptedAt: 'now',
+          eraseMemory: false,
+          phase: 'incomplete',
+          memory: 'retained',
+          memoryDir: f.core.registry.memoryDirFor('owner-private'),
+        }),
+      ),
+    );
+    expect(f.core.registry.get('owner-private')).toBeUndefined();
+    expect(f.core.registry.getHistorical('owner-private')?.ownerHumanId).toBe(owner.humanId);
+    expect(f.team.privateAccess.objects(carol, {})).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ objectId: dm.id })]),
+    );
+    expect(() => f.team.privateAccess.open(carol, { kind: 'bot-dm', objectId: dm.id })).toThrow(
+      expect.objectContaining({
+        code: 'permission-required',
+        details: { permission: 'privateContent.view' },
+      }),
+    );
+    expect(() => f.team.privateAccess.open(owner, { kind: 'bot-dm', objectId: dm.id })).toThrow(
+      expect.objectContaining({ code: 'own-content' }),
+    );
+    expect(f.log().records).toHaveLength(0);
+  });
+
+  it('audits failed provider loads without retaining a view slot', async () => {
+    const f = await fixture();
+    const snapshot = vi.spyOn(f.core.memory, 'snapshot').mockImplementation(() => {
+      throw new Error('provider-load-failed');
+    });
+    for (let n = 0; n < 129; n++)
+      expect(() => f.team.privateAccess.open(owner, f.targets[0])).toThrow('provider-load-failed');
+    snapshot.mockRestore();
+    const opened = f.team.privateAccess.open(owner, f.targets[0]);
+    expect(opened.viewId).toBeTruthy();
+    expect(
+      f.team.privateAccess.page(owner, { viewId: opened.viewId, before: 'missing-message' })
+        .messages,
+    ).toEqual([]);
+    expect(f.team.privateAccess.log(owner, { limit: 200 }).records).toHaveLength(130);
+    expect(f.team.privateAccess.verify(owner)).toEqual({ ok: true });
+  });
+
   it('lists metadata only, filters ownership and kind, and emits the Team notice without recording a read', async () => {
     const f = await fixture();
     const rows = await f.invoke('privateObjects', { humanId: alice.humanId });

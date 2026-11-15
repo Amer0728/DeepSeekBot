@@ -26,6 +26,9 @@ export const privateObjectSchema = z.object({
   name: z.string(),
   ownerHumanIds: z.array(z.string()),
 });
+export const privateObjectListingSchema = privateObjectSchema.extend({
+  ownerNames: z.array(z.string()),
+});
 export const auditRecordSchema = z
   .object({
     auditId: z.string(),
@@ -45,3 +48,5 @@ export const auditRecordSchema = z
 export type PrivateObject = z.infer<typeof privateObjectSchema>;
 export type PrivateKind = z.infer<typeof privateKindSchema>;
 export type AuditRecord = z.infer<typeof auditRecordSchema>;
+
+export type PrivateObjectListing = z.infer<typeof privateObjectListingSchema>;

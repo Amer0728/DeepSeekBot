@@ -372,6 +372,7 @@ try {
       );
       return {
         slug: botSlug,
+        ownerHumanId: seed.registry.get(botSlug)?.ownerHumanId ?? owner.humanId,
         path,
         history: execFileSync('git', ['-C', path, 'rev-list', 'HEAD'], {
           encoding: 'utf8',
@@ -441,6 +442,8 @@ try {
     try {
       for (const memory of memories) {
         const detail = await rpc(port, 'botharness', 'get', { slug: memory.slug });
+        if (enabled && memory.ownerHumanId !== owner.humanId && detail.metadataOnly !== true)
+          throw new Error('Member Bot administration did not return metadata only');
         let profile = detail.bot;
         if (detail.metadataOnly === true) {
           if ('memoryDir' in profile || 'persona' in profile || 'sessions' in profile)
