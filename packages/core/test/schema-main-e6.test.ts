@@ -18,7 +18,7 @@ it('appends account150 after published Team models148 and usage149 while preserv
     }),
   );
   expect(previous.mode).toBe('ready');
-  expect(previous.generation).toBe(149);
+  expect(previous.generation).toBe(BOT_HARNESS_SCHEMA_PLAN.generationOf('member-usage'));
   const database = attachOperationalModule(previous, 'migration-fixture');
   const key = 'ab'.repeat(32);
   const activeId = 'a'.repeat(32),
@@ -102,7 +102,7 @@ it('appends account150 after published Team models148 and usage149 while preserv
     mountOperationalDatabase({ dshHome: home, schemaPlan: BOT_HARNESS_SCHEMA_PLAN }),
   );
   expect(owner.mode).toBe('ready');
-  expect(owner.generation).toBe(152);
+  expect(owner.generation).toBe(BOT_HARNESS_SCHEMA_PLAN.targetGeneration);
   const current = attachOperationalModule(owner, 'migration-fixture');
   expect(
     current.read((db) =>

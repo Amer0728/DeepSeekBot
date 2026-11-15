@@ -768,6 +768,11 @@ describe('M10 member usage and role models', () => {
       }),
     ).toMatchObject({ ok: true });
     f.restrict();
+    const selector = f.team.roles.create(owner, 'Model selector', ['models.use'], {
+      kind: 'only',
+      routes: ['provider/allowed'],
+    }).role;
+    f.team.roles.set(owner, f.member.humanId, ['member', selector.roleId]);
     expect(f.methods.get({ slug: 'ada' })).toMatchObject({
       ok: true,
       value: { bot: { modelAllowed: false } },
@@ -821,7 +826,9 @@ describe('M10 member usage and role models', () => {
       ),
     });
     expect(previous.mode).toBe('ready');
-    expect(previous.generation).toBe(147);
+    expect(previous.generation).toBe(
+      BOT_HARNESS_SCHEMA_PLAN.generationOf('host-relationship-revocation'),
+    );
     const old = attachOperationalModule(previous, 'm10-main-fixture');
     old.transaction((db) => {
       db.prepare(
@@ -851,7 +858,7 @@ describe('M10 member usage and role models', () => {
         }),
       );
       expect(upgraded.mode).toBe('ready');
-      expect(upgraded.generation).toBe(149);
+      expect(upgraded.generation).toBe(BOT_HARNESS_SCHEMA_PLAN.generationOf('member-usage'));
       attachOperationalModule(upgraded, 'm10-upgraded-fixture').read((db) => {
         expect(db.prepare('SELECT human_id, legacy, total_tokens FROM usage_daily').all()).toEqual([
           { human_id: 'local-human', legacy: 1, total_tokens: 13 },

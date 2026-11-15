@@ -29,6 +29,7 @@ AX default model setup and credential reuse: follow `docs/agents/ax-model.md` fo
 ## Conventions
 
 - TypeScript ESM; tests live in `packages/*/test/` (vitest).
+- Database migrations: append a stable kebab-case id, never a generation; keep both entries in merge order when branches conflict. Follow [named schema migrations](docs/agents/schema-migrations.md) for ledger validation, body-hash protection and fixtures.
 - Repo scripts are Node `.mjs` run as `node scripts/<name>.mjs` — no new `.ps1`/`.cmd`/`.bat` files. Spawn child processes with direct `argv` (`shell: false`; resolve `.cmd` shims through `scripts/dev-package-manager.mjs`) and `windowsHide: true` on every spawn so no conhost window flashes on Windows; keep CLI action/flag names, exit codes and JSON shapes stable when porting a helper.
 - Never commit secrets: the Feishu App Secret goes to the DSH credentials service, never to config or the repo (ADR-0006).
 - Memory terminology lives in `GLOSSARY.md`; durable memory choices live in ADR-0002/0003/0004/0012/0014/0021 and are integrated into the living architecture.

@@ -17,7 +17,7 @@ import { createSqliteChannelStore } from '../src/channels/sqlite-store.js';
 import { createTempRoot, trackTestOwner } from './helpers.js';
 
 const qqHotfix = {
-  generation: 116,
+  id: 'historical-qq-hotfix',
   module: 'messaging',
   description: 'Historical #3419 QQ defaults hotfix that occupied generation 116',
   migrate(database: import('node:sqlite').DatabaseSync) {
@@ -48,6 +48,7 @@ function hotfixProfile(generation: 116 | 136) {
   const owner = trackTestOwner(mountOperationalDatabase({ dshHome, schemaPlan: plan }));
   expect(owner.mode).toBe('ready');
   attachOperationalModule(owner, 'messaging').transaction((db) => {
+    db.exec('DROP TABLE schema_migrations');
     db.prepare('INSERT INTO messaging_default_revisions VALUES (?, ?, ?)').run(
       'qq',
       1,

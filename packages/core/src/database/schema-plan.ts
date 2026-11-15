@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { DEFAULT_CHANNEL_POLICY } from '../team/channel-contract.js';
 import { ADMIN_PERMISSIONS, MEMBER_PERMISSIONS } from '../team/permissions.js';
 import { OWNER_HUMAN_CONTEXT } from '../humans/context.js';
@@ -10,7 +11,7 @@ import { INBOX_HISTORY_INDEX_SQL, MESSAGE_SEARCH_INDEX_SQL } from './inbox-histo
 import { deriveAssignmentTitle } from '../runtime/assignment-title.js';
 
 const SESSION_OWNERSHIP_MIGRATION: SchemaMigration = {
-  generation: 2,
+  id: 'session-ownership',
   module: 'session-ownership',
   description: 'Create explicit PersonaBot root Session ownership',
   migrate(database) {
@@ -28,7 +29,7 @@ const SESSION_OWNERSHIP_MIGRATION: SchemaMigration = {
 };
 
 const MESSAGING_TRACER_MIGRATION: SchemaMigration = {
-  generation: 3,
+  id: 'messaging-tracer',
   module: 'messaging',
   description: 'Create the minimal durable Source Event and Bot Inbox admission path',
   migrate(database) {
@@ -52,7 +53,7 @@ const MESSAGING_TRACER_MIGRATION: SchemaMigration = {
 };
 
 const ASSIGNMENT_DIRECTORY_MIGRATION: SchemaMigration = {
-  generation: 4,
+  id: 'assignment-directory',
   module: 'assignments',
   description: 'Create the durable Assignment Directory and latest report projection',
   migrate(database) {
@@ -76,7 +77,7 @@ const ASSIGNMENT_DIRECTORY_MIGRATION: SchemaMigration = {
 };
 
 const SOURCE_EVENT_ATTEMPT_MIGRATION: SchemaMigration = {
-  generation: 5,
+  id: 'source-event-attempt',
   module: 'bot-runtime',
   description: 'Track replay-safe Source Event attempt state',
   migrate(database) {
@@ -90,7 +91,7 @@ const SOURCE_EVENT_ATTEMPT_MIGRATION: SchemaMigration = {
 };
 
 const SESSION_OWNERSHIP_LINEAGE_MIGRATION: SchemaMigration = {
-  generation: 6,
+  id: 'session-ownership-lineage',
   module: 'session-ownership',
   description: 'Record ownership provenance, lineage, and the explicit cwd reference',
   migrate(database) {
@@ -105,7 +106,7 @@ const SESSION_OWNERSHIP_LINEAGE_MIGRATION: SchemaMigration = {
 };
 
 const SOURCE_EVENT_SIDE_EFFECT_MIGRATION: SchemaMigration = {
-  generation: 7,
+  id: 'source-event-side-effect',
   module: 'bot-runtime',
   description: 'Separate an in-flight side effect from an unreplayable failure state',
   migrate(database) {
@@ -119,7 +120,7 @@ const SOURCE_EVENT_SIDE_EFFECT_MIGRATION: SchemaMigration = {
 };
 
 const ASSIGNMENT_COLLABORATION_MIGRATION: SchemaMigration = {
-  generation: 8,
+  id: 'assignment-collaboration',
   module: 'assignments',
   description: 'Admit Assignment reports and asks with observation and continuity facts',
   migrate(database) {
@@ -141,7 +142,7 @@ const ASSIGNMENT_COLLABORATION_MIGRATION: SchemaMigration = {
 };
 
 const SESSION_PERSONA_SNAPSHOT_MIGRATION: SchemaMigration = {
-  generation: 9,
+  id: 'session-persona-snapshot',
   module: 'session-ownership',
   description: 'Freeze each Session system-prompt persona at its first assembly',
   migrate(database) {
@@ -153,7 +154,7 @@ const SESSION_PERSONA_SNAPSHOT_MIGRATION: SchemaMigration = {
 };
 
 const MEMORY_ACCEPTED_COMMIT_MIGRATION: SchemaMigration = {
-  generation: 10,
+  id: 'memory-accepted-commit',
   module: 'memory',
   description: 'Record accepted Memory Commit lineage and repository heads',
   migrate(database) {
@@ -199,7 +200,7 @@ const MEMORY_ACCEPTED_COMMIT_MIGRATION: SchemaMigration = {
 };
 
 export const WORKSPACE_GRANT_MIGRATION: SchemaMigration = {
-  generation: 11,
+  id: 'workspace-grant',
   module: 'workspace-grants',
   description: 'Record Human Workspace Grants and immutable Assignment permission provenance',
   migrate(database) {
@@ -226,7 +227,7 @@ export const WORKSPACE_GRANT_MIGRATION: SchemaMigration = {
 };
 
 export const TOOL_APPROVAL_RULE_MIGRATION: SchemaMigration = {
-  generation: 12,
+  id: 'tool-approval-rule',
   module: 'tool-approval-rules',
   description: 'Persist revocable Human rules for native tool approval',
   migrate(database) {
@@ -250,7 +251,7 @@ export const TOOL_APPROVAL_RULE_MIGRATION: SchemaMigration = {
 };
 
 export const ASSIGNMENT_ACCESS_MIGRATION: SchemaMigration = {
-  generation: 13,
+  id: 'assignment-access',
   module: 'assignment-access',
   description: 'Persist Human-owned per-Bot Assignment access preset and audit',
   migrate(database) {
@@ -275,7 +276,7 @@ export const ASSIGNMENT_ACCESS_MIGRATION: SchemaMigration = {
 };
 
 export const MEMORY_BRANCH_HEAD_MIGRATION: SchemaMigration = {
-  generation: 14,
+  id: 'memory-branch-head',
   module: 'memory',
   description: 'Track the accepted Memory head independently for each local branch',
   migrate(database) {
@@ -298,7 +299,7 @@ export const MEMORY_BRANCH_HEAD_MIGRATION: SchemaMigration = {
 };
 
 export const CHANNEL_MESSAGING_MIGRATION: SchemaMigration = {
-  generation: 15,
+  id: 'channel-messaging',
   module: 'messaging',
   description:
     'Move Channel messages to canonical Source Events, placements, and per-Bot admissions',
@@ -373,7 +374,7 @@ export const CHANNEL_MESSAGING_MIGRATION: SchemaMigration = {
 };
 
 const BOT_DM_ADMISSION_MIGRATION: SchemaMigration = {
-  generation: 16,
+  id: 'bot-dm-admission',
   module: 'messaging',
   description: 'Admit Bot-to-Bot DM messages through the canonical Inbox',
   rebuildsReferencedTables: true,
@@ -405,7 +406,7 @@ const BOT_DM_ADMISSION_MIGRATION: SchemaMigration = {
 };
 
 const GROUP_INVITATION_ADMISSION_MIGRATION: SchemaMigration = {
-  generation: 17,
+  id: 'group-invitation-admission',
   module: 'messaging',
   description: 'Deliver Group invitations through the Bot Inbox before membership',
   rebuildsReferencedTables: true,
@@ -437,7 +438,7 @@ const GROUP_INVITATION_ADMISSION_MIGRATION: SchemaMigration = {
 };
 
 const GROUP_DIGEST_ADMISSION_MIGRATION: SchemaMigration = {
-  generation: 18,
+  id: 'group-digest-admission',
   module: 'messaging',
   description: 'Capture per-Group ordinary-message digest policy with each Inbox Admission',
   rebuildsReferencedTables: true,
@@ -476,7 +477,7 @@ const GROUP_DIGEST_ADMISSION_MIGRATION: SchemaMigration = {
 };
 
 const GROUP_JOIN_ADMISSION_MIGRATION: SchemaMigration = {
-  generation: 19,
+  id: 'group-join-admission',
   module: 'messaging',
   description: 'Admit Group join requests and decisions as durable Bot Inbox notifications',
   rebuildsReferencedTables: true,
@@ -519,7 +520,7 @@ const GROUP_JOIN_ADMISSION_MIGRATION: SchemaMigration = {
 };
 
 const ASSIGNMENT_STOP_MIGRATION: SchemaMigration = {
-  generation: 20,
+  id: 'assignment-stop',
   module: 'assignments',
   description:
     'Persist stopping and stopped Assignment lifecycle while retaining DSH Session history',
@@ -531,7 +532,7 @@ const ASSIGNMENT_STOP_MIGRATION: SchemaMigration = {
   },
 };
 const ASSIGNMENT_REPORT_ADMISSION_MIGRATION: SchemaMigration = {
-  generation: 21,
+  id: 'assignment-report-admission',
   module: 'messaging',
   description: 'Admit Assignment reports to their PersonaBot Inbox',
   rebuildsReferencedTables: true,
@@ -580,7 +581,7 @@ const ASSIGNMENT_REPORT_ADMISSION_MIGRATION: SchemaMigration = {
 };
 
 const HUMAN_ATTENTION_DECISION_MIGRATION: SchemaMigration = {
-  generation: 22,
+  id: 'human-attention-decision',
   module: 'human-attention',
   description: 'Record Human decisions for informational Source Events',
   migrate(database) {
@@ -597,7 +598,7 @@ const HUMAN_ATTENTION_DECISION_MIGRATION: SchemaMigration = {
 };
 
 const BOT_ATTENTION_IGNORE_MIGRATION: SchemaMigration = {
-  generation: 23,
+  id: 'bot-attention-ignore',
   module: 'bot-inbox',
   description: 'Record explicit Bot ignore decisions on canonical Inbox Admissions',
   migrate(database) {
@@ -609,7 +610,7 @@ const BOT_ATTENTION_IGNORE_MIGRATION: SchemaMigration = {
 };
 
 const ASSIGNMENT_LIFECYCLE_NOTICE_MIGRATION: SchemaMigration = {
-  generation: 24,
+  id: 'assignment-lifecycle-notice',
   module: 'assignments',
   description: 'Admit Host-origin Assignment lifecycle notices to the Bot Inbox',
   rebuildsReferencedTables: true,
@@ -691,7 +692,7 @@ const ASSIGNMENT_LIFECYCLE_NOTICE_MIGRATION: SchemaMigration = {
 };
 
 export const LOCAL_HUMAN_RECEIPTS_MIGRATION: SchemaMigration = {
-  generation: 25,
+  id: 'local-human-receipts',
   module: 'messaging',
   description: 'Give the local Human explicit Group membership and identity-keyed read positions',
   rebuildsReferencedTables: true,
@@ -744,7 +745,7 @@ export const LOCAL_HUMAN_RECEIPTS_MIGRATION: SchemaMigration = {
 };
 
 const GROUP_WAKE_MODE_MIGRATION: SchemaMigration = {
-  generation: 26,
+  id: 'group-wake-mode',
   module: 'bot-inbox',
   description: 'Preserve the Group wake policy mode on each ordinary Inbox Admission',
   migrate(database) {
@@ -763,7 +764,7 @@ const GROUP_WAKE_MODE_MIGRATION: SchemaMigration = {
 };
 
 const GROUP_WAKE_POLICY_AUDIT_MIGRATION: SchemaMigration = {
-  generation: 27,
+  id: 'group-wake-policy-audit',
   module: 'messaging',
   description: 'Audit per-member Group wake policy revisions without duplicating current policy',
   migrate(database) {
@@ -793,7 +794,7 @@ const GROUP_WAKE_POLICY_AUDIT_MIGRATION: SchemaMigration = {
 };
 
 const USAGE_DAILY_MIGRATION: SchemaMigration = {
-  generation: 28,
+  id: 'usage-daily',
   module: 'usage',
   description: 'Derive per-PersonaBot daily token buckets from DSH Session usage events',
   migrate(database) {
@@ -816,7 +817,7 @@ const USAGE_DAILY_MIGRATION: SchemaMigration = {
 };
 
 const BOT_SOURCE_POLICY_MIGRATION: SchemaMigration = {
-  generation: 29,
+  id: 'bot-source-policy',
   module: 'bot-inbox',
   description: 'Record per-PersonaBot source policy revisions and Admission snapshots',
   migrate(database) {
@@ -853,7 +854,7 @@ const BOT_SOURCE_POLICY_MIGRATION: SchemaMigration = {
 };
 
 const BOT_SOURCE_POLICY_EDIT_MIGRATION: SchemaMigration = {
-  generation: 30,
+  id: 'bot-source-policy-edit',
   module: 'bot-inbox',
   description: 'Distinguish active source overrides and record actual Orchestrator wake attempts',
   migrate(database) {
@@ -880,7 +881,7 @@ const BOT_SOURCE_POLICY_EDIT_MIGRATION: SchemaMigration = {
 };
 
 const BOT_SOURCE_DELIVERY_MIGRATION: SchemaMigration = {
-  generation: 36,
+  id: 'bot-source-delivery',
   module: 'bot-inbox',
   description: 'Record the delivery dimension of immediate source policies',
   migrate(database) {
@@ -892,7 +893,7 @@ const BOT_SOURCE_DELIVERY_MIGRATION: SchemaMigration = {
 };
 
 const MEMORY_CHANGE_INBOX_MIGRATION: SchemaMigration = {
-  generation: 32,
+  id: 'memory-change-inbox',
   module: 'bot-inbox',
   description: 'Admit observed Memory changes as durable Source Events',
   rebuildsReferencedTables: true,
@@ -963,7 +964,7 @@ const MEMORY_CHANGE_INBOX_MIGRATION: SchemaMigration = {
 };
 
 const BOT_SOURCE_GROUP_MODES_MIGRATION: SchemaMigration = {
-  generation: 31,
+  id: 'bot-source-group-modes',
   module: 'bot-inbox',
   description: 'Allow ordinary Group source defaults to use mentions and silent wake modes',
   migrate(database) {
@@ -1010,7 +1011,7 @@ const BOT_SOURCE_GROUP_MODES_MIGRATION: SchemaMigration = {
 };
 
 const MEMORY_CHANGE_CHECKPOINT_MIGRATION: SchemaMigration = {
-  generation: 33,
+  id: 'memory-change-checkpoint',
   module: 'memory',
   description: 'Keep per-Bot Memory observations across Host restarts',
   migrate(database) {
@@ -1027,7 +1028,7 @@ const MEMORY_CHANGE_CHECKPOINT_MIGRATION: SchemaMigration = {
 };
 
 const MEMORY_RECOVERY_CHECKPOINT_MIGRATION: SchemaMigration = {
-  generation: 34,
+  id: 'memory-recovery-checkpoint',
   module: 'memory',
   description: 'Retain audited Git recovery checkpoints for Memory state',
   migrate(database) {
@@ -1053,7 +1054,7 @@ const MEMORY_RECOVERY_CHECKPOINT_MIGRATION: SchemaMigration = {
 };
 
 const ASSIGNMENT_MODEL_ROUTE_MIGRATION: SchemaMigration = {
-  generation: 35,
+  id: 'assignment-model-route',
   module: 'assignments',
   description: 'Snapshot each new Assignment Session model route independently of the Bot plan',
   migrate(database) {
@@ -1062,7 +1063,7 @@ const ASSIGNMENT_MODEL_ROUTE_MIGRATION: SchemaMigration = {
 };
 
 const USAGE_REPORT_COMPLETENESS_MIGRATION: SchemaMigration = {
-  generation: 37,
+  id: 'usage-report-completeness',
   module: 'usage',
   description: 'Distinguish unreported provider token buckets from reported zero',
   migrate(database) {
@@ -1079,7 +1080,7 @@ const USAGE_REPORT_COMPLETENESS_MIGRATION: SchemaMigration = {
 };
 
 const MESSAGING_OUTBOUND_MIGRATION: SchemaMigration = {
-  generation: 38,
+  id: 'messaging-outbound',
   module: 'messaging',
   description: 'Persist external account bindings, proactive grants and one-attempt Outbox facts',
   migrate(database) {
@@ -1111,7 +1112,7 @@ const MESSAGING_OUTBOUND_MIGRATION: SchemaMigration = {
 };
 
 const ATTACHMENT_FILE_BINDING_MIGRATION: SchemaMigration = {
-  generation: 39,
+  id: 'attachment-file-binding',
   module: 'messaging',
   description: 'Bind retained legacy attachment occurrences to independently managed real files',
   migrate(database) {
@@ -1132,7 +1133,7 @@ const ATTACHMENT_FILE_BINDING_MIGRATION: SchemaMigration = {
 };
 
 const USAGE_RETENTION_MIGRATION: SchemaMigration = {
-  generation: 40,
+  id: 'usage-retention',
   module: 'usage',
   description:
     'Retain daily usage independently of Session histories with durable anonymous receipts',
@@ -1166,7 +1167,7 @@ const USAGE_RETENTION_MIGRATION: SchemaMigration = {
 };
 
 const LOCAL_HUMAN_NAME_MIGRATION: SchemaMigration = {
-  generation: 41,
+  id: 'local-human-name',
   module: 'messaging',
   description: 'Retain one optional local Human default name without changing membership',
   migrate(database) {
@@ -1178,7 +1179,7 @@ const LOCAL_HUMAN_NAME_MIGRATION: SchemaMigration = {
 };
 
 const ORCHESTRATOR_WORKSPACE_WRITE_MIGRATION: SchemaMigration = {
-  generation: 42,
+  id: 'orchestrator-workspace-write',
   module: 'workspace-grants',
   description: 'Explicit Human-owned Orchestrator write permission on Workspace Grants',
   migrate(database) {
@@ -1191,7 +1192,7 @@ const ORCHESTRATOR_WORKSPACE_WRITE_MIGRATION: SchemaMigration = {
 };
 
 const HUMAN_CHANNEL_NICKNAME_MIGRATION: SchemaMigration = {
-  generation: 43,
+  id: 'human-channel-nickname',
   module: 'messaging',
   description: 'Retain explicit per-Channel Human nickname overrides',
   migrate(database) {
@@ -1205,7 +1206,7 @@ const HUMAN_CHANNEL_NICKNAME_MIGRATION: SchemaMigration = {
 };
 
 const EXTERNAL_SOURCE_MIGRATION: SchemaMigration = {
-  generation: 44,
+  id: 'external-source',
   module: 'messaging',
   description: 'Persist authenticated external IM Source Events without Channel placements',
   rebuildsReferencedTables: true,
@@ -1245,7 +1246,7 @@ const EXTERNAL_SOURCE_MIGRATION: SchemaMigration = {
 };
 
 const HUMAN_RESPONSE_INDEX_MIGRATION: SchemaMigration = {
-  generation: 45,
+  id: 'human-response-index',
   module: 'messaging',
   description: 'Index canonical Human response targets and history time',
   migrate(database) {
@@ -1266,7 +1267,7 @@ const HUMAN_RESPONSE_INDEX_MIGRATION: SchemaMigration = {
 };
 
 const EXTERNAL_GROUP_POLICY_MIGRATION: SchemaMigration = {
-  generation: 46,
+  id: 'external-group-policy',
   module: 'messaging',
   description: 'Version external group collection and wake independently of Service Grants',
   migrate(database) {
@@ -1288,7 +1289,7 @@ const EXTERNAL_GROUP_POLICY_MIGRATION: SchemaMigration = {
 };
 
 const HUMAN_INBOX_DISMISSAL_MIGRATION: SchemaMigration = {
-  generation: 47,
+  id: 'human-inbox-dismissal',
   module: 'human-attention',
   description: 'Persist Inbox-only dismissal independently of source request decisions',
   migrate(database) {
@@ -1306,7 +1307,7 @@ const HUMAN_INBOX_DISMISSAL_MIGRATION: SchemaMigration = {
 };
 
 const EXTERNAL_THREAD_POLICY_MIGRATION: SchemaMigration = {
-  generation: 48,
+  id: 'external-thread-policy',
   module: 'messaging',
   description: 'Version exact external Thread participation independently of group reception',
   migrate(database) {
@@ -1328,7 +1329,7 @@ const EXTERNAL_THREAD_POLICY_MIGRATION: SchemaMigration = {
 };
 
 const EXTERNAL_IDENTITY_MIGRATION: SchemaMigration = {
-  generation: 49,
+  id: 'external-identity',
   module: 'messaging',
   description: 'Separate Bot identity lifecycle from conversation grants',
   migrate(database) {
@@ -1344,7 +1345,7 @@ const EXTERNAL_IDENTITY_MIGRATION: SchemaMigration = {
 };
 
 const CHANNEL_BRIDGE_MIGRATION: SchemaMigration = {
-  generation: 50,
+  id: 'channel-bridge',
   module: 'messaging',
   description: 'Fence Channel Bridge intake preference and retain existing grant authority',
   migrate(database) {
@@ -1358,7 +1359,7 @@ const CHANNEL_BRIDGE_MIGRATION: SchemaMigration = {
 };
 
 const MESSAGING_DEFAULTS_MIGRATION: SchemaMigration = {
-  generation: 51,
+  id: 'messaging-defaults',
   module: 'messaging',
   description: 'Version platform preferences and preserve existing explicit Profile behavior',
   migrate(database) {
@@ -1380,7 +1381,7 @@ const MESSAGING_DEFAULTS_MIGRATION: SchemaMigration = {
 };
 
 const BRIDGE_ROUTES_MIGRATION: SchemaMigration = {
-  generation: 52,
+  id: 'bridge-routes',
   module: 'messaging',
   description:
     'Retain one Source Event with distinct Channel placements and per-member reception paths',
@@ -1415,7 +1416,7 @@ const BRIDGE_ROUTES_MIGRATION: SchemaMigration = {
 };
 
 const QUALIFIED_PLATFORM_DEFAULTS_MIGRATION: SchemaMigration = {
-  generation: 53,
+  id: 'qualified-platform-defaults',
   module: 'messaging',
   description:
     'Allow independently versioned qualified Slack preferences while retaining every existing override',
@@ -1438,7 +1439,7 @@ const QUALIFIED_PLATFORM_DEFAULTS_MIGRATION: SchemaMigration = {
 };
 
 const MODEL_PRESET_STORAGE_MIGRATION: SchemaMigration = {
-  generation: 54,
+  id: 'model-preset-storage',
   module: 'model-presets',
   description:
     'Own reusable Model Presets and their one-time import marker in the Profile database',
@@ -1453,7 +1454,7 @@ const MODEL_PRESET_STORAGE_MIGRATION: SchemaMigration = {
 };
 
 const PERSONA_BOT_REGISTRY_MIGRATION: SchemaMigration = {
-  generation: 55,
+  id: 'persona-bot-registry',
   module: 'bot-registry',
   description: 'Own PersonaBot identities and applied plans with a durable Registry import marker',
   migrate(database) {
@@ -1467,7 +1468,7 @@ const PERSONA_BOT_REGISTRY_MIGRATION: SchemaMigration = {
 };
 
 const ROSTER_ARRANGEMENT_MIGRATION: SchemaMigration = {
-  generation: 56,
+  id: 'roster-arrangement',
   module: 'roster',
   description: 'Own Channel sections and roster arrangement in the Profile database',
   migrate(database) {
@@ -1514,7 +1515,7 @@ function rebuildWithKind(
 }
 
 const BOT_SCHEDULE_MIGRATION: SchemaMigration = {
-  generation: 57,
+  id: 'bot-schedule',
   module: 'bot-schedules',
   description: 'Own PersonaBot Schedules and admit their firings into the Bot Inbox',
   rebuildsReferencedTables: true,
@@ -1553,7 +1554,7 @@ const BOT_SCHEDULE_MIGRATION: SchemaMigration = {
 };
 
 const DISCORD_PLATFORM_DEFAULTS_MIGRATION: SchemaMigration = {
-  generation: 58,
+  id: 'discord-platform-defaults',
   module: 'messaging',
   description:
     'Qualify independent Discord defaults without rewriting earlier revisions or overrides',
@@ -1576,7 +1577,7 @@ const DISCORD_PLATFORM_DEFAULTS_MIGRATION: SchemaMigration = {
 };
 
 const BOT_PAIRING_MIGRATION: SchemaMigration = {
-  generation: 59,
+  id: 'bot-pairing',
   module: 'messaging',
   description: 'Own current-Bot Human pairing and explicitly reviewed IM capabilities',
   migrate(database) {
@@ -1596,7 +1597,7 @@ const BOT_PAIRING_MIGRATION: SchemaMigration = {
 };
 
 const APPROVAL_MESSAGING_MIGRATION: SchemaMigration = {
-  generation: 60,
+  id: 'approval-messaging',
   module: 'messaging',
   description:
     'Own approved management routes and notification receipts without duplicating native decisions',
@@ -1614,7 +1615,7 @@ const APPROVAL_MESSAGING_MIGRATION: SchemaMigration = {
 };
 
 const NEW_CONVERSATION_DEFAULT_MIGRATION: SchemaMigration = {
-  generation: 65,
+  id: 'new-conversation-default',
   module: 'messaging',
   description: 'Let a bound app inherit the platform default new-conversation mode',
   migrate(database) {
@@ -1627,7 +1628,7 @@ const NEW_CONVERSATION_DEFAULT_MIGRATION: SchemaMigration = {
 };
 
 const BOUND_APP_ADMISSION_MIGRATION: SchemaMigration = {
-  generation: 61,
+  id: 'bound-app-admission',
   module: 'messaging',
   description:
     'Admit default traffic through a bound app with implicit conversation entries and a per-binding new-conversation mode',
@@ -1646,7 +1647,7 @@ const BOUND_APP_ADMISSION_MIGRATION: SchemaMigration = {
 };
 
 const CONVERSATION_LIST_MIGRATION: SchemaMigration = {
-  generation: 62,
+  id: 'conversation-list',
   module: 'messaging',
   description:
     'Keep durable conversation blocks per Bot and app fingerprint, and held conversations waiting for a decision',
@@ -1701,7 +1702,7 @@ const CONVERSATION_LIST_MIGRATION: SchemaMigration = {
 };
 
 const SEVERAL_APPS_MIGRATION: SchemaMigration = {
-  generation: 63,
+  id: 'several-apps',
   module: 'messaging',
   description:
     'Let one Bot bind several apps of the same platform; one app still belongs to one Bot',
@@ -1711,7 +1712,7 @@ const SEVERAL_APPS_MIGRATION: SchemaMigration = {
 };
 
 const CONVERSATION_INGEST_MIGRATION: SchemaMigration = {
-  generation: 64,
+  id: 'conversation-ingest',
   module: 'messaging',
   description: 'Let a Channel ingest an external conversation as one-way context',
   migrate(database) {
@@ -1736,7 +1737,7 @@ const CONVERSATION_INGEST_MIGRATION: SchemaMigration = {
 };
 
 const PERSONA_BOT_DELETION_MIGRATION: SchemaMigration = {
-  generation: 66,
+  id: 'persona-bot-deletion',
   module: 'bot-registry',
   description: 'Terminal PersonaBot deletion and exclusive Memory ownership proofs',
   migrate(database) {
@@ -1754,7 +1755,7 @@ const PERSONA_BOT_DELETION_MIGRATION: SchemaMigration = {
 };
 
 const MESSAGING_TYPING_MIGRATION: SchemaMigration = {
-  generation: 67,
+  id: 'messaging-typing',
   module: 'messaging',
   description: 'Persist identity-local native typing preference without persisting tickets',
   migrate(database) {
@@ -1766,7 +1767,7 @@ const MESSAGING_TYPING_MIGRATION: SchemaMigration = {
 };
 
 const CONTENT_PURGE_MIGRATION: SchemaMigration = {
-  generation: 68,
+  id: 'content-purge',
   module: 'messaging-purge',
   description: 'Require an independent Purge Ledger and fence accepted local Source Events',
   migrate(database) {
@@ -1815,7 +1816,7 @@ const CONTENT_PURGE_MIGRATION: SchemaMigration = {
 };
 
 const WECHAT_PLATFORM_DEFAULTS_MIGRATION: SchemaMigration = {
-  generation: 69,
+  id: 'wechat-platform-defaults',
   module: 'messaging',
   description: 'Qualify WeChat defaults and preserve existing identity-local typing overrides',
   migrate(database) {
@@ -1840,7 +1841,7 @@ const WECHAT_PLATFORM_DEFAULTS_MIGRATION: SchemaMigration = {
 };
 
 const COMPLETE_CONTENT_PURGE_MIGRATION: SchemaMigration = {
-  generation: 70,
+  id: 'complete-content-purge',
   module: 'messaging-purge',
   description:
     'Track acquired media and fence shared content, stale effects and attachment bindings',
@@ -1891,7 +1892,7 @@ const COMPLETE_CONTENT_PURGE_MIGRATION: SchemaMigration = {
 };
 
 const BOT_ONBOARDING_MIGRATION: SchemaMigration = {
-  generation: 71,
+  id: 'bot-onboarding',
   module: 'bot-onboarding',
   description: 'Persist Profile onboarding receipts and trusted Channel output provenance',
   migrate(database) {
@@ -1917,7 +1918,7 @@ const BOT_ONBOARDING_MIGRATION: SchemaMigration = {
 };
 
 const PROFILE_RECOVERY_MIGRATION: SchemaMigration = {
-  generation: 72,
+  id: 'profile-recovery',
   module: 'profile-portability',
   description: 'Persist Disaster Restore receipt and explicit target-local activation',
   migrate(database) {
@@ -1936,7 +1937,7 @@ const PROFILE_RECOVERY_MIGRATION: SchemaMigration = {
 };
 
 const AVATAR_PART_LIBRARY_MIGRATION: SchemaMigration = {
-  generation: 73,
+  id: 'avatar-part-library',
   module: 'avatar-part-library',
   description: 'Persist the Profile Part Library of Human-drawn Avatar Custom Parts',
   migrate(database) {
@@ -1950,7 +1951,7 @@ const AVATAR_PART_LIBRARY_MIGRATION: SchemaMigration = {
 };
 
 const RECEPTION_HISTORY_MIGRATION: SchemaMigration = {
-  generation: 74,
+  id: 'reception-history',
   module: 'messaging',
   description: 'Retain bounded reception coverage observations without copying external messages',
   migrate(database) {
@@ -1965,7 +1966,7 @@ const RECEPTION_HISTORY_MIGRATION: SchemaMigration = {
 };
 
 const BOT_SELF_RECORD_MIGRATION: SchemaMigration = {
-  generation: 75,
+  id: 'bot-self-record',
   module: 'messaging',
   description: 'Record Bot Self-Records as Channel Notices with born-handled Bot Inbox records',
   rebuildsReferencedTables: true,
@@ -1976,7 +1977,7 @@ const BOT_SELF_RECORD_MIGRATION: SchemaMigration = {
 };
 
 const MEMORY_COMMIT_RECORD_MIGRATION: SchemaMigration = {
-  generation: 76,
+  id: 'memory-commit-record',
   module: 'messaging',
   description: 'Track each PersonaBot Memory commit cursor and record each commit once',
   migrate(database) {
@@ -1995,7 +1996,7 @@ const MEMORY_COMMIT_RECORD_MIGRATION: SchemaMigration = {
 };
 
 const INBOX_HISTORY_MIGRATION: SchemaMigration = {
-  generation: 77,
+  id: 'inbox-history',
   module: 'messaging',
   description: 'Index canonical Source Events for own-Bot Inbox history with FTS5 trigram',
   migrate(database) {
@@ -2004,7 +2005,7 @@ const INBOX_HISTORY_MIGRATION: SchemaMigration = {
 };
 
 const EXTERNAL_USER_ROLE_MIGRATION: SchemaMigration = {
-  generation: 78,
+  id: 'external-user-role',
   module: 'messaging',
   description:
     'Keep ordinary conversation roles separate from explicit management grants in Messaging',
@@ -2021,7 +2022,7 @@ const EXTERNAL_USER_ROLE_MIGRATION: SchemaMigration = {
 };
 
 const PERMISSION_GROUP_MIGRATION: SchemaMigration = {
-  generation: 79,
+  id: 'permission-group',
   module: 'messaging',
   description: 'Persist continuous scoped authorization groups without copying member grants',
   migrate(database) {
@@ -2031,7 +2032,7 @@ const PERMISSION_GROUP_MIGRATION: SchemaMigration = {
 };
 
 const PAIRING_CARD_MIGRATION: SchemaMigration = {
-  generation: 80,
+  id: 'pairing-card',
   module: 'messaging',
   description: 'Persist scoped pairing-review card receipts and operator choices',
   migrate(database) {
@@ -2044,7 +2045,7 @@ const PAIRING_CARD_MIGRATION: SchemaMigration = {
 };
 
 export const BEHAVIOR_PERMISSION_MIGRATION: SchemaMigration = {
-  generation: 81,
+  id: 'behavior-permission',
   module: 'messaging',
   description: 'Persist reusable Bot-scoped Group behavior permission items',
   migrate(db) {
@@ -2058,7 +2059,7 @@ export const BEHAVIOR_PERMISSION_MIGRATION: SchemaMigration = {
 };
 
 export const EXTERNAL_TOOL_RULE_CREATOR_MIGRATION: SchemaMigration = {
-  generation: 82,
+  id: 'external-tool-rule-creator',
   module: 'tool-approval-rules',
   description: 'Retain external creator provenance for revocable native approval rules',
   migrate(database) {
@@ -2067,7 +2068,7 @@ export const EXTERNAL_TOOL_RULE_CREATOR_MIGRATION: SchemaMigration = {
 };
 
 const FAILURE_ALERT_MIGRATION: SchemaMigration = {
-  generation: 83,
+  id: 'failure-alert',
   module: 'messaging',
   description:
     'Persist opt-in failure alerts and bounded delivery metadata on the shared management route',
@@ -2084,7 +2085,7 @@ const FAILURE_ALERT_MIGRATION: SchemaMigration = {
 };
 
 const ASSIGNMENT_ARCHIVE_MIGRATION: SchemaMigration = {
-  generation: 84,
+  id: 'assignment-archive',
   module: 'assignments',
   description: 'Mirror the DSH Session archive on Orchestrator-archived Assignments (ADR-0188)',
   migrate(database) {
@@ -2093,7 +2094,7 @@ const ASSIGNMENT_ARCHIVE_MIGRATION: SchemaMigration = {
 };
 
 const INBOX_RESOLUTION_MIGRATION: SchemaMigration = {
-  generation: 85,
+  id: 'inbox-resolution',
   module: 'bot-inbox',
   description: 'Keep Inbox Admissions open until the Orchestrator resolves them (ADR-0188)',
   migrate(database) {
@@ -2112,7 +2113,7 @@ const INBOX_RESOLUTION_MIGRATION: SchemaMigration = {
 };
 
 const INBOX_SNOOZE_MIGRATION: SchemaMigration = {
-  generation: 86,
+  id: 'inbox-snooze',
   module: 'bot-inbox',
   description: 'Let the Orchestrator snooze open Inbox Admissions until a time (ADR-0188)',
   migrate(database) {
@@ -2128,7 +2129,7 @@ const INBOX_SNOOZE_MIGRATION: SchemaMigration = {
 };
 
 const ASSIGNMENT_ACCESS_SCOPE_MIGRATION: SchemaMigration = {
-  generation: 87,
+  id: 'assignment-access-scope',
   module: 'assignment-access',
   description: 'Record whether full access also covers the Orchestrator (ADR-0193)',
   migrate(database) {
@@ -2140,7 +2141,7 @@ const ASSIGNMENT_ACCESS_SCOPE_MIGRATION: SchemaMigration = {
 };
 
 const SECRET_MCP_SERVER_MIGRATION: SchemaMigration = {
-  generation: 88,
+  id: 'secret-mcp-server',
   module: 'secret-mcp',
   description: 'Remember Human-approved secret MCP servers per PersonaBot (ADR-0196)',
   migrate(database) {
@@ -2161,7 +2162,7 @@ const SECRET_MCP_SERVER_MIGRATION: SchemaMigration = {
 };
 
 const PROACTIVE_POST_LIMIT_MIGRATION: SchemaMigration = {
-  generation: 89,
+  id: 'proactive-post-limit',
   module: 'messaging',
   description: 'Persist per-app proactive post limits and independent quota revisions',
   migrate(database) {
@@ -2173,7 +2174,7 @@ const PROACTIVE_POST_LIMIT_MIGRATION: SchemaMigration = {
 };
 
 const SECRET_MCP_ENABLEMENT_MIGRATION: SchemaMigration = {
-  generation: 90,
+  id: 'secret-mcp-enablement',
   module: 'secret-mcp',
   description: 'Record which PersonaBots enabled a remembered secret MCP server (ADR-0198)',
   migrate(database) {
@@ -2190,7 +2191,7 @@ const SECRET_MCP_ENABLEMENT_MIGRATION: SchemaMigration = {
 };
 
 const DEVICE_PAIRING_MIGRATION: SchemaMigration = {
-  generation: 91,
+  id: 'device-pairing',
   module: 'device-pairing',
   description: 'Record the Host identity and paired devices for the device gateway (ADR-0199)',
   migrate(database) {
@@ -2214,7 +2215,7 @@ const DEVICE_PAIRING_MIGRATION: SchemaMigration = {
 };
 
 const PUSH_DELIVERY_MIGRATION: SchemaMigration = {
-  generation: 92,
+  id: 'push-delivery',
   module: 'push',
   description:
     'Record push tokens, notification kinds and sent Human Inbox items per paired device',
@@ -2241,7 +2242,7 @@ const PUSH_DELIVERY_MIGRATION: SchemaMigration = {
 };
 
 const HUMAN_INBOX_SNOOZE_MIGRATION: SchemaMigration = {
-  generation: 93,
+  id: 'human-inbox-snooze',
   module: 'human-attention',
   description: 'Let the Human snooze a Human Inbox item until a later time',
   migrate(database) {
@@ -2259,7 +2260,7 @@ const HUMAN_INBOX_SNOOZE_MIGRATION: SchemaMigration = {
 };
 
 const CHANNEL_REACTION_MIGRATION: SchemaMigration = {
-  generation: 94,
+  id: 'channel-reaction',
   module: 'messaging',
   description: 'Record emoji reactions on Channel messages',
   migrate(database) {
@@ -2278,7 +2279,7 @@ const CHANNEL_REACTION_MIGRATION: SchemaMigration = {
 };
 
 const SECRET_CLI_TOOL_RULE_MIGRATION: SchemaMigration = {
-  generation: 95,
+  id: 'secret-cli-tool-rule',
   module: 'tool-approval-rules',
   description: 'Allow secret_cli always-allow rules per program, account and variable names',
   migrate(database) {
@@ -2311,7 +2312,7 @@ const SECRET_CLI_TOOL_RULE_MIGRATION: SchemaMigration = {
 };
 
 const TOB_IDENTITY_MIGRATION: SchemaMigration = {
-  generation: 96,
+  id: 'tob-identity',
   module: 'tob',
   description: 'Reserve the protected local Tob identity',
   migrate(database) {
@@ -2322,7 +2323,7 @@ const TOB_IDENTITY_MIGRATION: SchemaMigration = {
 };
 
 const BOT_CREATION_OPERATION_MIGRATION: SchemaMigration = {
-  generation: 97,
+  id: 'bot-creation-operation',
   module: 'bot-creation',
   description: 'Reserve stable Bot creation identities for idempotent live CLI retries',
   migrate(database) {
@@ -2334,7 +2335,7 @@ const BOT_CREATION_OPERATION_MIGRATION: SchemaMigration = {
 };
 
 const CHANNEL_MANAGEMENT_OPERATION_MIGRATION: SchemaMigration = {
-  generation: 98,
+  id: 'channel-management-operation',
   module: 'channel-management',
   description: 'Reserve canonical Channel and invitation identities for scoped CLI retries',
   migrate(database) {
@@ -2347,7 +2348,7 @@ const CHANNEL_MANAGEMENT_OPERATION_MIGRATION: SchemaMigration = {
 };
 
 const GROUP_SEND_REVIEW_MIGRATION: SchemaMigration = {
-  generation: 99,
+  id: 'group-send-review',
   module: 'channel-send-review',
   description: 'Opt-in local Group send review and bounded durable draft intents',
   migrate(database) {
@@ -2363,7 +2364,7 @@ const GROUP_SEND_REVIEW_MIGRATION: SchemaMigration = {
 };
 
 const CLOUD_CONNECTION_MIGRATION: SchemaMigration = {
-  generation: 100,
+  id: 'cloud-connection',
   module: 'messaging',
   description: 'Track explicit cloud Agent connections without storing secret values',
   migrate(database) {
@@ -2380,7 +2381,7 @@ const CLOUD_CONNECTION_MIGRATION: SchemaMigration = {
 };
 
 const CLOUD_WORK_MIGRATION: SchemaMigration = {
-  generation: 101,
+  id: 'cloud-work',
   module: 'messaging',
   description: 'Fence bounded cloud work execution and forwarding across retries',
   migrate(database) {
@@ -2401,7 +2402,7 @@ const CLOUD_WORK_MIGRATION: SchemaMigration = {
 };
 
 const TOB_ONBOARDING_MIGRATION: SchemaMigration = {
-  generation: 102,
+  id: 'tob-onboarding',
   module: 'bot-onboarding',
   description: 'Version the short Tob journey without restarting legacy tutorials',
   migrate(database) {
@@ -2421,7 +2422,7 @@ const TOB_ONBOARDING_MIGRATION: SchemaMigration = {
 };
 
 const USAGE_IDLE_COMPACTION_MIGRATION: SchemaMigration = {
-  generation: 103,
+  id: 'usage-idle-compaction',
   module: 'usage',
   description: 'Record idle Orchestrator Session compactions for Bot activity',
   migrate(database) {
@@ -2449,7 +2450,7 @@ const USAGE_IDLE_COMPACTION_MIGRATION: SchemaMigration = {
 };
 
 const THREE_ACTION_APPROVAL_MIGRATION: SchemaMigration = {
-  generation: 104,
+  id: 'three-action-approval',
   module: 'tool-approval-rules',
   description: 'Remember one tool per authority scope and retain native ask for Full Access',
   migrate(database) {
@@ -2475,7 +2476,7 @@ const THREE_ACTION_APPROVAL_MIGRATION: SchemaMigration = {
 };
 
 const PUSH_APP_RENDER_MIGRATION: SchemaMigration = {
-  generation: 105,
+  id: 'push-app-render',
   module: 'push',
   description: 'Record which paired devices draw push notifications in the app',
   migrate(database) {
@@ -2484,7 +2485,7 @@ const PUSH_APP_RENDER_MIGRATION: SchemaMigration = {
 };
 
 const DEVICE_NOTIFICATION_PREFERENCE_MIGRATION: SchemaMigration = {
-  generation: 106,
+  id: 'device-notification-preference',
   module: 'push',
   description: 'Keep the device-owned notification preference copy without a push token',
   migrate(database) {
@@ -2499,7 +2500,7 @@ const DEVICE_NOTIFICATION_PREFERENCE_MIGRATION: SchemaMigration = {
 };
 
 const DEVICE_LIVE_ACTIVITY_MIGRATION: SchemaMigration = {
-  generation: 107,
+  id: 'device-live-activity',
   module: 'live-activity',
   description: 'Track device-owned Live Activity delivery handles, never request execution state',
   migrate(database) {
@@ -2515,7 +2516,7 @@ const DEVICE_LIVE_ACTIVITY_MIGRATION: SchemaMigration = {
 };
 
 const ASSIGNMENT_TITLE_MIGRATION: SchemaMigration = {
-  generation: 108,
+  id: 'assignment-title',
   module: 'assignments',
   description: 'Give Assignments a Title and turn purpose into their Description (ADR-0262)',
   migrate(database) {
@@ -2535,7 +2536,7 @@ const ASSIGNMENT_TITLE_MIGRATION: SchemaMigration = {
 };
 
 const SESSION_PROMPT_SNAPSHOT_MIGRATION: SchemaMigration = {
-  generation: 109,
+  id: 'session-prompt-snapshot',
   module: 'session-ownership',
   description: 'Freeze each Session Prompt Preset text at its first assembly',
   migrate(database) {
@@ -2544,7 +2545,7 @@ const SESSION_PROMPT_SNAPSHOT_MIGRATION: SchemaMigration = {
 };
 
 const TOOL_RULE_AUTO_APPROVAL_COUNT_MIGRATION: SchemaMigration = {
-  generation: 110,
+  id: 'tool-rule-auto-approval-count',
   module: 'tool-approval-rules',
   description: 'Count the approval requests each always-allow rule answers',
   migrate(database) {
@@ -2555,7 +2556,7 @@ const TOOL_RULE_AUTO_APPROVAL_COUNT_MIGRATION: SchemaMigration = {
 };
 
 const REQUEST_ASSIGNMENT_LINK_MIGRATION: SchemaMigration = {
-  generation: 111,
+  id: 'request-assignment-link',
   module: 'assignments',
   description: 'Record which Assignment each Human request created or advanced',
   migrate(database) {
@@ -2571,7 +2572,7 @@ const REQUEST_ASSIGNMENT_LINK_MIGRATION: SchemaMigration = {
 };
 
 const MESSAGE_SEARCH_ATTACHMENT_NAME_MIGRATION: SchemaMigration = {
-  generation: 112,
+  id: 'message-search-attachment-name',
   module: 'messaging',
   description: 'Index attachment file names in the message full-text index for global search',
   migrate(database) {
@@ -2580,7 +2581,7 @@ const MESSAGE_SEARCH_ATTACHMENT_NAME_MIGRATION: SchemaMigration = {
 };
 
 const GRANT_RECEPTION_EVIDENCE_MIGRATION: SchemaMigration = {
-  generation: 113,
+  id: 'grant-reception-evidence',
   module: 'messaging',
   description: 'Fence grant-backed reception evidence from older Bridge-only readers',
   migrate(database) {
@@ -2592,7 +2593,7 @@ const GRANT_RECEPTION_EVIDENCE_MIGRATION: SchemaMigration = {
 };
 
 const HUMAN_ATTENTION_CANDIDATE_INDEX_MIGRATION: SchemaMigration = {
-  generation: 114,
+  id: 'human-attention-candidate-index',
   module: 'messaging',
   description: 'Index canonical pending attention candidates without scanning ordinary history',
   migrate(database) {
@@ -2617,7 +2618,7 @@ const HUMAN_ATTENTION_CANDIDATE_INDEX_MIGRATION: SchemaMigration = {
 };
 
 const BOT_LAN_ADMISSION_MIGRATION: SchemaMigration = {
-  generation: 115,
+  id: 'bot-lan-admission',
   module: 'bot-lan',
   description: 'Record explicit Host-key-bound LAN Bot collaboration admissions',
   migrate(database) {
@@ -2635,7 +2636,7 @@ const BOT_LAN_ADMISSION_MIGRATION: SchemaMigration = {
 };
 
 const QUESTION_MESSAGING_MIGRATION: SchemaMigration = {
-  generation: 116,
+  id: 'question-messaging',
   module: 'messaging',
   description: 'Retain checked native question notification references and receipts',
   migrate(database) {
@@ -2649,7 +2650,7 @@ const QUESTION_MESSAGING_MIGRATION: SchemaMigration = {
 };
 
 const TAKEOVER_ATTENTION_INDEX_MIGRATION: SchemaMigration = {
-  generation: 117,
+  id: 'takeover-attention-index',
   module: 'messaging',
   description: 'Index Takeover Handoff requests without scanning ordinary history',
   migrate(database) {
@@ -2662,7 +2663,7 @@ const TAKEOVER_ATTENTION_INDEX_MIGRATION: SchemaMigration = {
 };
 
 const VOICE_PROVIDER_MIGRATION: SchemaMigration = {
-  generation: 118,
+  id: 'voice-provider',
   module: 'voice',
   description: 'Store TTS Providers; their keys stay in the credentials service',
   migrate(database) {
@@ -2677,7 +2678,7 @@ const VOICE_PROVIDER_MIGRATION: SchemaMigration = {
 };
 
 const GRANT_RESOLUTION_INDEX_MIGRATION: SchemaMigration = {
-  generation: 119,
+  id: 'grant-resolution-index',
   module: 'messaging',
   description: 'Index grant request resolutions without scanning Channel history',
   migrate(database) {
@@ -2690,7 +2691,7 @@ const GRANT_RESOLUTION_INDEX_MIGRATION: SchemaMigration = {
 };
 
 const OUTPUT_REQUEST_INDEX_MIGRATION: SchemaMigration = {
-  generation: 120,
+  id: 'output-request-index',
   module: 'messaging',
   description: 'Index Bot output lookups by the request that caused them',
   migrate(database) {
@@ -2701,7 +2702,7 @@ const OUTPUT_REQUEST_INDEX_MIGRATION: SchemaMigration = {
 };
 
 const SESSION_PARENT_INDEX_MIGRATION: SchemaMigration = {
-  generation: 121,
+  id: 'session-parent-index',
   module: 'session-ownership',
   description: 'Index child Sessions by parent without scanning every Session',
   migrate(database) {
@@ -2712,7 +2713,7 @@ const SESSION_PARENT_INDEX_MIGRATION: SchemaMigration = {
 };
 
 const NEEDS_REPAIR_INDEX_MIGRATION: SchemaMigration = {
-  generation: 122,
+  id: 'needs-repair-index',
   module: 'bot-inbox',
   description: 'Index Admissions that need repair without scanning Inbox history',
   migrate(database) {
@@ -2724,7 +2725,7 @@ const NEEDS_REPAIR_INDEX_MIGRATION: SchemaMigration = {
 };
 
 const PLACEMENT_NOTICE_MIGRATION: SchemaMigration = {
-  generation: 123,
+  id: 'placement-notice',
   module: 'messaging',
   description: 'Mark notice placements so the latest message is found without walking notices',
   migrate(database) {
@@ -2754,7 +2755,7 @@ const PLACEMENT_NOTICE_MIGRATION: SchemaMigration = {
 };
 
 const PLACEMENT_HUMAN_REPLY_MIGRATION: SchemaMigration = {
-  generation: 124,
+  id: 'placement-human-reply',
   module: 'messaging',
   description:
     'Mark Bot replies and mentions for the Human so the replies list skips other history',
@@ -2785,7 +2786,7 @@ const PLACEMENT_HUMAN_REPLY_MIGRATION: SchemaMigration = {
 };
 
 const BOUNDED_RANGE_INDEX_MIGRATION: SchemaMigration = {
-  generation: 125,
+  id: 'bounded-range-index',
   module: 'messaging',
   description:
     'Index message time, outbound attempts, outbound receipts and external message ids for bounded lookups',
@@ -2803,7 +2804,7 @@ const BOUNDED_RANGE_INDEX_MIGRATION: SchemaMigration = {
 };
 
 const ATTENTION_RESOLUTION_INDEX_MIGRATION: SchemaMigration = {
-  generation: 126,
+  id: 'attention-resolution-index',
   module: 'messaging',
   description: 'Index attention resolutions and admission activity time for bounded lookups',
   migrate(database) {
@@ -2828,7 +2829,7 @@ const ATTENTION_RESOLUTION_INDEX_MIGRATION: SchemaMigration = {
 };
 
 const CAUSAL_PURGE_TOMBSTONE_MIGRATION: SchemaMigration = {
-  generation: 127,
+  id: 'causal-purge-tombstone',
   module: 'messaging-purge',
   description: 'Allow a Source Event canonical tombstone when its causal ancestors are purged',
   migrate(database) {
@@ -2853,7 +2854,7 @@ const CAUSAL_PURGE_TOMBSTONE_MIGRATION: SchemaMigration = {
 };
 
 const VOICE_DEFAULTS_MIGRATION: SchemaMigration = {
-  generation: 128,
+  id: 'voice-defaults',
   module: 'voice',
   description: 'Store the Host-wide default TTS and ASR Provider every Bot falls back to',
   migrate(database) {
@@ -2867,7 +2868,7 @@ const VOICE_DEFAULTS_MIGRATION: SchemaMigration = {
 };
 
 const VOICE_SETTINGS_MIGRATION: SchemaMigration = {
-  generation: 129,
+  id: 'voice-settings',
   module: 'voice',
   description: 'Store Host-wide voice tuning such as the speech detection threshold',
   migrate(database) {
@@ -2881,7 +2882,7 @@ const VOICE_SETTINGS_MIGRATION: SchemaMigration = {
 };
 
 const CHANNEL_CHANGE_LOG_MIGRATION: SchemaMigration = {
-  generation: 130,
+  id: 'channel-change-log',
   module: 'messaging',
   description: 'Record every change to what a placed message renders in a global change log',
   migrate(database) {
@@ -3076,7 +3077,7 @@ const CHANNEL_CHANGE_LOG_MIGRATION: SchemaMigration = {
 };
 
 const WORKSPACE_GRANT_PATH_MIGRATION: SchemaMigration = {
-  generation: 131,
+  id: 'workspace-grant-path',
   module: 'workspace-grants',
   description: 'Keep one active Workspace Grant per Bot and canonical directory',
   migrate(database) {
@@ -3098,7 +3099,7 @@ const WORKSPACE_GRANT_PATH_MIGRATION: SchemaMigration = {
 };
 
 const CALL_VISUAL_UNSAVED_MIGRATION: SchemaMigration = {
-  generation: 134,
+  id: 'call-visual-unsaved',
   module: 'messaging',
   description: 'Drop the removed unsaved marker from call message visuals',
   migrate(database) {
@@ -3112,7 +3113,7 @@ const CALL_VISUAL_UNSAVED_MIGRATION: SchemaMigration = {
 };
 
 const CLIENT_ACKNOWLEDGEMENT_MIGRATION: SchemaMigration = {
-  generation: 136,
+  id: 'client-acknowledgement',
   module: 'bot-onboarding',
   description: 'Remember one-time Client notices per Profile instead of per browser origin',
   migrate(database) {
@@ -3127,7 +3128,7 @@ const CLIENT_ACKNOWLEDGEMENT_MIGRATION: SchemaMigration = {
 };
 
 const CALL_VISUAL_TIMELINE_MIGRATION: SchemaMigration = {
-  generation: 135,
+  id: 'call-visual-timeline',
   module: 'messaging',
   description:
     'Drop the removed frame-record list from call message visuals, and grid metadata without a picture range',
@@ -3148,7 +3149,7 @@ const CALL_VISUAL_TIMELINE_MIGRATION: SchemaMigration = {
 };
 
 const GENUI_PRIVATE_VIEW_MIGRATION: SchemaMigration = {
-  generation: 132,
+  id: 'genui-private-view',
   module: 'messaging',
   description:
     'Private Human view drafts reference canonical report placements and cascade on purge',
@@ -3171,7 +3172,7 @@ const callGridLayoutFor = (frames: string) =>
     WHEN 6 THEN '3+3' WHEN 7 THEN '3+2+2' WHEN 8 THEN '3+3+2' WHEN 9 THEN '3+3+3' END`;
 
 const CALL_GRID_ROWS_MIGRATION: SchemaMigration = {
-  generation: 133,
+  id: 'call-grid-rows',
   module: 'voice',
   description: 'Rewrite call grid layouts from square grids to balanced rows of at most three',
   migrate(database) {
@@ -3201,7 +3202,7 @@ const CALL_GRID_ROWS_MIGRATION: SchemaMigration = {
 };
 
 const QUESTION_MESSAGING_RECOVERY_MIGRATION: SchemaMigration = {
-  generation: 137,
+  id: 'question-messaging-recovery',
   module: 'messaging',
   description: 'Recover the question schema skipped by the generation-116 QQ defaults hotfix',
   migrate(database) {
@@ -3241,7 +3242,7 @@ const QUESTION_MESSAGING_RECOVERY_MIGRATION: SchemaMigration = {
 };
 
 const QQ_PLATFORM_DEFAULTS_MIGRATION: SchemaMigration = {
-  generation: 138,
+  id: 'qq-platform-defaults',
   module: 'messaging',
   description:
     'Allow QQ platform defaults while preserving official and historical hotfix preferences',
@@ -3264,7 +3265,7 @@ const QQ_PLATFORM_DEFAULTS_MIGRATION: SchemaMigration = {
 };
 
 const DEVICE_FEED_READ_MIGRATION: SchemaMigration = {
-  generation: 139,
+  id: 'device-feed-read',
   module: 'paired-devices',
   description: 'Retain the paired client acknowledgement of its first Host Feed read',
   migrate(database) {
@@ -3273,7 +3274,7 @@ const DEVICE_FEED_READ_MIGRATION: SchemaMigration = {
 };
 
 const SOURCE_EVENT_HUMAN_MIGRATION: SchemaMigration = {
-  generation: 140,
+  id: 'source-event-human',
   module: 'messaging',
   description: 'Record the speaking Human on Source Events without changing message payloads',
   migrate(database) {
@@ -3300,7 +3301,7 @@ const SOURCE_EVENT_HUMAN_MIGRATION: SchemaMigration = {
 };
 
 const TEAM_MEMBERS_MIGRATION: SchemaMigration = {
-  generation: 141,
+  id: 'team-members',
   module: 'team',
   description: 'Host-owned Human identities, password credentials and revocable member grants',
   migrate(database) {
@@ -3344,7 +3345,7 @@ const TEAM_MEMBERS_MIGRATION: SchemaMigration = {
 };
 
 const TEAM_ROLES_MIGRATION: SchemaMigration = {
-  generation: 142,
+  id: 'team-roles',
   module: 'team',
   description: 'Host Roles, member assignments and transferable Owner authority',
   migrate(database) {
@@ -3381,7 +3382,7 @@ const TEAM_ROLES_MIGRATION: SchemaMigration = {
 };
 
 const PRIVATE_BOTS_MIGRATION: SchemaMigration = {
-  generation: 143,
+  id: 'private-bots',
   module: 'team',
   description: 'Private Bot ownership and one durable Tob identity per Human',
   migrate(database) {
@@ -3401,7 +3402,7 @@ const PRIVATE_BOTS_MIGRATION: SchemaMigration = {
 };
 
 const HOST_RELATIONSHIP_MIGRATION: SchemaMigration = {
-  generation: 144,
+  id: 'host-relationship',
   module: 'host-relationships',
   description: 'Persist pinned reciprocal Host relationships and derived device provenance',
   migrate(database) {
@@ -3431,7 +3432,7 @@ const HOST_RELATIONSHIP_MIGRATION: SchemaMigration = {
 };
 
 const MEMBER_LIFECYCLE_MIGRATION: SchemaMigration = {
-  generation: 145,
+  id: 'member-lifecycle',
   module: 'team',
   description: 'Deactivation, mode suspension and deleted member identities',
   rebuildsReferencedTables: true,
@@ -3461,7 +3462,7 @@ const MEMBER_LIFECYCLE_MIGRATION: SchemaMigration = {
 };
 
 const CHANNEL_ACCESS_MIGRATION: SchemaMigration = {
-  generation: 146,
+  id: 'channel-access',
   module: 'team',
   description: 'Channel visibility, Human ownership, policy and admins',
   migrate(database) {
@@ -3481,7 +3482,7 @@ const CHANNEL_ACCESS_MIGRATION: SchemaMigration = {
 };
 
 const HOST_RELATIONSHIP_REVOCATION_MIGRATION: SchemaMigration = {
-  generation: 147,
+  id: 'host-relationship-revocation',
   module: 'host-relationships',
   description: 'Retain bounded offline reciprocal disconnect retries across Host restart',
   migrate(database) {
@@ -3496,7 +3497,7 @@ const HOST_RELATIONSHIP_REVOCATION_MIGRATION: SchemaMigration = {
 };
 
 const TEAM_MODELS_MIGRATION: SchemaMigration = {
-  generation: 148,
+  id: 'team-models',
   module: 'team',
   description: 'Role model route policy',
   migrate(db) {
@@ -3504,7 +3505,7 @@ const TEAM_MODELS_MIGRATION: SchemaMigration = {
   },
 };
 const MEMBER_USAGE_MIGRATION: SchemaMigration = {
-  generation: 149,
+  id: 'member-usage',
   module: 'usage',
   description: 'Human-attributed usage receipts and daily buckets',
   migrate(db) {
@@ -3536,7 +3537,7 @@ const MEMBER_USAGE_MIGRATION: SchemaMigration = {
 };
 
 const HOST_RELATIONSHIP_ACCOUNT_MIGRATION: SchemaMigration = {
-  generation: 150,
+  id: 'host-relationship-account',
   module: 'host-relationships',
   description: 'Retain verified same-account relationship provenance',
   migrate(database) {
@@ -3559,7 +3560,7 @@ const HOST_RELATIONSHIP_ACCOUNT_MIGRATION: SchemaMigration = {
 };
 
 const WORKSPACE_SPACES_MIGRATION: SchemaMigration = {
-  generation: 151,
+  id: 'workspace-spaces',
   module: 'workspace-spaces',
   description:
     'Account and audience-contained shared Workspace roots and resumable Memory relocation',
@@ -3594,7 +3595,7 @@ const WORKSPACE_SPACES_MIGRATION: SchemaMigration = {
 };
 
 const PRIVATE_CONTENT_AUDIT_MIGRATION: SchemaMigration = {
-  generation: WORKSPACE_SPACES_MIGRATION.generation + 1,
+  id: 'private-content-audit',
   module: 'team',
   description: 'Hash-chained private-content access audit and durable tail anchor',
   migrate(database) {
@@ -3612,6 +3613,62 @@ const PRIVATE_CONTENT_AUDIT_MIGRATION: SchemaMigration = {
         INSERT INTO private_audit_head VALUES (0, '', '');
       `);
   },
+};
+
+const MINIMAL_MEMBER_MIGRATION: SchemaMigration = {
+  id: 'minimal-member',
+  module: 'team',
+  description: 'Minimal Member grants, split Bot creation and Owner-only Tob',
+  migrate(db) {
+    const previousMember = ['channels.create', 'dm.humans', 'bots.create', 'models.use'];
+    const rows = z
+      .array(
+        z.object({
+          role_id: z.string(),
+          builtin: z.string().nullable(),
+          name: z.string(),
+          permissions_json: z.string(),
+          models_json: z.string(),
+        }),
+      )
+      .parse(
+        db
+          .prepare('SELECT role_id, builtin, name, permissions_json, models_json FROM host_roles')
+          .all(),
+      );
+    for (const row of rows) {
+      const permissions = z.array(z.string()).parse(JSON.parse(row.permissions_json));
+      const unmodifiedMember =
+        row.builtin === 'member' &&
+        row.name === 'member' &&
+        row.models_json === '{"kind":"all"}' &&
+        permissions.length === previousMember.length &&
+        previousMember.every((permission) => permissions.includes(permission));
+      const grants = unmodifiedMember
+        ? ['dm.humans']
+        : [
+            ...new Set(
+              permissions.map((permission) =>
+                permission === 'bots.create' ? 'bots.createPrivate' : permission,
+              ),
+            ),
+          ];
+      db.prepare('UPDATE host_roles SET permissions_json = ? WHERE role_id = ?').run(
+        JSON.stringify(grants),
+        row.role_id,
+      );
+    }
+    db.exec(
+      'DELETE FROM tob_identity WHERE human_id <> (SELECT owner_human_id FROM team_settings)',
+    );
+  },
+};
+
+const MIGRATION_LEDGER_MIGRATION: SchemaMigration = {
+  id: 'migration-ledger',
+  module: 'database',
+  description: 'Require named migration history on every subsequent open',
+  migrate() {},
 };
 
 export const BOT_HARNESS_SCHEMA_PLAN = defineSchemaPlan([
@@ -3644,12 +3701,12 @@ export const BOT_HARNESS_SCHEMA_PLAN = defineSchemaPlan([
   USAGE_DAILY_MIGRATION,
   BOT_SOURCE_POLICY_MIGRATION,
   BOT_SOURCE_POLICY_EDIT_MIGRATION,
-  BOT_SOURCE_DELIVERY_MIGRATION,
   BOT_SOURCE_GROUP_MODES_MIGRATION,
   MEMORY_CHANGE_INBOX_MIGRATION,
   MEMORY_CHANGE_CHECKPOINT_MIGRATION,
   MEMORY_RECOVERY_CHECKPOINT_MIGRATION,
   ASSIGNMENT_MODEL_ROUTE_MIGRATION,
+  BOT_SOURCE_DELIVERY_MIGRATION,
   USAGE_REPORT_COMPLETENESS_MIGRATION,
   MESSAGING_OUTBOUND_MIGRATION,
   ATTACHMENT_FILE_BINDING_MIGRATION,
@@ -3766,4 +3823,6 @@ export const BOT_HARNESS_SCHEMA_PLAN = defineSchemaPlan([
   HOST_RELATIONSHIP_ACCOUNT_MIGRATION,
   WORKSPACE_SPACES_MIGRATION,
   PRIVATE_CONTENT_AUDIT_MIGRATION,
+  MINIMAL_MEMBER_MIGRATION,
+  MIGRATION_LEDGER_MIGRATION,
 ]);

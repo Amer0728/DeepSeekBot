@@ -359,8 +359,8 @@ flowchart TD
   Start["Host starts"] --> Lease{"Acquire profile writer lease"}
   Lease -- "busy" --> ReadOnly["Fail closed<br/>read-only diagnostics"]
   Lease -- "owned" --> Open["Open botharness.db"]
-  Open --> Gen{"Schema generation supported?"}
-  Gen -- "newer / corrupt" --> Recovery["Recovery mode<br/>no operational writes or wakes"]
+  Open --> Gen{"Schema generation + ledger supported?"}
+  Gen -- "newer / divergent / corrupt" --> Recovery["Recovery mode<br/>no operational writes or wakes"]
   Gen -- "current" --> Integrity["Integrity checks"]
   Gen -- "older" --> Copy["Migrate isolated temp copy"]
   Copy --> Verify["Verify schema + integrity"]
@@ -374,6 +374,8 @@ flowchart TD
 ```
 
 一个 DSH profile 同时只允许一个 BotHarness writer。所有 module migration 合并成单调递增的 Schema Generation；迁移只在临时副本上完成，校验后原子替换。打开、迁移或页完整性检查失败时进入 recovery mode，不回退到 NDJSON、storage domain 或内存写入。外部工具留下的外键孤儿行不阻止挂载，只记录在诊断和启动日志中；迁移不得新增孤儿（ADR-0258）。
+
+Module migrations use stable ids in an append-only list; generation is computed from position. The Operational Database Owner writes `schema_migrations(generation, id)` alongside each staged migration and verifies the complete applied prefix on every open. Pre-ledger Profiles through generation 153 are backfilled once by the historical execution order. Divergent or unknown history fails with `upgrade-required` without repair. The committed id/body-hash snapshot protects merged migrations; append conflicts retain both entries in merge order ([ADR-0341](../adr/0341-named-schema-migrations-have-an-append-only-ledger.md), [workflow](../agents/schema-migrations.md)).
 
 ## 4 · Messaging 事务与外部副作用
 
@@ -1678,5 +1680,7 @@ The [M11 Host/CLI runtime](team-mode-m11-runtime.md) adds Human-only, permission
 The [M4 Host/CLI runtime](team-mode-m4-runtime.md) adds canonical Channel visibility, ownership/admins and policy, plus two-Human DM identity. The same audience Service scopes reads, SQL search, unread lists and live delivery; revocation closes existing browser Peers and paired-device streams. Private-content auditing remains M11.
 
 The Team usage and Role model policy runtime is described in [M10 Host and CLI logic](team-mode-m10-runtime.md).
+
+[M13 Host and CLI logic](team-mode-m13-runtime.md) supersedes M2's per-Human Tob and M3's default Member grants: only the current Host Owner has a Tob, Member grants exactly `dm.humans`, and Bot creation uses `bots.createPrivate` / `bots.createPublic`. Existing member Tobs retain their records, Memory and DMs as ordinary private Bots. Member `tobHome` succeeds with `{ available: false }`; onboarding allocates nothing and omits Bot/Channel identifiers. The migration preserves customized roles, maps legacy creation grants, and keeps no-Bot usage/offboarding paths valid. Integrated M6 startup relocation follows legacy Workspace registrations on the Bot and active Grants rather than the retired member Tob identity; canonical Memory ownership and account-space file containment survive upgrade and transfer. Grant-based Git/ZIP/Marketplace imports bind ownership, upload sessions and receipts to the caller and retain M6 account containment. Legacy Workspace Grant relocation preserves each relative subpath and write flag. Owner transfer retires the demoted Owner's Tob identity atomically, leaving the former Tob private and allowing a fresh Tob on later promotion. The separate Client/mobile surfaces retain their own acceptance checks.
 
 The [M5 approval logic](team-mode-m5-runtime.md) adds caller-scoped masking across Channel projections, Activity and push, Human decision attribution and unattended routing to the Bot owner. Member-owned Sessions refuse full access, suppressed asks and escalation. Team status and invitation responses identify the current isolation as `trial`; M12 owns enforcement qualification.
