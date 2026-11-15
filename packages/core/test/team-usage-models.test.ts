@@ -851,7 +851,7 @@ describe('M10 member usage and role models', () => {
         mountOperationalDatabase({
           dshHome: home,
           schemaPlan: defineSchemaPlan(
-            BOT_HARNESS_SCHEMA_PLAN.migrations.filter((m) => m.generation <= 149),
+            BOT_HARNESS_SCHEMA_PLAN.migrations.filter((migration) => migration.generation <= 149),
           ),
         }),
       );

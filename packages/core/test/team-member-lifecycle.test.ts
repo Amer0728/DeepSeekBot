@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -80,7 +81,7 @@ function fixture(
     core.operationalDatabase.close();
   });
   const db = attachOperationalModule(core.operationalDatabase, 'member-lifecycle-test');
-  if (options.seed !== false && !core.team.member('bob'))
+  if (options.seed !== false && !core.team.member('bob')) {
     db.transaction((connection) => {
       for (const human of [bob, alice]) {
         connection
@@ -93,6 +94,8 @@ function fixture(
       }
       connection.prepare('UPDATE team_settings SET enabled = 1').run();
     });
+    for (const human of [bob, alice]) core.team.spaces.ensureAccount(human.humanId);
+  }
   return { core, dshHome, db, runs, stop, firstRun };
 }
 
@@ -131,6 +134,13 @@ function createBot(f: ReturnType<typeof fixture>, human = bob, slug = 'bob-bot')
 function legacyMemberTob(f: ReturnType<typeof fixture>) {
   const { bot, dm } = createBot(f, bob, 'legacy-tob');
   return { botSlug: bot.slug, channelId: dm.id };
+}
+
+function accountFileCount(f: ReturnType<typeof fixture>) {
+  const root = join(f.dshHome, 'spaces', bob.humanId);
+  return readdirSync(root, { recursive: true, withFileTypes: true }).filter(
+    (entry) => !entry.isDirectory(),
+  ).length;
 }
 async function send(f: ReturnType<typeof fixture>, slug: string, id: string) {
   await f.core.channels.appendMessage(bob, 'dm-' + slug, {
@@ -346,6 +356,8 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       list: () => [workspace],
     });
     const f = fixture({ coreOptions: { workspaces } });
+    workspace.path = join(f.dshHome, 'spaces/bob/files/project');
+    mkdirSync(workspace.path, { recursive: true });
     const bot = createBot(f);
     const grant = await f.core.grants.create(bot.bot.slug, workspace.id);
     const rule = f.core.toolRules.createPending({
@@ -386,6 +398,7 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       const transferred = createBot(f, bob, 'transferred');
       writeFileSync(join(transferred.memory, 'keep.md'), 'Alice retained Memory');
       await f.core.team.transfer(owner, 'bob', 'alice');
+      const transferredMemory = f.core.registry.memoryDirFor(transferred.bot.slug)!;
       const remaining = createBot(f, bob, 'remaining');
       await restoreDeletionFact(f, [transferred.bot.slug, remaining.bot.slug]);
       const erasePrivateAccounts = vi.fn(async () => {
@@ -411,7 +424,7 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
         expect(existsSync(remaining.memory)).toBe(false);
       }
       expect(erasePrivateAccounts).toHaveBeenCalledExactlyOnceWith(remaining.bot.slug);
-      expect(readFileSync(join(transferred.memory, 'keep.md'), 'utf8')).toBe(
+      expect(readFileSync(join(transferredMemory, 'keep.md'), 'utf8')).toBe(
         'Alice retained Memory',
       );
     },
@@ -452,7 +465,12 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
         });
       await f.core.team.deactivate(owner, 'bob');
       const preview = f.core.team.purgePreview(owner, 'bob');
-      expect(preview.counts).toEqual({ channels: 1, bots: 2, messages: 1, files: 1 });
+      expect(preview.counts).toEqual({
+        channels: 1,
+        bots: 2,
+        messages: 1,
+        files: 1 + accountFileCount(f),
+      });
       await f.core.team.purgeConfirm(owner, 'bob', preview.token, 'bob');
       expect(f.core.channels.get(shared.dm.id)).toBeDefined();
       expect(f.core.channels.readMessages(shared.dm.id)[0]?.body).toBe('retained alice');
@@ -499,8 +517,8 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       const preview = f.core.team.purgePreview(owner, 'bob');
       expect(preview.counts).toEqual(
         operation === 'purge'
-          ? { channels: 4, bots: 3, messages: 3, files: 2 }
-          : { channels: 0, bots: 0, messages: 0, files: 0 },
+          ? { channels: 4, bots: 3, messages: 3, files: 2 + accountFileCount(f) }
+          : { channels: 0, bots: 0, messages: 0, files: accountFileCount(f) },
       );
       await f.core.team.purgeConfirm(owner, 'bob', preview.token, 'bob');
       expect(Boolean(f.core.channels.get(tob.channelId))).toBe(operation === 'transfer-first');
@@ -612,8 +630,8 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       if (scenario === 'transferred') {
         const target = await f.core.team.createMember(owner, 'alice', 'Alice');
         const bot = createBot(f, human, 'transferred-bot');
-        transferredMemory = bot.memory;
         await f.core.team.transfer(owner, human.humanId, target.member.humanId);
+        transferredMemory = f.core.registry.memoryDirFor(bot.bot.slug);
       }
       await f.core.team.resetPassword(owner, human.humanId);
       await f.core.team.deactivate(owner, human.humanId);
@@ -621,7 +639,11 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       await f.core.team.setMode(owner, true);
       await f.core.team.reactivate(owner, human.humanId);
       await f.core.team.deactivate(owner, human.humanId);
-      expect(f.core.team.transferPreview(owner, human.humanId)).toEqual({ channels: [], bots: [] });
+      expect(f.core.team.transferPreview(owner, human.humanId)).toMatchObject({
+        channels: [],
+        bots: [],
+        space: { spaceId: 'spaces/' + human.humanId },
+      });
       const preview = f.core.team.purgePreview(owner, human.humanId);
       expect(preview.counts.bots).toBe(tobSlug ? 1 : 0);
       await f.core.team.purgeConfirm(owner, human.humanId, preview.token, 'bob');
@@ -771,9 +793,12 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
     expect(f.core.tob.slug(bob)).toBeUndefined();
     expect(f.core.registry.get(tob.botSlug)?.ownerHumanId).toBe('alice');
     expect(f.core.team.belongs(alice, group.id)).toBe(true);
-    expect(readFileSync(join(original.memory, 'transferred.md'), 'utf8')).toBe(
-      'private transferred memory',
-    );
+    expect(
+      readFileSync(
+        join(f.core.registry.memoryDirFor(original.bot.slug)!, 'transferred.md'),
+        'utf8',
+      ),
+    ).toBe('private transferred memory');
     const methods = createBridgeMethodsForHumans(f.core);
     expect(methods(bob).get({ slug: 'bob-bot' })).toMatchObject({
       ok: false,
@@ -849,8 +874,21 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       });
     await f.core.team.deactivate(owner, 'bob');
     const preview = f.core.team.purgePreview(owner, 'bob');
-    expect(preview.counts).toMatchObject({ bots: 2, channels: 2, messages: 2, files: 1 });
+    expect(preview.counts).toMatchObject({
+      bots: 2,
+      channels: 2,
+      messages: 2,
+      files: 1 + accountFileCount(f),
+    });
     await f.core.team.purgeConfirm(owner, 'bob', preview.token, 'bob');
+    expect(f.core.team.privateAccess.log(owner, {}).records).toEqual(
+      expect.arrayContaining(
+        ['bob-bot', tob.botSlug].map((objectId) =>
+          expect.objectContaining({ kind: 'bot', objectId, action: 'memberPurgeConfirm' }),
+        ),
+      ),
+    );
+    expect(f.core.team.privateAccess.verify(owner)).toEqual({ ok: true });
     for (const slug of ['bob-bot', tob.botSlug]) {
       expect(f.core.registry.get(slug)).toBeUndefined();
       expect(f.core.deletions.get(slug)).toMatchObject({ phase: 'complete', memory: 'erased' });
@@ -860,7 +898,7 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
     if (!inventory.ok) throw new Error('inventory unavailable');
     for (const slug of ['bob-bot', tob.botSlug])
       expect(inventory.value.bots.find((bot) => bot.slug === slug)).toMatchObject({
-        deleted: true,
+        owner: false,
         displayName: '',
       });
     expect(f.core.attachments.has(file)).toBe(false);

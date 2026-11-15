@@ -8,7 +8,7 @@ export const CONNECT_COMMANDS = [
   {
     command: 'private-route',
     description:
-      'list, add/replace <quick|custom>, or start/stop/remove <quick|custom>; mutations require --confirm',
+      'list, add/replace <quick|custom>, or start/stop/remove <quick|custom>; mutations require --confirm; stop supports --expected-route-revision',
   },
   {
     command: 'private-connect',
@@ -65,6 +65,7 @@ export const CONNECT_COMMANDS = [
   },
 ] as const;
 export const CONNECT_OPTIONS = {
+  'expected-route-revision': { type: 'string' },
   hostname: { type: 'string' },
   'token-stdin': { type: 'boolean' },
   wait: { type: 'boolean' },
@@ -87,6 +88,7 @@ export async function runConnectCommand(
     quick?: boolean;
     origin?: string;
     lan?: boolean;
+    'expected-route-revision'?: string;
   },
   io: { readStdin?: () => Promise<string>; stderr?: (text: string) => void },
   connect: () => Promise<{
@@ -94,8 +96,16 @@ export async function runConnectCommand(
   }>,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((done) => setTimeout(done, ms)),
 ): Promise<unknown> {
+  if (command !== 'private-route' && values['expected-route-revision'] !== undefined)
+    throw new CliLiveError('usage', '--expected-route-revision applies to private-route stop.');
   if (command === 'private-route') {
     const [action, routeId] = rest;
+    const expectedRevision = values['expected-route-revision'];
+    if (
+      expectedRevision !== undefined &&
+      (action !== 'stop' || !expectedRevision.length || expectedRevision.length > 200)
+    )
+      throw new CliLiveError('usage', '--expected-route-revision applies to private-route stop.');
     if (action === 'list' && rest.length === 1) {
       const host = await connect();
       const snapshot = JSON.parse(new TextDecoder().decode((await host.http(DEVICES)).bytes)) as {
@@ -139,6 +149,7 @@ export async function runConnectCommand(
             action,
             routeId,
             confirm: true,
+            ...(expectedRevision === undefined ? {} : { expectedRevision }),
             ...(configure
               ? { mode: routeId === 'quick' ? 'quick' : named ? 'named' : 'ingress' }
               : {}),

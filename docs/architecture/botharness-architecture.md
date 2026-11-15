@@ -6,6 +6,26 @@ E7 的创建目标也限定“与人私聊”。既有 Team 联系人目录和 H
 
 ## 已确认目标：环境面板与双向 Host 关系（逐片交付）
 
+E11 执行保护与 E6 凭据事务的顺序固定为：执行 Web Lock → 短配置事务；配置 writer 不反向取得执行锁。短事务重新读取持久授权，在期限与实际线路检查后原子保存保护并同步启动原 SDK 请求，网络等待在事务外。新记录放在同一带版本的执行索引文档中；保留旧引用事实，未知响应不解除保护。旧页面不能解析新格式时拒绝连接更改，须重新加载当前版本回读，不能删除未知记录来恢复写入。事务只 fresh-read/CAS 原 SavedHost 配置，完成后重新派生执行状态，不将未知操作字段写入凭据数组。自动登记沿用自己的每 Host intent lock → 同一短配置事务。
+
+私有线路确认绑定所属 Host 返回的不透明配置代次，同一值贯穿所显示的计划、UI 或 CLI 确认、发送、确认响应与未知结果回读。Host 在现有生命周期串行操作内、写入停止状态或关闭运行资源之前比较该值；替换、删除后重加或 Host 重启均使旧确认失效。持久化成功后，配置与代次同时发布。运行健康和端口更新保留配置身份；Quick 公开地址变化时同时更新代次，必须重新确认，代次不从连接器令牌派生。同 ID 新配置不会被旧确认停止，其停止状态也不能解除旧操作的未知记录。没有代次的旧私有停止记录保持未知。既有本地 owner 明确的无条件控制保留原语义。新的非空执行文档使用版本 3；读取时仍保留旧版本 2 与引用记录。旧数组读取器和版本 2 读取器都拒绝整个新文档，避免管理其他 Host 的旧 writer 擦除配置代次。
+
+远程连接执行保护及其兼容性限制见 [ADR-0340](../adr/0340-uncertain-connection-writes-stay-client-execution-state.md)。既有 Owner-only RemoteHosts provider 同时限制执行记录和本地移除；Member/Admin 页面不恢复 Owner 凭据或执行历史，权限拒绝不转成恢复存储提示。原授权回读失败时保留未知事实，不回退到 Native Owner 请求。
+
+E11 在独立 Settings Target 下复用目标 Host 的设备、单条私有路由和账号 owner。计划切换先验证既有替代路由，明确保存本 Client 的手动偏好，等待实际连接切换并回读精确 Host 后才执行一次；没有替代路由则明确确认断开。Client 既有 HostStorage 所有者下的独立执行索引中的记录绑定 Host 公钥、设备、操作/路由及代次，结果未知时跨重载保留，不成为 Host 配置权威，也不自动重放，其他 SavedHost 数组写入不能擦除它。共享 Web Lock 覆盖准备、保护持久化、一次写入、确认及回读 CAS；缺少 Web Locks 时拒绝危险写入。最多保留 32 条未解决事实而不自动清除。新独立授权可明确通过同一 Host 公钥核对旧操作的结果，但不继承或重发操作；公钥变化拒绝核对，清除仍按代次 CAS。退出登录、关系断开、单设备撤销和单路由停止保持独立权限和效果，不操作外部 Tailscale 映射或无关 Host 进程。
+
+E6 通过现有已认证账号列表与 `/offer` 发现同账号 Host：两端各自验证本机注册与 Noise 身份，接收端使用自己的账号会话重新读取准确的来源注册；HMAC、账号、目标注册、新鲜度和包含双方身份的固定角色 transcript 一并校验。按稳定注册 ID 选唯一发起端，异步返回后复查账号代际、原有 pin 和主动断开抑制；当前账号资格保存在 canonical relationship 的 account_origin。完整双边证明也可为已有手动批准的 active 关系附加资格，以原 NULL 值 CAS 保留同一 ID、审批、授权、独立线路和私有 admission，不绕过待处理的手动审批。只有具备该验证资格的关系自动为桌面/Web Client 登记，其余手动关系仍需「在此 Client 使用」。每 Host 成功独立发布，扫描轮转、并发和重试有界；不切换 Environment Scope、打开的会话或 Settings Target，不借用 Bot 协作授权，也不需要部署 relay。
+
+发现由既有 Host 关系 owner 启停，初始及每三十秒调度一次，不依赖排序较小的 Host 上打开 Client；无账号不触网，退出账号同步使旧代请求取消，关闭后不再调度。重新登录改变注册 ID 时，只在双方新鲜权威 offer、原账号资格与准确 Host/pin 全部一致后，以旧资格 CAS 更新原 active 关系，不新建关系或改变审批，旧响应不得覆盖新代。资格同时记录各端用自己已认证 offer 取得的 officialOrigin；同一 CAS 事务只替换此前明确记录的官方地址，首次资格只添加新地址，不猜测或删除手动线路，容量超限时资格与线路均不提交。单端成功但回复丢失时可重新证明并收敛到原关系，主动断开抑制始终有效。已有 public-only Client 沿原线路 owner 学习新地址，不新造授权或改变偏好/浏览范围；私有 admission 仍沿原路径。正式链保留已发布的 Human 140、Team/私有 Bot 141–143，再追加关系 144、已发布 Team 生命周期 145、Channel 权限 146、离线撤销 147、已发布 Team 模型 148 与 Human 用量归属 149、账号登记 150；未发布的旧 Environment 140–143 及 offline145/account146、offline146/account147、offline147/account148 分叉只作闭合归档，最终验证使用全新 Profile，不复制账号凭据。
+
+同一注册也可能换用新的官方 hostname。发起端只有在本机已验证 offer 的地址与对端地址都已公告后才跳过重复证明；成功公告的进程内状态绑定账号代际、关系 ID 和本机官方地址，仅在对端确认、本地资格 CAS 成功及当前代复查后记录。重启、退出账号、换代或关系退休会释放对应状态；冷启动重新证明一次，正常轮询不重复写入。它不构成新的授权或路由权威，重新证明可能改变关系观察时间，不能把授权与 pin 保持不变误写成整行字节不变。
+
+同一关系 owner 在已发布 Team145、Channel 权限146、离线撤销147、Team 模型148 和 Human 用量归属149 之后，以 Operational Database generation 150 保留单次 Client 公钥的登记状态：来源端先记 unconfirmed，目标端在原设备授权事务中检查该 intent 及十分钟截止并只兑换一次；Client 把私钥保存在原 SavedHost/CLI 私有文件后，以同一 key 幂等确认。丢确认先读回，不新造 key；未知状态在 Client 私有记录中保留并显示「正在完成连接」。取消使用准确关系与公钥，在目标同一事务保存 tombstone 并撤销匹配的派生设备；迟到 offer 和 redemption 都检查该事实，不影响其他 Client 或独立手机授权。来源端跨退出账号、重启保留待清理事实，有限重试固定 Noise 身份的减权取消；未确认到期也进入清理，八次后保留待检查。仅截止后另过六十秒的已完成取消/清理记录可回收，1,024 条满额安全拒绝，不能淘汰仍有效的 tombstone。见 [ADR-0339](../adr/0339-relationship-enrollment-keeps-issuance-and-cancellation-durable.md)。
+
+浏览器仍以原 private SavedHost 为凭据 owner；所有数组写入经同一短 IndexedDB 原生事务执行 fresh-read、准确设备/密钥/凭据代际比较及同步 localStorage 写入，不存第二份凭据或租约。自动登记另持有每 Host 的 Web Lock，锁内先重读并复用同源其他标签页已保存的 Client 授权；不同 Host 不因一条慢连接全程串行。缺 Web Locks 时在生成自动登记密钥前拒绝，HTTP LAN 的既有手动连接与线路持久化仍走 IndexedDB 短事务。原生手机 App 不导入自动消费者，仍逐 Host 登记；运行完整 owner Web Client 的手机浏览器属于 Web Client，不能凭 UA 或调用者标记声称排除了物理手机。浏览器、已安装 Desktop 和原生手机验收分别记录。
+
+本 Client 的 Forget/Remove 在原私有数组保留不含凭据的自动选择及新代次；临时登记不清除该选择，成功手动登记仅在准确凭据与已捕获选择（包括原先不存在）均未变化时清除。较晚 Forget 使旧手动流程拒绝完成并准确回收自己的授权；取消补偿不覆盖较新凭据或选择。pending confirmation 保留该快照供重载后收敛，attach 前重读并复用准确匹配的既有 Client，防止旧流程覆盖另一标签页的连接。
+
 E9 的远端 Bot 设置复用原有 ConversationView 内的资料、模型、Workspace Grant 与审批控件，来源上下文固定捕获所属 Host、Bot 与原 HostClient。写入仍经过原 Host 的 Registry、模型、Workspace 和审批 owners 与既有 Device Gateway/API Gateway；每次调用前后检查原 Client 及连接状态，离开来源、撤销或同 Host ID 换 Client 后，旧结果不能提交后续操作。Workspace 目录选择沿用目标 Host 的目录浏览与 Workspace owner，保留分页而不向远端暴露本机 OS picker。纯 Human 会话不显示 Bot 控件。删除独立远端 SettingsDialog，不增加持久数据、代理权限层或 Bot 协作成员授权。
 
 私有线路 admission 存入既有受保护 credentials owner，以准确关系和固定对端身份绑定；公开关系、CLI 结果及生命周期日志不包含 token。仅固定身份的加密控制交换学习 admission，并在已认证的登记 ticket 中交给当前 Client，沿用既有 Noise 配对。等待对端撤销确认期间保留原有引用；确认后只清理该关系引用，重启补清已确认残留。异步写入与清理按关系串行，并在 await 后重新核对 canonical 授权；已断开关系不能继续普通返回探测。Tailscale HTTPS 登记仍走固定 Noise，后续沿用既有 HostClient 线路策略。
@@ -625,6 +645,8 @@ The application-defined `ConnectionsDialog` presents pairing and device manageme
 [ADR-0202](../adr/0202-phone-push-is-a-content-free-projection-of-the-activity-list.md)（[#1655](https://github.com/BotHarness/DeepSeekBot/issues/1655)）：应用定义的 Push delivery 模块（`packages/core/src/push/`）是 Activity 的投影，不另设通知权威。Activity 表或 PersonaBot 的审批、提问、私密输入计数变化时（以及每分钟一次的兜底扫描），模块读取 `action` 项与未读的 `replies` 项，对每台已登记的配对设备只发送一次新项，并经 Expo Push Service 投递；推送标题为频道名（`#名称`，私信为 PersonaBot 名称），正文为所需操作加上工具与主要参数、问题或消息的简短预览（折叠空白，最多 140 字符）；私密输入请求不含内容（[ADR-0213](../adr/0213-phone-push-shows-the-channel-and-a-short-preview.md)）。数据字段只含 Host 标识、Activity 项标识、PersonaBot 标识与读取请求所需的 Channel／消息标识，并携带未处理 Human 操作数作为角标。设备经设备网关的 `/botharness-device/push` 登记 Expo push token、切换各类通知、发送测试通知；撤销设备或 Expo 回报 `DeviceNotRegistered` 时删除 token。发送失败有界重试，结果写入不含内容的 `push` 开发者日志。App 保存每台配对的 Host，点按通知先切换到对应 Host，再打开该审批、提问或私信。
 
 ## 5 · Orchestrator 与 Assignment control plane
+
+M6 adds application-owned account/shared roots, separate grantable `files/` and protected Bot Memory, current audience checks (including for the Owner's own Bots), and the bound `core.currentRoots(session, kind)` seam for M12. The persistence, migration, M9 lifecycle and wire contracts are in [M6 runtime boundaries](team-mode-m6-runtime.md).
 
 直调 Bot tool 可以像 Orchestrator 一样调用 `create_assignment` 与 `send_assignment_request`（[ADR-0306](../adr/0306-direct-cli-calls-reach-orchestrator-owned-assignments.md)，取代 ADR-0297）。Assignment 仍归该 Bot 的 Orchestrator 所有和管理。未传 `--source` 时，每次直调记录一条带 `directBotTool` 的 `system-message` Source Event，作为来源与审计锚点，它没有 Inbox Admission。创建、复用或送达后，Orchestrator 的 Inbox 会收到一条 `silent` 准入的 `assignment-lifecycle` 通知，下一轮 Turn 读取。并发上限、Workspace Grant、Continuity Key 复用、失败后继续与已归档重新激活的规则不变；`wait_for_assignment` 仍只在 Turn 内可用。
 
@@ -1650,6 +1672,8 @@ M2 adds application-defined private Bot ownership, one Tob per Human, scoped Act
 The [M3 Host/CLI runtime](team-mode-m3-runtime.md) adds persistent Host Roles, union permissions, target-scoped device management and transferable Owner authority without rewriting Human identity. The Core shares its canonical Team Service with the live hub so delivery gates follow current ownership. Credential issuance provenance restricts transfer targets; suspension removes effective permissions, and transfers invalidate outstanding pairing offers.
 
 The [M9 lifecycle runtime](team-mode-m9-runtime.md) adds permission-scoped password resets, other-device sign-out, reversible mode suspension, deactivation/reactivation, group ownership transfer and permanent member deletion through Content Purge. Shared messages keep anonymous deleted-Human authorship; M2 private Bots and Tob participate in transfer, stop and Content Purge Memory erasure; shared roots and member mobile carriers retain their own qualification gates.
+
+The [M11 Host/CLI runtime](team-mode-m11-runtime.md) adds Human-only, permission-checked private-object discovery and read-only views through the same Team Service and Gateway. Opens append one hash-chained SQLite audit fact before content reads; metadata-only, Human-bound views reuse that fact for bounded pagination. A durable chain head detects deleted tail records. Role revocation clears views and uses the existing Peer/device stream disposal path; Team status advertises the member notice flag. Client and mobile presentation remain separate.
 
 The [M4 Host/CLI runtime](team-mode-m4-runtime.md) adds canonical Channel visibility, ownership/admins and policy, plus two-Human DM identity. The same audience Service scopes reads, SQL search, unread lists and live delivery; revocation closes existing browser Peers and paired-device streams. Private-content auditing remains M11.
 

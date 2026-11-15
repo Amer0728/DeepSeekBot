@@ -37,6 +37,24 @@ Direction observations expire after 30 seconds and reset to unverified on Host r
 | `relationships enroll <id> --device-name <name> --out <new-absolute-private-file>`                              | Enroll this named CLI Client and save its independent credential privately. Stdout contains only Host/device identifiers.       |
 | `relationships disconnect <id> --confirm`                                                                       | Retire derived access, keeping independent phone grants and remote data. A missing peer acknowledgement remains pending.        |
 
+Same-account discovery uses the same Host owner as Environments:
+
+| Command                                                                                    | Purpose                                                                                                    |
+| ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `relationships account-discover`                                                           | Start bounded verified discovery without waiting for every Host; inspect subsequent results independently. |
+| `relationships account-status`                                                             | Read the current account generation and active relationships eligible for automatic Client enrollment.     |
+| `relationships account-enroll <id> --device-name <name> --out <new-absolute-private-file>` | Enroll an independent CLI Client only through current, server-verified account provenance.                 |
+| `relationships enrollments`                                                                | Inspect unconfirmed, committed and pending exact-key cleanup facts, deadlines and retry counts.            |
+| `relationships enrollment-status <id> <client-public-key>`                                 | Read one exact Client intent after an uncertain response.                                                  |
+| `relationships commit-enrollment <id> <client-public-key>`                                 | Idempotently confirm private persistence of that same intent; never mint another key.                      |
+| `relationships cancel-enrollment <id> <client-public-key> --confirm`                       | Cancel the exact intent and retry its bounded pending cleanup, preserving other Clients.                   |
+
+`account-discover` does not trust a listed Host alone: both participants independently verify account registration, Host identity, Noise key and the fresh signed transcript. Existing pins and explicit-disconnect suppression remain authoritative. The same proof can qualify an existing manually approved active relationship without changing its ID, approval or grants; pending manual approval is never bypassed. Manual relationships without that verified qualification retain **Use on this client**. Sign-out stops discovery and new automatic enrollment; existing independently usable grants/routes remain, and exact-key cleanup can continue while signed out. Bot collaboration is separate.
+
+Every new relationship enrollment first creates an unconfirmed source intent. The CLI saves its independent key privately before confirming it; stdout reports `enrollment: committed` or `pending` alongside Host/device IDs. A pending private file retains its `relationshipEnrollment.publicKey` for exact readback and retry. Keep that file and retry confirmation with the same key; do not rerun enrollment with a fresh file. Confirmation is idempotent across a lost reply and Host restart. If an unconfirmed ten-minute deadline expires, commitment is refused and the source retains pending cleanup. A cancelled result removes the newly written private file. Cleanup revokes only matching relationship-derived grants, including a grant whose paired reply was lost, and rejects late offers/redemption. It retries at most eight times across restart; `enrollments` retains exhaustion for inspection and explicit retry. The 1,024-record lifecycle limit returns a coded refusal rather than evicting unresolved work or live cancellation tombstones.
+
+The supported in-harness desktop/Web Client automatically enrolls verified account relationships without changing Environment Scope, the open conversation or Settings Target. Same-origin tabs reuse one saved Client grant under a per-Host Web Lock; different browser contexts have independent private storage and grants. Automatic enrollment requires Web Locks and refuses before key creation when unavailable. Existing HTTP LAN manual enrollment and route updates use the same short native IndexedDB transaction as every other credential-array writer; it stores no credentials or lease and preserves unrelated Hosts and newer device generations. Native mobile still enrolls each Host explicitly. A phone browser running the complete owner Web Client is a Web Client; User-Agent is not an authorization signal. Native-mobile noninheritance requires its own device verification.
+
 Use the existing `--host` / `--token-file` options to select the exact local owner. Repeat `enroll` against the other local Host for its independent CLI Client; `device-probe --device-file <absolute-private-file>` reads that Client's real remote Feed. Phones cannot invoke relationship enrollment through their device gateway. Do not retry an uncertain initiation blindly: inspect `relationships list` first.
 
 Disconnect immediately refuses local relationship access and retires its derived grants. An offline peer remains `peerRevocationPending: true` across restart. Only the exact idempotent disconnect is retried, up to eight automatic attempts with delays capped at one minute; ordinary mutations are never replayed. `list` exposes `revocationAttempts`, `revocationRetryAt` and `automaticEnrollmentSuppressed`. After exhaustion the pending record remains inspectable; `relationships sync <id>` explicitly retries that disconnected generation and renews its bounded retry budget. Acknowledgement changes only its exact ID and pinned key, so a stale acknowledgement cannot retire a newer generation. Independent device grants and remote data remain intact.
@@ -1035,11 +1053,28 @@ deepseekbot connection-host <host-id> test-route <origin> --client-id <id>
 deepseekbot connection-host <host-id> remove --client-id <id> --confirm
 deepseekbot connection-host <host-id> revoke-device <device-id> --client-id <id> --confirm
 deepseekbot connection-host <host-id> stop-route lan --client-id <id> --confirm
-deepseekbot connection-host <host-id> stop-route private-tunnel --client-id <id> --confirm
+deepseekbot connection-host <host-id> plan-stop-route private-tunnel --connection-route-id quick --client-id <id>
+deepseekbot connection-host <host-id> stop-route private-tunnel --connection-route-id quick --expected-route-revision <revision> --client-id <id> --confirm
+deepseekbot connection-host <host-id> plan-stop-route lan --client-id <id>
+deepseekbot connection-host <host-id> stop-route lan --handover <trusted-origin> --client-id <id> --confirm
+deepseekbot connection-host <host-id> stop-route lan --confirm-disconnect --client-id <id> --confirm
+deepseekbot connection-host <host-id> plan-revoke-device <device-id> --client-id <id>
+deepseekbot connection-host <host-id> plan-sign-out --client-id <id>
+deepseekbot connection-host <host-id> sign-out --client-id <id> --confirm
+deepseekbot connection-host <host-id> read-operation --client-id <id>
+deepseekbot connection-host <host-id> read-previous-operation --client-id <id>
 deepseekbot connection-host <host-id> select-route <origin-or-automatic> --client-id <id> --confirm
 ```
 
 `select-route` persists the preference in the selected browser’s existing Host record before switching after active requests finish. A manual origin must already be eligible and never silently fails over. Pass `automatic` to restore the existing policy without widening route eligibility. `connection-hosts` reports saved preference, pending switch and actual current route separately. Only this Client/Host is affected; mobile connection details use the same HostClient behavior and their own canonical persistence owner.
+
+`plan-*` reads the named Host before changing anything and reports whether the operation can disconnect this Client. Choose `--handover <trusted-origin>` to verify an existing alternative, explicitly save that Client’s manual route preference, wait for its active connection and read back the exact Host before writing. Without a usable alternative, `--confirm-disconnect` acknowledges loss of access; `--confirm` remains required. Stopping a private route requires its `quick` or `custom` ID and preserves other routes. Sign-out uses that Host’s account owner; relationship disconnection and individual device revocation keep their separate effects.
+
+For a private route, first use `plan-stop-route` and pass its configuration revision unchanged with `--expected-route-revision`. Re-plan after a configuration change or Host restart; never substitute a newly inspected revision for the one confirmed. The Host atomically refuses a changed configuration before stopping it. A mismatched, absent or legacy unqualified revision cannot settle an uncertain private stop.
+
+An uncertain write is atomically recorded in a versioned execution index under the selected Client’s existing HostStorage owner before transmission and is never replayed. Reloading retains the guard. A shared Web Lock covers preparation, one write and acknowledgement; missing Web Locks refuse dangerous writes. `read-operation` fresh-reads the guard under the same lock, uses the same authenticated Host owner and clears only the matching generation after observing completion. An unchanged or unavailable result remains unknown. Recover access through an already trusted route, then read back. `read-previous-operation` explicitly lets a new independent grant read the outcome of an older grant’s operation through the same pinned Host, without inheriting or resending it; a different Host key refuses. At most 32 unresolved execution records are retained before further writes refuse. Loaded Channels and messages stay available while offline. These Client operations do not stop foreign Tailscale mappings or unrelated Host processes.
+
+New execution records remain separate from SavedHost credentials. Older open pages cannot safely manage the new index format and fail closed; reload the target browser Client before connection changes or readback. Use a current Client to resolve outstanding records before rolling code back. Never delete unknown execution records to make an older page writable. Legacy referenced operations remain readable.
 
 These commands use the existing selected-Client control channel and the same management adapter as the Connections dialog. Lists expose Host identity, name and actual route observations, never credentials or private keys. `inspect` uses that browser's paired authorization on the target Host to read devices and stoppable routes. `remove` deletes this browser connection only, preserving Host data and grants; `revoke-device` revokes the named device on the target; `stop-route` disables only that target's LAN listener or private Tunnel. Stopping the active route or revoking the current device may interrupt the reply: an unacknowledged action is not a success and needs a fresh status check. Unknown Hosts/routes/devices, stale requests and unconfirmed writes are refused. Account grouping does not rewrite sign-in/sign-out provenance or grant management permissions.
 
@@ -1966,12 +2001,15 @@ For several IM requests in one turn, call `ask_secret` with the existing account
 
 Use `device-offer --route-id quick|custom --out <new-absolute-private-file>` for a single-route invitation, including recovery or older phones. Omit `--route-id` to admit all connected private routes.
 
+`private-route stop` optionally accepts `--expected-route-revision` from `list` for a configuration-bound stop; without it the explicit local-owner command retains its unconditional behavior. A changed revision refuses before mutation.
+
 `private-route list` reads the Host's public `privateRoutes` projection. A Host supports `quick` plus one `custom` route (Named Tunnel or private HTTPS ingress):
 
 ```bash
 deepseekbot private-route add quick --confirm
 deepseekbot private-route add custom --origin https://bot.example.com --confirm
 deepseekbot private-route stop quick --confirm
+deepseekbot private-route stop quick --expected-route-revision <revision-from-list> --confirm
 deepseekbot private-route start quick --confirm
 deepseekbot private-route replace custom --hostname bot.example.com --token-stdin --confirm
 deepseekbot private-route remove custom --confirm

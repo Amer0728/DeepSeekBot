@@ -1,3 +1,4 @@
+import type { HumanContext } from '../humans/context.js';
 import type { BridgeMethods } from '../bridge/methods.js';
 import type { PersonaBotRegistry } from '../bots/registry.js';
 import type { BotCreationService } from '../bots/creation.js';
@@ -7,13 +8,18 @@ import type { PrepareTobOperation } from './cli-operations.js';
 import { TobError } from './service.js';
 
 export function createMemberTobOperations(deps: {
+  human: HumanContext;
   bridge: BridgeMethods;
   registry: PersonaBotRegistry;
   creations: BotCreationService;
   isProtectedBot(slug: string): boolean;
 }): PrepareTobOperation {
   const creation = createTobBotCreationOperations(deps);
-  const profile = createTobBotProfileOperations({ ...deps, bridge: () => deps.bridge });
+  const profile = createTobBotProfileOperations({
+    ...deps,
+    human: () => deps.human,
+    bridge: () => deps.bridge,
+  });
   return async (command, args, signal) => {
     const authorizeCreation = () => {
       if (command !== 'create') return;

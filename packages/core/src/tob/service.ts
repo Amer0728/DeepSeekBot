@@ -51,6 +51,7 @@ export function createTobService(options: {
   registry: PersonaBotRegistry;
   channels: ChannelStore;
   workspaceRoot: string;
+  workspaceFor?: (human: HumanContext) => string;
   ensureWorkspace?: (path: string) => Promise<{ id: string }>;
   grants: WorkspaceGrantStore;
   settings?: () => TobSettingsProvider | undefined;
@@ -74,7 +75,9 @@ export function createTobService(options: {
         }
       ).bot_slug;
     });
-    const workspacePath = join(options.workspaceRoot, slug);
+    const workspacePath =
+      (options.workspaceFor ? join(options.workspaceFor(human), 'files') : undefined) ??
+      join(options.workspaceRoot, slug);
     mkdirSync(workspacePath, { recursive: true });
     let bot = registry.get(slug);
     if (!bot) {

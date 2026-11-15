@@ -90,7 +90,7 @@ function fixture(seed = true, dshHome = createTempRoot('m10-members-lifecycle-')
   };
   closes.push(close);
   const db = attachOperationalModule(core.operationalDatabase, 'm10-members-test');
-  if (seed)
+  if (seed) {
     db.transaction((connection) => {
       for (const human of [member, recipient]) {
         connection
@@ -103,6 +103,8 @@ function fixture(seed = true, dshHome = createTempRoot('m10-members-lifecycle-')
       }
       connection.prepare('UPDATE team_settings SET enabled = 1').run();
     });
+    for (const human of [member, recipient]) core.team.spaces.ensureAccount(human.humanId);
+  }
   const methods = createBridgeMethodsForHumans({
     ...core,
     roster: createTestRosterStore({ database: core.operationalDatabase }),

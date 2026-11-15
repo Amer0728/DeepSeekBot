@@ -662,7 +662,13 @@ export interface OwnedSessionBot {
 }
 
 export interface BridgeError {
-  details?: { preview?: AllBotPreview; permission?: string; route?: string };
+  details?: {
+    preview?: AllBotPreview;
+    permission?: string;
+    path?: string;
+    spaceId?: string;
+    route?: string;
+  };
   code: string;
   message: string;
 }
@@ -2079,10 +2085,11 @@ export function createBridgeMethodsForHumans(
 ): (human: HumanContext) => BridgeMethods {
   const tables = new Map<HumanId, BridgeMethods>();
   return (human) => {
-    const existing = tables.get(human.humanId);
+    const key = JSON.stringify([human.humanId, human.caller]);
+    const existing = tables.get(key);
     if (existing !== undefined) return existing;
     const methods = createBridgeMethods(human, deps);
-    tables.set(human.humanId, methods);
+    tables.set(key, methods);
     return methods;
   };
 }
@@ -8341,15 +8348,44 @@ function buildBridgeMethods(
     },
     workspaceOptions() {
       try {
+        const team = deps.team;
+        const spaces = team
+          ? team.spaces.list(human).map((space) => ({
+              id: space.spaceId,
+              title: space.name,
+              path: join(team.spaces.path(space.spaceId), 'files'),
+            }))
+          : [];
+        const native =
+          !deps.team || isHostOwner()
+            ? (deps.grants?.availableWorkspaces() ?? []).filter(({ id, path }) => {
+                if (!deps.team) return true;
+                if (/^(spaces|shared)\//u.test(id)) return false;
+                try {
+                  deps.team.spaces.assertGrantForHuman(human, path);
+                  return true;
+                } catch {
+                  return false;
+                }
+              })
+            : [];
         return {
           ok: true,
-          value: { workspaces: deps.grants?.availableWorkspaces() ?? [] },
+          value: {
+            workspaces: [...native, ...spaces],
+          },
         };
       } catch (error) {
         if (error instanceof WorkspaceGrantError) {
           return {
             ok: false,
-            error: { code: error.code, message: error.message },
+            error: {
+              code: error.code,
+              message: error.message,
+              ...(error instanceof WorkspaceGrantError && error.details
+                ? { details: error.details }
+                : {}),
+            },
           };
         }
         throw error;
@@ -8481,7 +8517,13 @@ function buildBridgeMethods(
         if (error instanceof WorkspaceGrantError)
           return {
             ok: false,
-            error: { code: error.code, message: error.message },
+            error: {
+              code: error.code,
+              message: error.message,
+              ...(error instanceof WorkspaceGrantError && error.details
+                ? { details: error.details }
+                : {}),
+            },
           };
         throw error;
       }
@@ -8514,7 +8556,13 @@ function buildBridgeMethods(
           if (error instanceof WorkspaceGrantError)
             return {
               ok: false,
-              error: { code: error.code, message: error.message },
+              error: {
+                code: error.code,
+                message: error.message,
+                ...(error instanceof WorkspaceGrantError && error.details
+                  ? { details: error.details }
+                  : {}),
+              },
             };
           throw error;
         }
@@ -8591,7 +8639,13 @@ function buildBridgeMethods(
         if (error instanceof WorkspaceGrantError) {
           return {
             ok: false,
-            error: { code: error.code, message: error.message },
+            error: {
+              code: error.code,
+              message: error.message,
+              ...(error instanceof WorkspaceGrantError && error.details
+                ? { details: error.details }
+                : {}),
+            },
           };
         }
         throw error;
@@ -8621,7 +8675,13 @@ function buildBridgeMethods(
         if (error instanceof WorkspaceGrantError) {
           return {
             ok: false,
-            error: { code: error.code, message: error.message },
+            error: {
+              code: error.code,
+              message: error.message,
+              ...(error instanceof WorkspaceGrantError && error.details
+                ? { details: error.details }
+                : {}),
+            },
           };
         }
         throw error;
@@ -8651,7 +8711,13 @@ function buildBridgeMethods(
         if (error instanceof WorkspaceGrantError)
           return {
             ok: false,
-            error: { code: error.code, message: error.message },
+            error: {
+              code: error.code,
+              message: error.message,
+              ...(error instanceof WorkspaceGrantError && error.details
+                ? { details: error.details }
+                : {}),
+            },
           };
         throw error;
       }
@@ -9201,6 +9267,21 @@ function buildBridgeMethods(
           ok: false,
           error: { code: target.code, message: target.message },
         };
+      try {
+        const bot = deps.registry.get(slug);
+        if (deps.team && bot) deps.team.spaces.assertMemoryPath(botOwner(bot), slug, target.to);
+      } catch (error) {
+        if (error instanceof WorkspaceGrantError)
+          return {
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.code,
+              ...(error.details ? { details: error.details } : {}),
+            },
+          };
+        throw error;
+      }
       if (target.to === target.from)
         return { ok: true, value: { memoryDir: target.from, moved: false } };
       try {

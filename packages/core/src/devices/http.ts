@@ -169,11 +169,26 @@ export function createDevicesHttp(options: {
       if (routeId !== undefined && routeId !== 'quick' && routeId !== 'custom')
         return json({ code: 'private-route-not-found' }, 400);
       const action = input['action'];
+      const expectedRevision = input['expectedRevision'];
+      if (
+        expectedRevision !== undefined &&
+        (action !== 'stop' ||
+          typeof expectedRevision !== 'string' ||
+          !expectedRevision.length ||
+          expectedRevision.length > 200)
+      )
+        return json({ code: 'private-tunnel-input-invalid' }, 400);
       if (action === 'start' || action === 'stop' || action === 'remove') {
         if (routeId === undefined) return json({ code: 'private-route-id-required' }, 400);
         if (action === 'start' && (options.privateConnection?.status().state ?? 'off') !== 'off')
           return json({ code: 'private-route-in-use' }, 409);
-        const result = await options.privateTunnel[action](routeId);
+        const result =
+          action === 'stop'
+            ? await options.privateTunnel.stop(
+                routeId,
+                typeof expectedRevision === 'string' ? expectedRevision : undefined,
+              )
+            : await options.privateTunnel[action](routeId);
         return json(result, result.ok ? 200 : 409);
       }
       if (input['action'] === 'disable') {

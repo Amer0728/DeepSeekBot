@@ -3,12 +3,16 @@ import { afterEach, assert, describe, expect, it, vi } from 'vitest';
 import type { HostCarrier } from '../../../apps/mobile/src/host/carrier.js';
 import type { HumanAttentionItem as HostAttentionItem } from '../../../apps/mobile/src/host/wire.js';
 import { FakeHost } from '../../../apps/mobile/test/fake-host.js';
+import { serializeSavedHost, type SavedHost } from '../../../apps/mobile/src/host/hosts.js';
+import { connectionOperationIndexSchema } from '../../core/src/devices/connection-operation.js';
+import { manageConnections } from '../src/client/connection-management.js';
 import { createHostActivityActions } from '../src/client/host-activity-actions.js';
 import type { HumanAttentionItem } from '../src/client/store.js';
 import { pairingLink } from '../../core/src/devices/http.js';
 import { en, zh } from '../src/client/locale.js';
 import { REMOTE_NOTIFICATION_KEY } from '../src/client/remote-notifications.js';
 import { hostSettingsDrafts, type HostDraftChoice } from '../src/client/host-settings-drafts.js';
+import { withRemoteHostStorageLock } from '../src/client/remote-host-storage-lock.js';
 import {
   ALL_HOSTS,
   HOST_TAB_STORAGE_KEY,
@@ -70,7 +74,244 @@ const link = (hostId = 'host-b') =>
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   });
 
+it('applies another tab saved routes and preference to the existing Client without writing them back', async () => {
+  const host = new FakeHost();
+  const first = 'https://first.example.ts.net';
+  const second = 'https://second.example.ts.net';
+  const saved = {
+    hostId: 'host-b',
+    hostName: 'Studio B',
+    deviceId: 'device-1',
+    credential: host.credential,
+    routes: [first],
+  };
+  const storage = memoryStorage({ [REMOTE_HOSTS_STORAGE_KEY]: JSON.stringify([saved]) });
+  const events = new EventTarget();
+  vi.stubGlobal('addEventListener', events.addEventListener.bind(events));
+  vi.stubGlobal('removeEventListener', events.removeEventListener.bind(events));
+  const source = createRemoteHosts({ storage, carrier: host.carrier });
+  const release = source.subscribe(() => {});
+  try {
+    const client = source.client('host-b');
+    assert(client);
+    await vi.waitFor(() => expect(client.getSnapshot().connection.status).toBe('connected'));
+    const updated = JSON.stringify([
+      { ...saved, routes: [first, second], routePreference: second },
+    ]);
+    storage.setItem(REMOTE_HOSTS_STORAGE_KEY, updated);
+    const write = vi.spyOn(storage, 'setItem');
+    const changed = new Event('storage');
+    Object.defineProperties(changed, {
+      key: { value: REMOTE_HOSTS_STORAGE_KEY },
+      storageArea: { value: storage },
+    });
+    events.dispatchEvent(changed);
+    await vi.waitFor(() =>
+      expect(client.getSnapshot()).toMatchObject({
+        routes: [{ url: first }, { url: second }],
+        routePreference: second,
+        connection: { status: 'connected', route: second },
+      }),
+    );
+    expect(source.client('host-b')).toBe(client);
+    expect(storage.getItem(REMOTE_HOSTS_STORAGE_KEY)).toBe(updated);
+    expect(write).not.toHaveBeenCalled();
+  } finally {
+    release();
+  }
+});
+
 describe('remote hosts', () => {
+  it.each(['legacy-missing', 'legacy-corrupt', 'inline-corrupt'] as const)(
+    'refuses a %s indexed record for current and previous grants without discarding it',
+    async (failure) => {
+      for (const previous of [false, true]) {
+        const host: SavedHost = {
+          hostId: 'history-host',
+          hostName: 'History',
+          deviceId: previous ? 'new-device' : 'old-device',
+          credential: 'private',
+          routes: ['https://history.example.ts.net'],
+          encryption: {
+            protocol: 'connect-noise-xk-v1',
+            hostKey: '11'.repeat(32),
+            deviceKey: '22'.repeat(32),
+          },
+        };
+        const key = `botharness.remoteHosts.operation.v1:${JSON.stringify([host.hostId, host.encryption!.hostKey, 'old-device'])}`;
+        const storage = memoryStorage({
+          [REMOTE_HOSTS_STORAGE_KEY]: JSON.stringify([host]),
+          'botharness.remoteHosts.operations.v1': JSON.stringify([
+            {
+              hostId: host.hostId,
+              key,
+              ...(failure === 'inline-corrupt' ? { record: { generation: 'invalid' } } : {}),
+            },
+          ]),
+          ...(failure === 'legacy-corrupt' ? { [key]: 'invalid JSON' } : {}),
+        });
+        const before = [...storage.values];
+        const sources = createRemoteHosts({
+          storage,
+          carrier: fakeCarrier().carrier,
+          connectionOperationLock: async (_name, run) => run(),
+        });
+        const client = sources.client(host.hostId)!;
+        const api = vi.spyOn(client, 'api');
+        expect(sources.getSnapshot().hosts[0]?.host).toMatchObject({
+          hostId: host.hostId,
+          credential: host.credential,
+          connectionOperationUnavailable: true,
+        });
+        await expect(
+          manageConnections(
+            sources,
+            { action: 'stop-route', hostId: host.hostId, kind: 'lan', confirm: true },
+            { expiresAt: Date.now() + 30000, signal: new AbortController().signal },
+          ),
+        ).rejects.toThrow('connection-operation-storage-unavailable');
+        expect(api).not.toHaveBeenCalled();
+        expect([...storage.values]).toEqual(before);
+        sources.close();
+      }
+    },
+  );
+  it.each(['cancel', 'new-forget'] as const)(
+    'preserves Human intent when manual pairing waits for storage and receives %s',
+    async (mode) => {
+      const choice = {
+        kind: 'automatic-enrollment-suppressed',
+        hostId: 'host-b',
+        publicKey: null,
+        generation: 'earlier-forget',
+      };
+      const storage = memoryStorage({ [REMOTE_HOSTS_STORAGE_KEY]: JSON.stringify([choice]) });
+      const { carrier, calls } = fakeCarrier();
+      const sources = createRemoteHosts({ storage, carrier });
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const held = withRemoteHostStorageLock({ storage, name: 'credentials', run: () => gate });
+      const abort = new AbortController();
+      const pending = sources.pair(link(), 'Cancelled browser', undefined, {
+        signal: abort.signal,
+      });
+      await vi.waitFor(() => expect(calls.some((call) => call.url.endsWith('/pair'))).toBe(true));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const newerChoice = { ...choice, generation: 'newer-forget' };
+      if (mode === 'cancel') abort.abort();
+      else storage.setItem(REMOTE_HOSTS_STORAGE_KEY, JSON.stringify([newerChoice]));
+      release();
+      await held;
+      expect((await pending).ok).toBe(false);
+      expect(sources.getSnapshot().hosts).toEqual([]);
+      expect(JSON.parse(storage.getItem(REMOTE_HOSTS_STORAGE_KEY) ?? '[]')).toEqual([
+        mode === 'cancel' ? choice : newerChoice,
+      ]);
+      expect(calls.some((call) => call.url.endsWith('/unpair'))).toBe(true);
+    },
+  );
+
+  it('keeps mixed saved credentials and local automatic choices separate, preserves unrelated choices and clears only an explicit manual add', async () => {
+    const a = {
+      hostId: 'host-a',
+      hostName: 'A',
+      deviceId: 'a',
+      credential: 'a.private',
+      routes: ['http://127.0.0.1:47001'],
+    };
+    const c = { ...a, hostId: 'host-c', hostName: 'C', deviceId: 'c', credential: 'c.private' };
+    const choice = { kind: 'automatic-enrollment-suppressed', hostId: 'host-b', publicKey: null };
+    const storage = memoryStorage({
+      [REMOTE_HOSTS_STORAGE_KEY]: JSON.stringify([
+        a,
+        choice,
+        { kind: 'broken-record', hostId: 5 },
+        c,
+      ]),
+    });
+    const { carrier, calls } = fakeCarrier();
+    const sources = createRemoteHosts({ storage, carrier });
+    expect(sources.getSnapshot().hosts.map((item) => item.host.hostId)).toEqual([
+      'host-a',
+      'host-c',
+    ]);
+    await sources.forgetLocal('host-a');
+    expect(calls).toEqual([]);
+    const restored = createRemoteHosts({ storage, carrier });
+    expect(restored.getSnapshot().hosts.map((item) => item.host.hostId)).toEqual(['host-c']);
+    const automatic = await restored.enrollRelationship(
+      {
+        id: 'b'.repeat(32),
+        peer: {
+          id: 'host-b',
+          name: 'B',
+          publicKey: 'ab'.repeat(32),
+          routes: ['https://hbbbbbbbbbbbb.deepseekbot.dev'],
+        },
+      },
+      'Desktop',
+      undefined,
+      { accountGeneration: 'test-generation' },
+    );
+    expect(automatic).toEqual({ ok: false, code: 'client-automatic-enrollment-suppressed' });
+    expect(calls).toEqual([]);
+    expect((await restored.pair(link(), 'Manual browser')).ok).toBe(true);
+    const persisted = JSON.parse(storage.values.get(REMOTE_HOSTS_STORAGE_KEY) ?? '[]');
+    expect(persisted).toContainEqual(c);
+    expect(persisted).toContainEqual(
+      expect.objectContaining({
+        kind: 'automatic-enrollment-suppressed',
+        hostId: 'host-a',
+        publicKey: null,
+      }),
+    );
+    expect(persisted).not.toContainEqual(choice);
+    expect(
+      createRemoteHosts({ storage, carrier })
+        .getSnapshot()
+        .hosts.map((item) => item.host.hostId),
+    ).toEqual(['host-c', 'host-b']);
+  });
+  it('fresh-merges an unrelated Host added by another Client and refuses a stale exact-device removal', async () => {
+    const host = {
+      hostId: 'host-b',
+      hostName: 'B',
+      deviceId: 'old',
+      credential: 'old.private',
+      routes: ['http://192.168.56.1:47001'],
+      encryption: {
+        protocol: 'connect-noise-xk-v1',
+        hostKey: 'ab'.repeat(32),
+        deviceKey: 'cd'.repeat(32),
+      },
+    };
+    const storage = memoryStorage({ [REMOTE_HOSTS_STORAGE_KEY]: JSON.stringify([host]) });
+    const sources = createRemoteHosts({ storage, carrier: fakeCarrier().carrier });
+    const added = {
+      hostId: 'host-c',
+      hostName: 'C',
+      deviceId: 'c',
+      credential: 'c.private',
+      routes: ['http://127.0.0.1:47001'],
+    };
+    storage.setItem(REMOTE_HOSTS_STORAGE_KEY, JSON.stringify([host, added]));
+    await sources.learnRelationshipRoutes({
+      id: host.hostId,
+      name: host.hostName,
+      publicKey: host.encryption.hostKey,
+      routes: ['http://192.168.56.1:47002'],
+    });
+    expect(JSON.parse(storage.values.get(REMOTE_HOSTS_STORAGE_KEY) ?? '[]')).toContainEqual(added);
+    const newer = { ...host, deviceId: 'new', credential: 'new.private' };
+    storage.setItem(REMOTE_HOSTS_STORAGE_KEY, JSON.stringify([newer, added]));
+    await expect(sources.forgetLocal(host.hostId)).rejects.toThrow('connection-host-changed');
+    expect(JSON.parse(storage.values.get(REMOTE_HOSTS_STORAGE_KEY) ?? '[]')).toEqual([
+      newer,
+      added,
+    ]);
+  });
   it('stores private route recovery in the same Client grant and refuses to override a manual route', async () => {
     const host = {
       hostId: 'host-b',
@@ -209,34 +450,28 @@ describe('remote hosts', () => {
     const remove = vi.spyOn(storage, 'removeItem');
     const { carrier, calls } = fakeCarrier();
     const sources = createRemoteHosts({ enabled: false, storage, carrier });
+    const relationship = {
+      id: 'a'.repeat(32),
+      peer: { id: 'owner-host', name: 'Private', publicKey: 'ab'.repeat(32), routes: [] },
+    };
     const off = sources.subscribe(() => {});
     expect(sources.getSnapshot()).toEqual({ hosts: [], avatars: new Map(), tab: ALL_HOSTS });
     expect(await sources.pair(link(), 'Member')).toEqual({ ok: false, code: 'owner-required' });
-    expect(
-      await sources.enrollRelationship(
-        {
-          id: 'a'.repeat(32),
-          peer: {
-            id: 'host-b',
-            name: 'Studio',
-            publicKey: 'ab'.repeat(32),
-            routes: ['http://127.0.0.1:47001'],
-          },
-        },
-        'Member',
-      ),
-    ).toEqual({
+    expect(await sources.enrollRelationship(relationship, 'Member')).toEqual({
       ok: false,
       code: 'owner-required',
     });
-    await expect(
-      sources.learnRelationshipRoutes({
-        id: 'owner-host',
-        name: 'Studio',
-        publicKey: 'ab'.repeat(32),
-        routes: ['http://192.168.56.1:47001'],
+    expect(
+      await sources.enrollRelationship(relationship, 'Member', undefined, {
+        accountGeneration: 'caller-generation',
       }),
-    ).rejects.toMatchObject({ code: 'owner-required' });
+    ).toEqual({ ok: false, code: 'owner-required' });
+    await expect(sources.learnRelationshipRoutes(relationship.peer)).rejects.toMatchObject({
+      code: 'owner-required',
+    });
+    await expect(sources.retireRelationship(relationship.id)).rejects.toMatchObject({
+      code: 'owner-required',
+    });
     expect(() => sources.select('owner-host')).toThrow('owner-required');
     expect(() =>
       sources.open({ hostId: 'owner-host', channelId: 'private', title: 'Private' }),
@@ -320,6 +555,100 @@ describe('remote hosts', () => {
     ]);
   });
 
+  it.each([false, true])(
+    'projects earlier execution history immediately when attaching a new grant (missing record: %s)',
+    async (missing) => {
+      const key = `botharness.remoteHosts.operation.v1:${JSON.stringify(['host-b', '11'.repeat(32), 'old-device'])}`;
+      const index = JSON.stringify([{ hostId: 'host-b', key }]);
+      const storage = memoryStorage({
+        'botharness.remoteHosts.operations.v1': index,
+        ...(!missing
+          ? {
+              [key]: JSON.stringify({
+                generation: crypto.randomUUID(),
+                hostKey: '11'.repeat(32),
+                deviceId: 'old-device',
+                operation: { action: 'revoke-device', deviceId: 'old-device' },
+              }),
+            }
+          : {}),
+      });
+      const sources = createRemoteHosts({ storage, carrier: fakeCarrier().carrier });
+      expect((await sources.pair(link(), 'New browser', 'host-a')).ok).toBe(true);
+      expect(sources.getSnapshot().hosts[0]?.host).toMatchObject({
+        deviceId: 'device-1',
+        ...(missing ? { connectionOperationUnavailable: true } : { connectionOwnerChanged: true }),
+      });
+      expect(storage.values.get('botharness.remoteHosts.operations.v1')).toBe(index);
+      sources.close();
+    },
+  );
+
+  it('keeps execution history while applying another tab’s encrypted loopback routes and preference', async () => {
+    const host: SavedHost = {
+      hostId: 'loopback-host',
+      hostName: 'This computer',
+      routes: ['http://127.0.0.1:47001'],
+      deviceId: 'loopback-device',
+      credential: 'loopback.secret',
+      encryption: {
+        protocol: 'connect-noise-xk-v1',
+        hostKey: '11'.repeat(32),
+        deviceKey: '22'.repeat(32),
+        loopback: 'encrypted',
+      },
+    };
+    const storage = memoryStorage({
+      [REMOTE_HOSTS_STORAGE_KEY]: JSON.stringify([serializeSavedHost(host)]),
+    });
+    const events = new EventTarget();
+    vi.stubGlobal('addEventListener', events.addEventListener.bind(events));
+    vi.stubGlobal('removeEventListener', events.removeEventListener.bind(events));
+    const sources = createRemoteHosts({ storage, carrier: fakeCarrier().carrier });
+    expect(sources.getSnapshot().hosts[0]?.host.routes).toEqual(host.routes);
+    const pending = {
+      generation: crypto.randomUUID(),
+      hostKey: host.encryption!.hostKey,
+      deviceId: host.deviceId,
+      operation: { action: 'stop-route', kind: 'lan' },
+    } as const;
+    sources.setPendingConnection(host.hostId, sources.client(host.hostId)!, pending);
+    await sources.client(host.hostId)?.setRoutePreference?.(host.routes[0]);
+    expect(sources.client(host.hostId)?.getSnapshot().routePreference).toBe(host.routes[0]);
+    expect(sources.getSnapshot().hosts[0]?.host.pendingConnection).toEqual(pending);
+    const persisted = JSON.parse(storage.values.get(REMOTE_HOSTS_STORAGE_KEY)!)[0];
+    expect(persisted).toMatchObject({
+      routes: [],
+      encryptedLoopbackRoutes: host.routes,
+    });
+    expect(persisted).not.toHaveProperty('pendingConnection');
+    expect(persisted).not.toHaveProperty('connectionOwnerChanged');
+    expect(persisted).not.toHaveProperty('connectionOperationUnavailable');
+    const release = sources.subscribe(() => {});
+    const changedRoute = 'http://127.0.0.1:47002';
+    const updated = JSON.stringify([
+      serializeSavedHost({
+        ...host,
+        routes: [changedRoute],
+        routePreference: changedRoute,
+      }),
+    ]);
+    storage.setItem(REMOTE_HOSTS_STORAGE_KEY, updated);
+    const write = vi.spyOn(storage, 'setItem');
+    const changed = new Event('storage');
+    Object.defineProperties(changed, {
+      key: { value: REMOTE_HOSTS_STORAGE_KEY },
+      storageArea: { value: storage },
+    });
+    events.dispatchEvent(changed);
+    expect(sources.client(host.hostId)?.getSnapshot().routePreference).toBe(changedRoute);
+    expect(sources.getSnapshot().hosts[0]?.host.pendingConnection).toEqual(pending);
+    expect(storage.getItem(REMOTE_HOSTS_STORAGE_KEY)).toBe(updated);
+    expect(write).not.toHaveBeenCalled();
+    release();
+    sources.close();
+  });
+
   it('records an unreachable remote as a failed pairing', async () => {
     const record = vi.fn();
     const carrier: HostCarrier = {
@@ -364,7 +693,13 @@ describe('remote hosts', () => {
 
     expect(sources.client('host-b')).toBeUndefined();
     expect(sources.getSnapshot()).toEqual({ hosts: [], avatars: new Map(), tab: ALL_HOSTS });
-    expect(storage.values.has(REMOTE_HOSTS_STORAGE_KEY)).toBe(false);
+    expect(JSON.parse(storage.values.get(REMOTE_HOSTS_STORAGE_KEY) ?? '[]')).toEqual([
+      expect.objectContaining({
+        kind: 'automatic-enrollment-suppressed',
+        hostId: 'host-b',
+        publicKey: null,
+      }),
+    ]);
     expect(storage.values.get(HOST_TAB_STORAGE_KEY)).toBe(ALL_HOSTS);
     expect(calls.at(-1)).toEqual({
       url: 'http://127.0.0.1:47001/botharness-device/unpair',
@@ -471,6 +806,102 @@ function liveHost() {
 }
 
 describe('Host Feed lifecycle', () => {
+  it.each([false, true])(
+    'keeps a loaded Feed and conversation when an indexed current/old execution record is missing (%s)',
+    async (previousGrant) => {
+      const { host, storage, saved } = liveHost();
+      host
+        .channel('dm-ada')
+        .append({ id: 'loaded-before-history-failure', body: 'Loaded conversation survives' });
+      host.deviceSnapshot = {
+        host: { id: host.hostId, name: 'Studio' },
+        devices: [],
+        lan: { state: 'listening' },
+      };
+      const lock = async <T>(_name: string, run: () => Promise<T>) => run();
+      const seed = createRemoteHosts({
+        carrier: host.carrier,
+        storage,
+        connectionOperationLock: lock,
+      });
+      const key = `botharness.remoteHosts.operation.v1:${JSON.stringify([host.hostId, 'previous-test-pin', 'device-1'])}`;
+      storage.setItem(
+        'botharness.remoteHosts.operations.v1',
+        JSON.stringify([{ hostId: host.hostId, key }]),
+      );
+      storage.setItem(
+        key,
+        JSON.stringify({
+          generation: crypto.randomUUID(),
+          hostKey: 'previous-test-pin',
+          deviceId: 'device-1',
+          operation: { action: 'stop-route', kind: 'lan' },
+        }),
+      );
+      seed.close();
+      if (previousGrant)
+        storage.setItem(
+          REMOTE_HOSTS_STORAGE_KEY,
+          JSON.stringify([{ ...saved[0], deviceId: 'new-device' }]),
+        );
+      const sources = createRemoteHosts({
+        carrier: host.carrier,
+        storage,
+        connectionOperationLock: lock,
+      });
+      const release = sources.subscribe(() => {});
+      releases.push(release);
+      await vi.waitFor(() => expect(sources.getSnapshot().hosts[0]?.inbox.status).toBe('ready'));
+      const target = { hostId: host.hostId, title: 'Ada', botSlug: 'ada' };
+      sources.open(target);
+      const conversation = sources.conversation(target)!;
+      conversation.start();
+      try {
+        await vi.waitFor(() =>
+          expect(
+            conversation
+              .getSnapshot()
+              .messages.some((message) => message.id === 'loaded-before-history-failure'),
+          ).toBe(true),
+        );
+        const feed = sources.getSnapshot().hosts[0]!.inbox;
+        const messages = conversation.getSnapshot().messages;
+        const index = connectionOperationIndexSchema.parse(
+          JSON.parse(storage.getItem('botharness.remoteHosts.operations.v1')!),
+        );
+        assert(index[0]);
+        expect(index[0].key).toBe(key);
+        const record = storage.getItem(key)!;
+        storage.removeItem(key);
+        const client = sources.client(host.hostId)!;
+        const api = vi.spyOn(client, 'api');
+        const command = () =>
+          manageConnections(
+            sources,
+            { action: 'stop-route', hostId: host.hostId, kind: 'lan', confirm: true },
+            { expiresAt: Date.now() + 30_000, signal: new AbortController().signal },
+          );
+        await expect(command()).rejects.toThrow('connection-operation-storage-unavailable');
+        expect(api).not.toHaveBeenCalled();
+        expect(sources.getSnapshot().hosts[0]?.inbox).toBe(feed);
+        expect(conversation.getSnapshot().messages).toBe(messages);
+        expect(sources.conversation(target)).toBe(conversation);
+        expect(sources.getSnapshot().open).toEqual(target);
+        expect(storage.getItem('botharness.remoteHosts.operations.v1')).not.toBeNull();
+        const reloaded = createRemoteHosts({
+          carrier: host.carrier,
+          storage,
+          connectionOperationLock: lock,
+        });
+        expect(reloaded.getSnapshot().hosts[0]?.host.connectionOperationUnavailable).toBe(true);
+        storage.setItem(key, record);
+        await expect(command()).rejects.toThrow('connection-management-unconfirmed');
+        expect(conversation.getSnapshot().messages).toBe(messages);
+      } finally {
+        conversation.stop();
+      }
+    },
+  );
   it.each(['removeItem', 'setItem'] as const)(
     'finishes permanent removal and reports notification persistence refusal from %s',
     async (operation) => {
@@ -551,7 +982,13 @@ describe('Host Feed lifecycle', () => {
         expect(client.getSnapshot().connection.status).toBe('stopped');
         expect(sources.client(host.hostId)).toBeUndefined();
         expect(sources.getSnapshot().hosts).toEqual([]);
-        expect(storage.getItem(REMOTE_HOSTS_STORAGE_KEY)).toBeNull();
+        expect(JSON.parse(storage.getItem(REMOTE_HOSTS_STORAGE_KEY) ?? '[]')).toEqual([
+          expect.objectContaining({
+            kind: 'automatic-enrollment-suppressed',
+            hostId: host.hostId,
+            publicKey: null,
+          }),
+        ]);
         expect(sources.notifications.getSnapshot().hosts).not.toHaveProperty(host.hostId);
         expect(sources.notifications.choice('other')).toEqual(other);
         expect(close).toHaveBeenCalledOnce();
@@ -1045,7 +1482,7 @@ describe('Host Feed lifecycle', () => {
     const sources = createRemoteHosts({ carrier: host.carrier, storage });
     expect(sources.getSnapshot().tab).toBe(host.hostId);
     expect(sources.getSnapshot().hosts[0]?.host).toEqual(saved[0]);
-    expect(storage.values.has('botharness.computers.v1')).toBe(false);
+    expect(storage.values.has('botharness.computers.v1')).toBe(true);
     expect(storage.values.has('botharness.computers.tab.v1')).toBe(false);
     await sources.remove(host.hostId);
     expect(createRemoteHosts({ carrier: host.carrier, storage }).getSnapshot().hosts).toEqual([]);

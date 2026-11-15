@@ -60,6 +60,7 @@ function fixture(
   const roster = createTestRosterStore({ database: core.operationalDatabase });
   const methods = createBridgeMethodsForHumans({ ...core, team, roster });
   for (const human of [owner, alice, bob]) {
+    core.team.spaces.ensureAccount(human.humanId);
     const slug = human.humanId === owner.humanId ? 'owner-bot' : human.humanId + '-bot';
     expect(core.registry.create({ slug, displayName: slug, ownerHumanId: human.humanId }).ok).toBe(
       true,
@@ -362,6 +363,7 @@ describe('M2 private Bot boundaries', () => {
   it('rechecks Tob creation permission after preparation and for recovered receipts', async () => {
     const f = fixture();
     const ops = createMemberTobOperations({
+      human: bob,
       bridge: f.methods(bob),
       registry: privateBotRegistry(f.core.registry, bob),
       creations: privateBotCreations(f.core.creations, bob),
@@ -443,6 +445,7 @@ describe('M2 private Bot boundaries', () => {
         new Date().toISOString(),
       );
     });
+    f.core.team.spaces.ensureAccount(carol.humanId);
     f.core.registry.create({ slug: 'carol-bot', displayName: 'Carol Bot', ownerHumanId: 'carol' });
     const group = f.core.channels.createGroup(owner, {
       name: 'Public working group',
@@ -829,6 +832,7 @@ describe('M2 private Bot boundaries', () => {
     expect(home).toEqual(again);
     expect(await f.methods(owner).tobHome({})).toMatchObject({ ok: true, value: home });
     const ops = createMemberTobOperations({
+      human: bob,
       bridge: f.methods(bob),
       registry: privateBotRegistry(f.core.registry, bob),
       creations: privateBotCreations(f.core.creations, bob),

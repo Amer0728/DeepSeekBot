@@ -1,3 +1,5 @@
+import { privateKindSchema } from '../team/private-contract.js';
+import { spaceAudienceSchema } from '../workspaces/spaces.js';
 import {
   channelPolicySchema,
   channelVisibilitySchema,
@@ -10,6 +12,9 @@ import type { BotCreateCliIo } from './bot-create-cli.js';
 
 export const TEAM_OPTIONS = {
   as: { type: 'string' },
+  after: { type: 'string' },
+  reason: { type: 'string' },
+  audience: { type: 'string' },
   models: { type: 'string' },
   'human-id': { type: 'string' },
   post: { type: 'string' },
@@ -31,10 +36,22 @@ export const TEAM_OPTIONS = {
   'password-stdin': { type: 'boolean' },
 } as const;
 export const TEAM_COMMANDS = [
+  { command: 'audit', description: 'list [--after] [--limit] | verify' },
+  {
+    command: 'private',
+    description:
+      'list [--member <username>] [--kind] | open <kind> <id> [--reason] | page <viewId> --before <messageId>',
+  },
+
   { command: 'usage', description: 'members --period today|week|month|quarter' },
   { command: 'models', description: 'allowed' },
   { command: 'dm', description: '<username>' },
   { command: 'team-directory', description: 'active DM recipients' },
+  {
+    command: 'spaces',
+    description:
+      'list | audience-directory | create --name --audience | update <spaceId> [--name] [--audience] | delete <spaceId> --confirm',
+  },
   {
     command: 'roles',
     description:
@@ -53,6 +70,12 @@ export const TEAM_COMMANDS = [
 ] as const;
 
 type TeamValues = {
+  after?: string;
+  limit?: string;
+  kind?: string;
+  reason?: string;
+  before?: string;
+  audience?: string;
   models?: string;
   period?: string;
   'human-id'?: string;
@@ -151,12 +174,80 @@ export async function runTeamCommand(
   rpc: Rpc,
 ): Promise<unknown> {
   const [action, argument] = rest;
+  if (command === 'spaces') {
+    const audience = () => {
+      const value = values.audience;
+      if (value === 'everyone') return { kind: 'everyone' as const };
+      const [kind, ...parts] = (value ?? '').split(':');
+      if (parts.length !== 1 || !parts[0]) return usage();
+      const members = ids(parts[0]);
+      const parsed = spaceAudienceSchema.safeParse(
+        kind === 'roles' ? { kind, roleIds: members } : { kind, humanIds: members },
+      );
+      if (!parsed.success) return usage();
+      return parsed.data;
+    };
+    if (action === 'list' && rest.length === 1) return rpc('spaces', {});
+    if (action === 'audience-directory' && rest.length === 1)
+      return rpc('spaceAudienceDirectory', {});
+    if (action === 'create' && rest.length === 1 && values.name && values.audience)
+      return rpc('spaceCreate', { name: values.name, audience: audience() });
+    if (
+      action === 'update' &&
+      argument &&
+      rest.length === 2 &&
+      (values.name !== undefined || values.audience !== undefined)
+    )
+      return rpc('spaceUpdate', {
+        spaceId: argument,
+        ...(values.name === undefined ? {} : { name: values.name }),
+        ...(values.audience === undefined ? {} : { audience: audience() }),
+      });
+    if (action === 'delete' && argument && rest.length === 2) {
+      if (!values.confirm) throw new CliLiveError('confirm-required', 'confirm-required');
+      return rpc('spaceDelete', { spaceId: argument, confirm: true });
+    }
+    return usage();
+  }
   if (command === 'models' && action === 'allowed' && rest.length === 1)
     return rpc('modelsAllowed', {});
   if (command === 'usage' && action === 'members' && rest.length === 1) {
     const period = values.period ?? 'today';
     if (!['today', 'week', 'month', 'quarter'].includes(period)) return usage();
     return rpc('usageByMember', { period });
+  }
+  if (command === 'audit') {
+    if (action === 'verify' && rest.length === 1) return rpc('auditVerify', {});
+    if (action === 'list' && rest.length === 1) {
+      const limit = values.limit === undefined ? undefined : Number(values.limit);
+      if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 200))
+        return usage();
+      return rpc('auditLog', {
+        ...(values.after === undefined ? {} : { after: values.after }),
+        ...(limit === undefined ? {} : { limit }),
+      });
+    }
+    return usage();
+  }
+  if (command === 'private') {
+    if (action === 'list' && rest.length === 1) {
+      if (values.kind !== undefined && !privateKindSchema.safeParse(values.kind).success)
+        return usage();
+      if (values.member !== undefined && values.member.length !== 1) return usage();
+      return rpc('privateObjects', {
+        ...(values.kind === undefined ? {} : { kind: values.kind }),
+        ...(values.member?.[0] === undefined ? {} : { username: values.member[0] }),
+      });
+    }
+    if (action === 'open' && rest.length === 3 && privateKindSchema.safeParse(argument).success)
+      return rpc('privateContentOpen', {
+        kind: argument,
+        objectId: rest[2],
+        ...(values.reason === undefined ? {} : { reason: values.reason }),
+      });
+    if (action === 'page' && rest.length === 2 && argument && values.before)
+      return rpc('privateContentPage', { viewId: argument, before: values.before });
+    return usage();
   }
   if (command === 'roles') {
     if (action === 'list' && rest.length === 1) return rpc('roles', {});
