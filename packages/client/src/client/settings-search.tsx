@@ -205,6 +205,7 @@ export const SETTINGS_DESCRIPTIONS: Partial<Record<BotHarnessKey, BotHarnessKey>
   'connections.hosts.preference': 'connections.hosts.preferenceScope',
   'team.mode.title': 'team.mode.description',
   'team.spaces.yours': 'team.spaces.yoursHint',
+  'team.private.open': 'team.private.listBody',
   'team.insecureHttp.title': 'team.insecureHttp.description',
   'zoom.current': 'zoom.current.description',
   'zoom.default': 'zoom.default.description',
