@@ -6,6 +6,7 @@ export const connectionMutationSchema = z.discriminatedUnion('action', [
     action: z.literal('stop-route'),
     kind: z.enum(['lan', 'private-tunnel']),
     routeId: z.enum(['quick', 'custom']).optional(),
+    expectedRevision: z.string().min(1).max(200).optional(),
   }),
   z.object({ action: z.literal('sign-out') }),
 ]);

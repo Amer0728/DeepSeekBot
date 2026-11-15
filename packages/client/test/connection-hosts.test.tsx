@@ -133,6 +133,81 @@ const notifyStoredHosts = () => {
   globalThis.dispatchEvent(event);
 };
 
+it.each([false, true])(
+  'keeps the user-confirmed private revision when replacement before confirmation is %s',
+  async (replaced) => {
+    let revision = 'configuration-a';
+    api.mockImplementation(async (path, input) =>
+      path === '/api/botharness/devices'
+        ? {
+            status: 200,
+            body: {
+              host: { id: 'target', name: 'Studio' },
+              devices: [],
+              privateRoutes: [
+                {
+                  id: 'custom',
+                  origin: 'https://private.example.com',
+                  state: 'connected',
+                  revision,
+                },
+              ],
+            },
+          }
+        : {
+            status: 200,
+            body: {
+              ok: true,
+              routeId: 'custom',
+              status: { state: 'off' },
+              expectedRevision:
+                input?.body && 'expectedRevision' in input.body
+                  ? input.body.expectedRevision
+                  : undefined,
+            },
+          },
+    );
+    await open();
+    await click(t('connections.hosts.stop'));
+    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    if (replaced) revision = 'configuration-b';
+    await click(t('connections.hosts.stop'));
+    const writes = api.mock.calls.filter(([, input]) => input?.body);
+    expect(writes).toHaveLength(replaced ? 0 : 1);
+    if (!replaced)
+      expect(writes[0]?.[1]?.body).toMatchObject({ expectedRevision: 'configuration-a' });
+  },
+);
+
+it('refuses a stale private row before planning instead of replacing its displayed identity', async () => {
+  let revision = 'configuration-a';
+  api.mockImplementation(async () => ({
+    status: 200,
+    body: {
+      host: { id: 'target', name: 'Studio' },
+      devices: [],
+      privateRoutes: [
+        {
+          id: 'custom',
+          origin:
+            revision === 'configuration-a'
+              ? 'https://before.example.com'
+              : 'https://after.example.com',
+          state: 'connected',
+          revision,
+        },
+      ],
+    },
+  }));
+  await open();
+  expect(host.textContent).toContain('https://before.example.com');
+  revision = 'configuration-b';
+  await click(t('connections.hosts.stop'));
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+  expect(api.mock.calls.filter(([, input]) => input?.body)).toEqual([]);
+  expect(sources.getSnapshot().hosts[0]?.host.pendingConnection).toBeUndefined();
+});
+
 it('keeps local removal separate from target device revocation and confirms the target', async () => {
   await open();
   expect(host.textContent).toContain('Test phone');

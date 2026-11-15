@@ -1053,7 +1053,8 @@ deepseekbot connection-host <host-id> test-route <origin> --client-id <id>
 deepseekbot connection-host <host-id> remove --client-id <id> --confirm
 deepseekbot connection-host <host-id> revoke-device <device-id> --client-id <id> --confirm
 deepseekbot connection-host <host-id> stop-route lan --client-id <id> --confirm
-deepseekbot connection-host <host-id> stop-route private-tunnel --connection-route-id quick --client-id <id> --confirm
+deepseekbot connection-host <host-id> plan-stop-route private-tunnel --connection-route-id quick --client-id <id>
+deepseekbot connection-host <host-id> stop-route private-tunnel --connection-route-id quick --expected-route-revision <revision> --client-id <id> --confirm
 deepseekbot connection-host <host-id> plan-stop-route lan --client-id <id>
 deepseekbot connection-host <host-id> stop-route lan --handover <trusted-origin> --client-id <id> --confirm
 deepseekbot connection-host <host-id> stop-route lan --confirm-disconnect --client-id <id> --confirm
@@ -1068,6 +1069,8 @@ deepseekbot connection-host <host-id> select-route <origin-or-automatic> --clien
 `select-route` persists the preference in the selected browser’s existing Host record before switching after active requests finish. A manual origin must already be eligible and never silently fails over. Pass `automatic` to restore the existing policy without widening route eligibility. `connection-hosts` reports saved preference, pending switch and actual current route separately. Only this Client/Host is affected; mobile connection details use the same HostClient behavior and their own canonical persistence owner.
 
 `plan-*` reads the named Host before changing anything and reports whether the operation can disconnect this Client. Choose `--handover <trusted-origin>` to verify an existing alternative, explicitly save that Client’s manual route preference, wait for its active connection and read back the exact Host before writing. Without a usable alternative, `--confirm-disconnect` acknowledges loss of access; `--confirm` remains required. Stopping a private route requires its `quick` or `custom` ID and preserves other routes. Sign-out uses that Host’s account owner; relationship disconnection and individual device revocation keep their separate effects.
+
+For a private route, first use `plan-stop-route` and pass its configuration revision unchanged with `--expected-route-revision`. Re-plan after a configuration change or Host restart; never substitute a newly inspected revision for the one confirmed. The Host atomically refuses a changed configuration before stopping it. A mismatched, absent or legacy unqualified revision cannot settle an uncertain private stop.
 
 An uncertain write is atomically recorded in a versioned execution index under the selected Client’s existing HostStorage owner before transmission and is never replayed. Reloading retains the guard. A shared Web Lock covers preparation, one write and acknowledgement; missing Web Locks refuse dangerous writes. `read-operation` fresh-reads the guard under the same lock, uses the same authenticated Host owner and clears only the matching generation after observing completion. An unchanged or unavailable result remains unknown. Recover access through an already trusted route, then read back. `read-previous-operation` explicitly lets a new independent grant read the outcome of an older grant’s operation through the same pinned Host, without inheriting or resending it; a different Host key refuses. At most 32 unresolved execution records are retained before further writes refuse. Loaded Channels and messages stay available while offline. These Client operations do not stop foreign Tailscale mappings or unrelated Host processes.
 
@@ -1998,12 +2001,15 @@ For several IM requests in one turn, call `ask_secret` with the existing account
 
 Use `device-offer --route-id quick|custom --out <new-absolute-private-file>` for a single-route invitation, including recovery or older phones. Omit `--route-id` to admit all connected private routes.
 
+`private-route stop` optionally accepts `--expected-route-revision` from `list` for a configuration-bound stop; without it the explicit local-owner command retains its unconditional behavior. A changed revision refuses before mutation.
+
 `private-route list` reads the Host's public `privateRoutes` projection. A Host supports `quick` plus one `custom` route (Named Tunnel or private HTTPS ingress):
 
 ```bash
 deepseekbot private-route add quick --confirm
 deepseekbot private-route add custom --origin https://bot.example.com --confirm
 deepseekbot private-route stop quick --confirm
+deepseekbot private-route stop quick --expected-route-revision <revision-from-list> --confirm
 deepseekbot private-route start quick --confirm
 deepseekbot private-route replace custom --hostname bot.example.com --token-stdin --confirm
 deepseekbot private-route remove custom --confirm

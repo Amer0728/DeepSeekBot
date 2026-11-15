@@ -3,7 +3,11 @@ import { FakeHost } from '../../../apps/mobile/test/fake-host.js';
 import type { SavedHost } from '../../../apps/mobile/src/host/hosts.js';
 import type { HostClient } from '../../../apps/mobile/src/host/client.js';
 import type { ConnectionMutation } from '../../core/src/devices/connection-operation.js';
-import { connectionOperationIndexSchema } from '../../core/src/devices/connection-operation.js';
+import {
+  connectionMutationSchema,
+  connectionOperationIndexSchema,
+  pendingConnectionSchema,
+} from '../../core/src/devices/connection-operation.js';
 import { withRemoteHostCredentialWrite } from '../src/client/remote-host-storage-lock.js';
 import {
   attachOperationalModule,
@@ -12,6 +16,8 @@ import {
 import { BOT_HARNESS_SCHEMA_PLAN } from '../../core/src/database/schema-plan.js';
 import { createDevicePairing } from '../../core/src/devices/pairing.js';
 import { createDevicesHttp } from '../../core/src/devices/http.js';
+import { createPrivateTunnel } from '../../core/src/devices/private-tunnel.js';
+import { detectPhoneRoutes } from '../../core/src/devices/routes.js';
 import { createTempRoot, trackTestOwner } from '../../core/test/helpers.js';
 import {
   createRemoteHosts,
@@ -61,6 +67,7 @@ function acknowledgement(path: string, input: unknown) {
       ok: true,
       status: { state: 'off' },
       routeId: 'routeId' in body ? body.routeId : undefined,
+      expectedRevision: 'expectedRevision' in body ? body.expectedRevision : undefined,
     };
   return { state: path.endsWith('/lan') ? 'off' : 'signed-out' };
 }
@@ -110,6 +117,258 @@ const fixture = (routes?: string[]) => {
   return { sources, values, storage, lock };
 };
 
+it('binds the preview revision through confirmation instead of adopting a replacement configuration', async () => {
+  const { sources } = fixture();
+  let revision = 'configuration-a';
+  const post = vi.fn();
+  vi.spyOn(sources.client('a')!, 'api').mockImplementation(async (path, input) => {
+    if (path === '/api/botharness/devices')
+      return {
+        status: 200,
+        body: {
+          host: { id: 'a', name: 'Host' },
+          devices: [],
+          privateRoutes: [
+            { id: 'custom', state: 'connected', origin: 'https://private.example.com', revision },
+          ],
+        },
+      };
+    post(input?.body);
+    return {
+      status: 200,
+      body: { ok: true, routeId: 'custom', expectedRevision: revision, status: { state: 'off' } },
+    };
+  });
+  const operation = { action: 'stop-route', kind: 'private-tunnel', routeId: 'custom' };
+  await expect(
+    manageConnections(sources, { action: 'plan-operation', hostId: 'a', operation }, request()),
+  ).resolves.toMatchObject({ expectedRevision: 'configuration-a' });
+  revision = 'configuration-b';
+  await expect(
+    manageConnections(
+      sources,
+      { ...operation, hostId: 'a', expectedRevision: 'configuration-a', confirm: true },
+      request(),
+    ),
+  ).rejects.toThrow('connection-route-changed');
+  expect(post).not.toHaveBeenCalled();
+  expect(sources.getSnapshot().hosts[0]?.host.pendingConnection).toBeUndefined();
+  sources.close();
+});
+
+it.each([undefined, 'configuration-a', 'configuration-b'])(
+  'resolves an off private route only for the exact journal revision %s',
+  async (expectedRevision) => {
+    const { sources } = fixture();
+    const client = sources.client('a')!;
+    const operation = {
+      action: 'stop-route' as const,
+      kind: 'private-tunnel' as const,
+      routeId: 'custom' as const,
+      ...(expectedRevision === undefined ? {} : { expectedRevision }),
+    };
+    const pending = {
+      generation: crypto.randomUUID(),
+      hostKey: '11'.repeat(32),
+      deviceId: 'device-a',
+      operation,
+    };
+    sources.setPendingConnection('a', client, pending);
+    vi.spyOn(client, 'api').mockResolvedValue({
+      status: 200,
+      body: {
+        host: { id: 'a', name: 'Host' },
+        devices: [],
+        privateRoutes: [{ id: 'custom', state: 'off', revision: 'configuration-b' }],
+      },
+    });
+    const completed = expectedRevision === 'configuration-b';
+    await expect(
+      manageConnections(sources, { action: 'read-operation', hostId: 'a' }, request()),
+    ).resolves.toMatchObject({ outcome: completed ? 'completed' : 'unknown' });
+    expect(sources.getSnapshot().hosts[0]?.host.pendingConnection?.generation).toBe(
+      completed ? undefined : pending.generation,
+    );
+    sources.close();
+  },
+);
+
+it('requires an identity-bound private stop ACK and preserves unknown on a mismatched ACK', async () => {
+  const { sources } = fixture();
+  vi.spyOn(sources.client('a')!, 'api').mockImplementation(async (path, input) => {
+    if (path === '/api/botharness/devices')
+      return {
+        status: 200,
+        body: {
+          host: { id: 'a', name: 'Host' },
+          devices: [],
+          privateRoutes: [
+            {
+              id: 'custom',
+              state: 'connected',
+              origin: 'https://private.example.com',
+              revision: 'configuration-a',
+            },
+          ],
+        },
+      };
+    expect(input?.body).toMatchObject({ expectedRevision: 'configuration-a' });
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        routeId: 'custom',
+        expectedRevision: 'configuration-b',
+        status: { state: 'off' },
+      },
+    };
+  });
+  await expect(
+    manageConnections(
+      sources,
+      {
+        action: 'stop-route',
+        kind: 'private-tunnel',
+        routeId: 'custom',
+        hostId: 'a',
+        confirm: true,
+        expectedRevision: 'configuration-a',
+      },
+      request(),
+    ),
+  ).rejects.toThrow('connection-management-unconfirmed');
+  expect(sources.getSnapshot().hosts[0]?.host.pendingConnection?.operation).toMatchObject({
+    expectedRevision: 'configuration-a',
+  });
+  sources.close();
+});
+
+it.each(['credential-wait', 'handover'])(
+  'keeps the original revision across %s and lets the Host CAS reject a late replacement',
+  async (stage) => {
+    type Credentials = NonNullable<
+      ReturnType<Parameters<typeof createPrivateTunnel>[0]['credentials']>
+    >;
+    const records = new Map<string, Awaited<ReturnType<Credentials['readRecord']>>>();
+    const owner = createPrivateTunnel({
+      port: () => 1,
+      credentials: () => ({
+        readRecord: async (key) => records.get(key),
+        modifyRecord: async (key, mutate) => {
+          const record = await mutate(records.get(key));
+          if (record) records.set(key, record);
+          else records.delete(key);
+          return record;
+        },
+        deleteRecord: async (key) => {
+          records.delete(key);
+        },
+      }),
+    });
+    await owner.add({ mode: 'ingress', origin: 'https://private.example.com' });
+    const expectedRevision = owner.statuses()[0]!.revision;
+    const lan = 'http://127.0.0.1:47001';
+    const { sources, storage } = fixture(
+      stage === 'handover' ? ['https://private.example.com', lan] : [lan],
+    );
+    const database = trackTestOwner(
+      mountOperationalDatabase({
+        dshHome: createTempRoot('connection-private-cas-'),
+        schemaPlan: BOT_HARNESS_SCHEMA_PLAN,
+      }),
+    );
+    const pairing = createDevicePairing({
+      database: attachOperationalModule(database, 'device-pairing'),
+      hostName: 'CAS target',
+    });
+    const http = createDevicesHttp({
+      pairing,
+      privateTunnel: owner,
+      routes: () => detectPhoneRoutes({ port: 4100, run: async () => '' }),
+    });
+    const client = sources.client('a')!;
+    let route = stage === 'handover' ? 'https://private.example.com' : lan;
+    let preference: string | undefined;
+    vi.spyOn(client, 'getSnapshot').mockImplementation(() => ({
+      connection: { status: 'connected', route },
+      ...(preference === undefined ? {} : { routePreference: preference }),
+    }));
+    vi.spyOn(client, 'testRoute').mockResolvedValue(true);
+    vi.spyOn(client, 'setRoutePreference').mockImplementation(async (next) => {
+      route = next ?? route;
+      preference = next;
+      await owner.replace('custom', { mode: 'ingress', origin: 'https://replacement.example.com' });
+    });
+    let release!: () => void;
+    let queued: Promise<unknown> | undefined;
+    let posts = 0;
+    vi.spyOn(client, 'api').mockImplementation(async (path, input) => {
+      if (path === '/api/botharness/devices') {
+        const body = {
+          host: { id: 'a', name: 'Host' },
+          devices: [],
+          privateRoutes: owner.statuses(),
+        };
+        if (stage === 'credential-wait')
+          queued = withRemoteHostCredentialWrite({
+            storage,
+            run: () =>
+              new Promise<void>((resolve) => {
+                release = resolve;
+              }),
+          });
+        return { status: 200, body };
+      }
+      posts++;
+      expect(input?.body).toMatchObject({ expectedRevision });
+      const response = await http(
+        new Request(`http://localhost${path}`, {
+          method: 'POST',
+          body: JSON.stringify(input?.body),
+        }),
+      );
+      return { status: response.status, body: await response.json() };
+    });
+    try {
+      const operation = manageConnections(
+        sources,
+        {
+          action: 'stop-route',
+          kind: 'private-tunnel',
+          routeId: 'custom',
+          hostId: 'a',
+          confirm: true,
+          expectedRevision,
+          ...(stage === 'handover' ? { handover: lan } : {}),
+        },
+        request(),
+      );
+      const check = expect(operation).rejects.toThrow(
+        stage === 'handover' ? 'connection-route-changed' : 'connection-management-refused',
+      );
+      if (stage === 'credential-wait') {
+        await vi.waitFor(() => expect(release).toBeDefined());
+        await owner.replace('custom', {
+          mode: 'ingress',
+          origin: 'https://replacement.example.com',
+        });
+        release();
+        await queued;
+      }
+      await check;
+      expect(posts).toBe(stage === 'handover' ? 0 : 1);
+      expect(owner.statuses()[0]).toMatchObject({
+        enabled: true,
+        origin: 'https://replacement.example.com',
+      });
+      expect(sources.getSnapshot().hosts[0]?.host.pendingConnection).toBeUndefined();
+    } finally {
+      sources.close();
+      await owner.close();
+    }
+  },
+);
+
 it('review: resolves a public origin back to the exact saved route for test, selection and handover', async () => {
   const active = 'https://active.trycloudflare.com';
   const alternate = 'https://OTHER.ts.net/';
@@ -136,11 +395,23 @@ it('review: resolves a public origin back to the exact saved route for test, sel
         ? {
             host: { id: 'a', name: 'Studio' },
             devices: [],
-            privateRoutes: [{ id: 'quick', origin: active, state: 'connected' }],
+            privateRoutes: [
+              { id: 'quick', revision: 'quick-revision', origin: active, state: 'connected' },
+            ],
           }
-        : { ok: true, status: { state: 'off' }, routeId: 'quick' },
+        : {
+            ok: true,
+            status: { state: 'off' },
+            routeId: 'quick',
+            expectedRevision: 'quick-revision',
+          },
   }));
-  const operation = { action: 'stop-route', kind: 'private-tunnel', routeId: 'quick' };
+  const operation = {
+    action: 'stop-route',
+    kind: 'private-tunnel',
+    routeId: 'quick',
+    expectedRevision: 'quick-revision',
+  };
   await expect(
     manageConnections(sources, { action: 'plan-operation', hostId: 'a', operation }, request()),
   ).resolves.toMatchObject({ alternatives: ['https://other.ts.net'] });
@@ -173,7 +444,12 @@ it('review: resolves a public origin back to the exact saved route for test, sel
 it.each([
   { action: 'revoke-device', deviceId: 'phone' },
   { action: 'stop-route', kind: 'lan' },
-  { action: 'stop-route', kind: 'private-tunnel', routeId: 'quick' },
+  {
+    action: 'stop-route',
+    kind: 'private-tunnel',
+    routeId: 'quick',
+    expectedRevision: 'quick-revision',
+  },
   { action: 'sign-out' },
 ])('review: retains an unknown $action result for a non-contract 200 reply', async (operation) => {
   for (const reply of ['<html>login</html>', {}, { ok: true }]) {
@@ -187,7 +463,7 @@ it.each([
             host: { id: 'a', name: 'Studio' },
             devices: [{ id: 'phone', name: 'Phone' }],
             lan: { state: 'listening' },
-            privateRoutes: [{ id: 'quick', state: 'connected' }],
+            privateRoutes: [{ id: 'quick', revision: 'quick-revision', state: 'connected' }],
             connect: { account: { state: 'signed-in' } },
           },
         };
@@ -236,6 +512,109 @@ it('review: an older Client managing another Host cannot strip a new inline unkn
   expect(
     restored.getSnapshot().hosts.find((host) => host.host.hostId === 'b')?.host.pendingConnection,
   ).toEqual(pending);
+  restored.close();
+  sources.close();
+});
+
+it('prevents the old153 cross-Host index writer from stripping a new pending revision', () => {
+  const { sources, storage } = fixture();
+  const pending = {
+    generation: crypto.randomUUID(),
+    hostKey: '11'.repeat(32),
+    deviceId: 'device-b',
+    operation: {
+      action: 'stop-route' as const,
+      kind: 'private-tunnel' as const,
+      routeId: 'custom' as const,
+      expectedRevision: 'configuration-a',
+    },
+  };
+  sources.setPendingConnection('b', sources.client('b')!, pending);
+  const before = storage.getItem('botharness.remoteHosts.operations.v1')!;
+  const oldMutation = connectionMutationSchema.options[1].omit({ expectedRevision: true });
+  const oldPending = pendingConnectionSchema.extend({ operation: oldMutation });
+  const oldEntries = connectionOperationIndexSchema.element
+    .extend({ record: oldPending.nullable().optional() })
+    .array()
+    .max(32);
+  const oldRead = (raw: string) => {
+    const value: unknown = JSON.parse(raw);
+    if (Array.isArray(value)) return oldEntries.parse(value);
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      !('version' in value) ||
+      value.version !== 2 ||
+      !('entries' in value)
+    )
+      throw new Error('connection-operation-storage-unavailable');
+    return oldEntries.parse(value.entries);
+  };
+  const downgrade = { ...JSON.parse(before), version: 2 };
+  expect(oldRead(JSON.stringify(downgrade))[0]?.record?.operation).not.toHaveProperty(
+    'expectedRevision',
+  );
+  const write = vi.spyOn(storage, 'setItem');
+  const oldPrepareA = () => {
+    const index = oldRead(storage.getItem('botharness.remoteHosts.operations.v1')!);
+    storage.setItem(
+      'botharness.remoteHosts.operations.v1',
+      JSON.stringify({
+        version: 2,
+        entries: [
+          ...index,
+          {
+            hostId: 'a',
+            key: `botharness.remoteHosts.operation.v1:${JSON.stringify(['a', '11'.repeat(32), 'device-a'])}`,
+          },
+        ],
+      }),
+    );
+  };
+  expect(oldPrepareA).toThrow('connection-operation-storage-unavailable');
+  expect(write).not.toHaveBeenCalled();
+  expect(storage.getItem('botharness.remoteHosts.operations.v1')).toBe(before);
+  const restored = createRemoteHosts({ storage, carrier: new FakeHost().carrier });
+  expect(
+    restored.getSnapshot().hosts.find((entry) => entry.host.hostId === 'b')?.host.pendingConnection,
+  ).toEqual(pending);
+  sources.setPendingConnection('b', sources.client('b')!, undefined, pending.generation);
+  expect(oldRead(storage.getItem('botharness.remoteHosts.operations.v1')!)).toEqual([]);
+  restored.close();
+  sources.close();
+});
+
+it('reads an existing version2 pending without inventing identity and upgrades the next write to version3', () => {
+  const { sources, storage } = fixture();
+  const legacy = {
+    generation: crypto.randomUUID(),
+    hostKey: '11'.repeat(32),
+    deviceId: 'device-b',
+    operation: {
+      action: 'stop-route' as const,
+      kind: 'private-tunnel' as const,
+      routeId: 'custom' as const,
+    },
+  };
+  sources.setPendingConnection('b', sources.client('b')!, legacy);
+  const document = JSON.parse(storage.getItem('botharness.remoteHosts.operations.v1')!);
+  storage.setItem(
+    'botharness.remoteHosts.operations.v1',
+    JSON.stringify({ ...document, version: 2 }),
+  );
+  const restored = createRemoteHosts({ storage, carrier: new FakeHost().carrier });
+  expect(
+    restored.getSnapshot().hosts.find((entry) => entry.host.hostId === 'b')?.host.pendingConnection,
+  ).toEqual(legacy);
+  sources.setPendingConnection('a', sources.client('a')!, {
+    ...legacy,
+    deviceId: 'device-a',
+    operation: { action: 'sign-out' },
+  });
+  expect(JSON.parse(storage.getItem('botharness.remoteHosts.operations.v1')!).version).toBe(3);
+  expect(
+    sources.getSnapshot().hosts.find((entry) => entry.host.hostId === 'b')?.host.pendingConnection,
+  ).toEqual(legacy);
   restored.close();
   sources.close();
 });
@@ -294,7 +673,9 @@ it.each(['before-lock', 'inspect', 'handover', 'missing', 'unreadable'] as const
           host: { id: 'a', name: 'Studio' },
           devices: [],
           lan: { state: 'listening' },
-          privateRoutes: [{ id: 'quick', origin: active, state: 'connected' }],
+          privateRoutes: [
+            { id: 'quick', revision: 'quick-revision', origin: active, state: 'connected' },
+          ],
         },
       };
     });
@@ -307,6 +688,7 @@ it.each(['before-lock', 'inspect', 'handover', 'missing', 'unreadable'] as const
               action: 'stop-route',
               kind: 'private-tunnel',
               routeId: 'quick',
+              expectedRevision: 'quick-revision',
               hostId: 'a',
               confirm: true,
               handover: alternate,
@@ -622,7 +1004,9 @@ it.each([false, true])(
         body: {
           host: { id: 'a', name: 'Studio' },
           devices: [{ id: 'phone', name: 'Independent phone' }],
-          privateRoutes: [{ id: 'quick', origin: quick, state: 'connected' }],
+          privateRoutes: [
+            { id: 'quick', revision: 'quick-revision', origin: quick, state: 'connected' },
+          ],
         },
       };
     });
@@ -634,6 +1018,7 @@ it.each([false, true])(
             action: 'stop-route',
             kind: 'private-tunnel',
             routeId: 'quick',
+            expectedRevision: 'quick-revision',
             hostId: 'a',
             confirm: true,
           },
@@ -1140,7 +1525,12 @@ it('stops only one explicitly selected private route and keeps the other owner a
             host: { id: 'a', name: 'Studio' },
             devices: [{ id: 'phone', name: 'Independent phone' }],
             privateRoutes: [
-              { id: 'quick', origin: 'https://test.trycloudflare.com', state: 'connected' },
+              {
+                id: 'quick',
+                revision: 'quick-revision',
+                origin: 'https://test.trycloudflare.com',
+                state: 'connected',
+              },
               { id: 'custom', origin: 'https://private.example.com', state: 'connected' },
             ],
           }
@@ -1155,12 +1545,21 @@ it('stops only one explicitly selected private route and keeps the other owner a
   ).rejects.toThrow('connection-route-unknown');
   await manageConnections(
     sources,
-    { action: 'stop-route', hostId: 'a', kind: 'private-tunnel', routeId: 'quick', confirm: true },
+    {
+      action: 'stop-route',
+      hostId: 'a',
+      kind: 'private-tunnel',
+      routeId: 'quick',
+      expectedRevision: 'quick-revision',
+      confirm: true,
+    },
     request(),
   );
   expect(api).toHaveBeenLastCalledWith(
     '/api/botharness/devices/private-tunnel',
-    expect.objectContaining({ body: { action: 'stop', routeId: 'quick', confirm: true } }),
+    expect.objectContaining({
+      body: { action: 'stop', routeId: 'quick', expectedRevision: 'quick-revision', confirm: true },
+    }),
   );
   expect(api.mock.calls.filter(([, init]) => init?.body)).toHaveLength(1);
 });
@@ -1209,7 +1608,9 @@ it('performs no write when a planned alternative was saved but never became the 
     body: {
       host: { id: 'a', name: 'Studio' },
       devices: [],
-      privateRoutes: [{ id: 'quick', origin: active, state: 'connected' }],
+      privateRoutes: [
+        { id: 'quick', revision: 'quick-revision', origin: active, state: 'connected' },
+      ],
     },
   });
   await expect(
@@ -1220,6 +1621,7 @@ it('performs no write when a planned alternative was saved but never became the 
         hostId: 'a',
         kind: 'private-tunnel',
         routeId: 'quick',
+        expectedRevision: 'quick-revision',
         confirm: true,
         handover: alternate,
       },
@@ -1524,7 +1926,9 @@ it('reports only public origins in a handover plan, excluding URL credentials an
     body: {
       host: { id: 'a', name: 'Studio' },
       devices: [],
-      privateRoutes: [{ id: 'quick', origin: active, state: 'connected' }],
+      privateRoutes: [
+        { id: 'quick', revision: 'quick-revision', origin: active, state: 'connected' },
+      ],
     },
   });
   const result = await manageConnections(
@@ -1532,7 +1936,12 @@ it('reports only public origins in a handover plan, excluding URL credentials an
     {
       action: 'plan-operation',
       hostId: 'a',
-      operation: { action: 'stop-route', kind: 'private-tunnel', routeId: 'quick' },
+      operation: {
+        action: 'stop-route',
+        kind: 'private-tunnel',
+        routeId: 'quick',
+        expectedRevision: 'quick-revision',
+      },
     },
     request(),
   );
@@ -1650,7 +2059,9 @@ it.each(['success', 'wrong-owner', 'route-changed'])(
         body: {
           host: { id: reads === 2 && mode === 'wrong-owner' ? 'b' : 'a', name: 'Studio' },
           devices: [],
-          privateRoutes: [{ id: 'quick', origin: active, state: 'connected' }],
+          privateRoutes: [
+            { id: 'quick', revision: 'quick-revision', origin: active, state: 'connected' },
+          ],
         },
       };
     });
@@ -1661,6 +2072,7 @@ it.each(['success', 'wrong-owner', 'route-changed'])(
         hostId: 'a',
         kind: 'private-tunnel',
         routeId: 'quick',
+        expectedRevision: 'quick-revision',
         confirm: true,
         handover: alternate,
       },

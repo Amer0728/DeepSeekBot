@@ -98,7 +98,7 @@ export interface ManagedHost {
   name: string;
   devices: { id: string; name: string; revoked: boolean; current: boolean }[];
   stops: StopKind[];
-  privateRoutes: { id: 'quick' | 'custom'; origin: string; state: string }[];
+  privateRoutes: { id: 'quick' | 'custom'; origin: string; state: string; revision?: string }[];
   accountState: string;
   lanState: string;
   lanPort?: number;
@@ -154,6 +154,9 @@ async function inspect(
           id: route.id,
           origin: typeof route.origin === 'string' ? address(route.origin) : '',
           state: route.state,
+          ...(typeof route.revision === 'string' && route.revision.length
+            ? { revision: route.revision }
+            : {}),
         });
     }
   }
@@ -174,6 +177,7 @@ export interface ConnectionPlan {
   hostId: string;
   disconnects: boolean;
   alternatives: string[];
+  expectedRevision?: string;
 }
 
 function affectsRoute(operation: ConnectionMutation, status: ManagedHost, route: string): boolean {
@@ -218,10 +222,20 @@ function operationPlan(
   status: ManagedHost,
   operation: ConnectionMutation,
 ): ConnectionPlan {
+  const expectedRevision =
+    operation.action === 'stop-route' && operation.kind === 'private-tunnel'
+      ? status.privateRoutes.find((entry) => entry.id === operation.routeId)?.revision
+      : undefined;
+  if (operation.action === 'stop-route' && operation.kind === 'private-tunnel') {
+    if (!expectedRevision) throw new AppearanceError('connection-route-revision-required');
+    if (operation.expectedRevision !== undefined && operation.expectedRevision !== expectedRevision)
+      throw new AppearanceError('connection-route-changed');
+  }
   const selfRevocation =
     operation.action === 'revoke-device' && operation.deviceId === remote.host.deviceId;
   return {
     hostId: remote.host.hostId,
+    ...(expectedRevision === undefined ? {} : { expectedRevision }),
     disconnects:
       selfRevocation || affectsRoute(operation, status, remote.snapshot.connection.route),
     alternatives: selfRevocation
@@ -247,7 +261,11 @@ function operationCompleted(status: ManagedHost, operation: ConnectionMutation):
   if (operation.action === 'sign-out') return status.accountState === 'signed-out';
   if (operation.kind === 'lan') return status.lanState === 'off';
   return status.privateRoutes.some(
-    (entry) => entry.id === operation.routeId && entry.state === 'off',
+    (entry) =>
+      operation.expectedRevision !== undefined &&
+      entry.id === operation.routeId &&
+      entry.revision === operation.expectedRevision &&
+      entry.state === 'off',
   );
 }
 
@@ -264,7 +282,11 @@ function operationAcknowledged(raw: unknown, operation: ConnectionMutation): boo
   if (operation.action === 'sign-out') return body.state === 'signed-out';
   if (operation.kind === 'lan') return body.state === 'off';
   return (
-    body.ok === true && object(body.status).state === 'off' && body.routeId === operation.routeId
+    operation.expectedRevision !== undefined &&
+    body.expectedRevision === operation.expectedRevision &&
+    body.ok === true &&
+    object(body.status).state === 'off' &&
+    body.routeId === operation.routeId
   );
 }
 
@@ -477,6 +499,17 @@ async function executeConnections(
   if (!currentRemote) throw new AppearanceError('connection-host-changed');
   const plan = operationPlan(currentRemote, status, operation);
   if (input.action === 'plan-operation') return plan;
+  const validateRevision = (current: ManagedHost) => {
+    if (operation.action !== 'stop-route' || operation.kind !== 'private-tunnel') return;
+    if (!operation.expectedRevision)
+      throw new AppearanceError('connection-route-revision-required');
+    if (
+      current.privateRoutes.find((entry) => entry.id === operation.routeId)?.revision !==
+      operation.expectedRevision
+    )
+      throw new AppearanceError('connection-route-changed');
+  };
+  validateRevision(status);
   if (input.confirm !== true) throw new AppearanceError('connection-confirmation-required');
   let handedOver: string | undefined;
   if (plan.disconnects) {
@@ -496,6 +529,7 @@ async function executeConnections(
       const refreshed = await inspect(client, remote, request.signal);
       status = refreshed;
       validateOperation(operation, refreshed);
+      validateRevision(refreshed);
       const active = client.getSnapshot().connection;
       if (
         active.status !== 'connected' ||
@@ -531,7 +565,12 @@ async function executeConnections(
     body =
       operation.kind === 'lan'
         ? { action: 'disable', confirm: true }
-        : { action: 'stop', routeId: operation.routeId, confirm: true };
+        : {
+            action: 'stop',
+            routeId: operation.routeId,
+            expectedRevision: operation.expectedRevision,
+            confirm: true,
+          };
   } else {
     path = '/api/botharness/devices/connect';
     body = { action: 'sign-out', confirm: true };
@@ -586,6 +625,7 @@ async function executeConnections(
         'confirm-required',
         'private-route-id-required',
         'private-route-not-found',
+        'private-route-changed',
         'lan-action-invalid',
       ].includes(String(object(result.body).code))
     )

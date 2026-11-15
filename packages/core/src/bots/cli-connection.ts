@@ -9,7 +9,7 @@ export const CONNECTION_COMMANDS = [
   {
     command: 'connection-host',
     description:
-      '<host-id> inspect/read-operation/read-previous-operation/remove/revoke-device/stop-route/sign-out/test-route/select-route on --client-id; plan-* previews writes; mutations require --confirm; self-disconnection requires --handover <origin> or --confirm-disconnect',
+      '<host-id> inspect/read-operation/read-previous-operation/remove/revoke-device/stop-route/sign-out/test-route/select-route on --client-id; plan-* previews writes; mutations require --confirm; private stop requires --expected-route-revision from plan-stop-route; self-disconnection requires --handover <origin> or --confirm-disconnect',
   },
   { command: 'connection-clients', description: 'list online Clients for Remote Host connection' },
   {
@@ -31,6 +31,7 @@ export async function runConnectionCommand(
     'confirm-disconnect'?: boolean;
     handover?: string;
     'connection-route-id'?: string;
+    'expected-route-revision'?: string;
   },
   io: { readStdin?: () => Promise<string> },
   connect: () => Promise<{
@@ -68,6 +69,17 @@ export async function runConnectionCommand(
     const extra = ['revoke-device', 'stop-route', 'test-route', 'select-route'].includes(
       action ?? '',
     );
+    const expectedRevision = values['expected-route-revision'];
+    const conditionalStop = action === 'stop-route' && argument === 'private-tunnel' && !planning;
+    if (
+      (conditionalStop && !expectedRevision) ||
+      (expectedRevision !== undefined &&
+        (!conditionalStop || !expectedRevision.length || expectedRevision.length > 200))
+    )
+      throw new CliLiveError(
+        'usage',
+        'Private stop requires --expected-route-revision from plan-stop-route.',
+      );
     if (
       !values['client-id'] ||
       values['connection-id'] ||
@@ -102,6 +114,7 @@ export async function runConnectionCommand(
         ? {
             kind: argument,
             ...(values['connection-route-id'] ? { routeId: values['connection-route-id'] } : {}),
+            ...(expectedRevision === undefined ? {} : { expectedRevision }),
           }
         : {}),
     };

@@ -639,6 +639,7 @@ interface LiveValues
   'confirm-disconnect'?: boolean;
   handover?: string;
   'connection-route-id'?: string;
+  'expected-route-revision'?: string;
   fingerprint?: string;
   'remote-host-id'?: string;
   'host-id'?: string;
@@ -1060,6 +1061,9 @@ export async function runLiveCli(
         ...(values['connection-route-id'] === undefined
           ? {}
           : { 'connection-route-id': values['connection-route-id'] }),
+        ...(values['expected-route-revision'] === undefined
+          ? {}
+          : { 'expected-route-revision': values['expected-route-revision'] }),
       },
       io,
       () => connectLiveHost(values, io, AbortSignal.timeout(timeoutMs(values.timeout))),

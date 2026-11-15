@@ -62,6 +62,7 @@ function HostDetailsSession({
     deviceId?: string;
     kind?: string;
     routeId?: string;
+    expectedRevision?: string;
     label: string;
   }>();
   const [plan, setPlan] = useState<ConnectionPlan>();
@@ -293,16 +294,24 @@ function HostDetailsSession({
         ))}
       {[
         ...(managed?.stops.includes('lan')
-          ? [{ kind: 'lan', routeId: undefined, label: t('connections.lan') }]
+          ? [
+              {
+                kind: 'lan',
+                routeId: undefined,
+                expectedRevision: undefined,
+                label: t('connections.lan'),
+              },
+            ]
           : []),
         ...(managed?.privateRoutes
           .filter((route) => route.state !== 'off')
           .map((route) => ({
             kind: 'private-tunnel',
             routeId: route.id,
+            expectedRevision: route.revision,
             label: route.origin || route.id,
           })) ?? []),
-      ].map(({ kind, routeId, label }) => (
+      ].map(({ kind, routeId, expectedRevision, label }) => (
         <SettingsRow
           key={`${kind}-${routeId ?? ''}`}
           title={label}
@@ -316,6 +325,7 @@ function HostDetailsSession({
                   action: 'stop-route',
                   kind,
                   ...(routeId === undefined ? {} : { routeId }),
+                  ...(expectedRevision === undefined ? {} : { expectedRevision }),
                   label,
                 })
               }
@@ -389,6 +399,9 @@ function HostDetailsSession({
               void perform({
                 ...confirm,
                 confirm: true,
+                ...(plan?.expectedRevision === undefined
+                  ? {}
+                  : { expectedRevision: plan.expectedRevision }),
                 ...(plan?.disconnects
                   ? handover
                     ? { handover }

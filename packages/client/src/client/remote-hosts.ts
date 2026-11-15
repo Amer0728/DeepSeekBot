@@ -240,7 +240,7 @@ function operationIndex(storage: HostStorage | undefined) {
       typeof value !== 'object' ||
       value === null ||
       !('version' in value) ||
-      value.version !== 2 ||
+      (value.version !== 2 && value.version !== 3) ||
       !('entries' in value)
     )
       throw new Error('connection-operation-storage-unavailable');
@@ -275,7 +275,7 @@ function operationIndex(storage: HostStorage | undefined) {
 function writeOperationIndex(storage: HostStorage, index: ReturnType<typeof operationIndex>): void {
   storage.setItem(
     CONNECTION_OPERATIONS_INDEX,
-    JSON.stringify(index.length ? { version: 2, entries: index } : []),
+    JSON.stringify(index.length ? { version: 3, entries: index } : []),
   );
 }
 
