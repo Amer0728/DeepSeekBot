@@ -29,6 +29,7 @@ const copyBase = z.object({ stage: z.string(), identity: memoryProofSchema });
 const copySchema = z.union([
   copyBase.extend({ phase: z.literal('copying') }),
   copyBase.extend({ phase: z.enum(['ready', 'retiring']), digest: z.string() }),
+  copyBase.extend({ phase: z.literal('rolling-back'), target: z.string() }),
 ]);
 export const relocationProofSchema = memoryProofSchema.extend({ copy: copySchema.optional() });
 export type RelocationProof = z.infer<typeof relocationProofSchema>;
@@ -89,6 +90,7 @@ export function prepareMemoryCopy(
   proof: RelocationProof,
 ): RelocationProof {
   let copy = proof.copy;
+  if (copy?.phase === 'rolling-back') throw new Error('space-memory-copy-incomplete');
   if (copy) validateStage(copy.stage, source, target);
   if (!copy || copy.phase === 'copying') {
     sameIdentity(source, proof);
@@ -138,7 +140,7 @@ export function retireMemoryCopy(
   source: string,
   proof: RelocationProof,
 ): void {
-  if (!proof.copy || proof.copy.phase === 'copying')
+  if (!proof.copy || (proof.copy.phase !== 'ready' && proof.copy.phase !== 'retiring'))
     throw new Error('space-memory-copy-incomplete');
   if (proof.copy.phase === 'ready') {
     if (existsSync(source) && digestTree(source) !== proof.copy.digest)
@@ -159,19 +161,32 @@ export function rollbackMemoryCopy(
   target: string,
   proof: RelocationProof,
 ): void {
-  const copy = proof.copy;
+  let copy = proof.copy;
   if (!copy || copy.phase === 'retiring') throw new Error('space-memory-copy-not-rollbackable');
   validateStage(copy.stage, source, target);
-  sameIdentity(source, proof);
-  if (copy.phase === 'ready' && digestTree(source) !== copy.digest)
-    throw new Error('space-memory-copy-changed');
-  for (const path of [target, copy.stage]) {
-    if (!existsSync(path)) continue;
+  if (copy.phase !== 'rolling-back') {
+    sameIdentity(source, proof);
+    if (copy.phase === 'ready' && digestTree(source) !== copy.digest)
+      throw new Error('space-memory-copy-changed');
+    const paths = [target, copy.stage].filter((path) => lstatSync(path, { throwIfNoEntry: false }));
+    if (paths.length > 1) throw new Error('space-memory-target-exists');
+    const path = paths[0];
+    if (path === undefined) {
+      journal.remove();
+      return;
+    }
     sameIdentity(path, copy.identity, copy.phase === 'copying');
     if (copy.phase === 'copying' && path === target) throw new Error('space-memory-target-exists');
     if (copy.phase === 'ready' && digestTree(path) !== copy.digest)
       throw new Error('space-memory-copy-changed');
-    rmSync(path, { recursive: true });
+    copy = { phase: 'rolling-back', stage: copy.stage, identity: copy.identity, target: path };
+  }
+  if (copy.target !== target && copy.target !== copy.stage)
+    throw new Error('space-memory-target-unsafe');
+  if (lstatSync(copy.target, { throwIfNoEntry: false })) {
+    sameIdentity(copy.target, copy.identity, true);
+    journal.save({ ...proof, copy });
+    rmSync(copy.target, { recursive: true });
   }
   journal.remove();
 }

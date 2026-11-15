@@ -1,6 +1,7 @@
 import { describe, expect, it, afterEach, vi } from 'vitest';
+import { z } from 'zod';
 import * as fs from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createTempRoot } from './helpers.js';
 import { createTestRegistry } from './registry-fixture.js';
@@ -23,6 +24,7 @@ import {
 import { WorkspaceSpaces } from '../src/workspaces/spaces.js';
 import { defaultSpaceMemoryPath } from '../src/workspaces/space-memory.js';
 import { OWNER_HUMAN_CONTEXT as owner, humanContext } from '../src/humans/context.js';
+import { relocationProofSchema } from '../src/workspaces/space-memory-copy.js';
 
 vi.mock('node:fs', async (original) => {
   const real = await original<typeof import('node:fs')>();
@@ -150,6 +152,90 @@ async function formerOwnerMemory(f: ReturnType<typeof fixture>) {
 }
 
 describe('M6 durable filesystem transactions', () => {
+  it.each(['target', 'stage', 'replacement'])(
+    'resumes interrupted rollback removal of the recorded %s directory only',
+    async (where) => {
+      const f = fixture();
+      const memory = await formerOwnerMemory(f);
+      const sourceProof = memoryOwnership(memory.source);
+      const transfer = prepareSpaceTransfer(f.db, f.home, owner.humanId, 'bob', ['former-owner']);
+      const readCopy = (db: typeof f.db) => {
+        const body = db.read(
+          (connection) =>
+            connection
+              .prepare('SELECT moves_json FROM workspace_file_transfers WHERE human_id = ?')
+              .get(owner.humanId)?.moves_json,
+        );
+        const state = z
+          .object({
+            moves: z.array(
+              z.object({ source: z.string(), memory: relocationProofSchema.optional() }),
+            ),
+          })
+          .parse(JSON.parse(String(body)));
+        const copy = state.moves.find((move) => move.source === memory.source)?.memory?.copy;
+        if (!copy) throw new Error('Missing Memory copy journal');
+        return copy;
+      };
+      const copy = readCopy(f.db);
+      const removal = where === 'stage' ? copy.stage : memory.target;
+      if (where === 'stage') real.renameSync(memory.target, removal);
+      let interrupted = false;
+      vi.mocked(fs.rmSync).mockImplementation((path, options) => {
+        if (String(path) === removal && !interrupted) {
+          interrupted = true;
+          real.rmSync(join(removal, '.git'), { recursive: true });
+          throw new Error('rollback removal interrupted');
+        }
+        real.rmSync(path, options);
+      });
+      expect(() => transfer.rollback()).toThrow('rollback removal interrupted');
+      expect(readCopy(f.db).phase).toBe('rolling-back');
+      expect(fs.existsSync(join(removal, '.git'))).toBe(false);
+      fs.writeFileSync(join(memory.source, 'after-rollback-intent'), 'new authoritative data');
+      const saved = join(dirname(removal), 'saved-partial-copy');
+      const unrelated = join(dirname(removal), 'unrelated-directory');
+      if (where === 'replacement') {
+        real.renameSync(removal, saved);
+        fs.mkdirSync(removal);
+        fs.writeFileSync(join(removal, 'keep'), 'unrelated data');
+      }
+      f.database.close();
+      const reopened = mount(f.home);
+      const db = attachOperationalModule(reopened, 'rollback-removal-recovery');
+      if (where === 'replacement') {
+        expect(() => recoverSpaceTransfers(db)).toThrow('space-memory-ownership-invalid');
+        expect(fs.readFileSync(join(removal, 'keep'), 'utf8')).toBe('unrelated data');
+        real.renameSync(removal, unrelated);
+        real.renameSync(saved, removal);
+      }
+      recoverSpaceTransfers(db);
+      expect(fs.existsSync(removal)).toBe(false);
+      expect(fs.existsSync(memory.target)).toBe(false);
+      expect(fs.readFileSync(join(memory.source, 'uncommitted.txt'), 'utf8')).toBe(
+        'retained uncommitted Memory',
+      );
+      expect(fs.readFileSync(join(memory.source, 'after-rollback-intent'), 'utf8')).toBe(
+        'new authoritative data',
+      );
+      expect(memoryOwnership(memory.source)).toEqual(sourceProof);
+      expect(
+        execFileSync('git', ['-C', memory.source, 'rev-list', 'HEAD'], {
+          encoding: 'utf8',
+          windowsHide: true,
+        }).trim(),
+      ).toBe(memory.history);
+      expect(fs.readFileSync(join(f.home, 'spaces', owner.humanId, 'files/report'), 'utf8')).toBe(
+        'account file',
+      );
+      if (where === 'replacement')
+        expect(fs.readFileSync(join(unrelated, 'keep'), 'utf8')).toBe('unrelated data');
+      expect(
+        db.read((connection) => connection.prepare('SELECT * FROM workspace_file_transfers').all()),
+      ).toEqual([]);
+    },
+  );
+
   it.each(['move', 'erase'])(
     'continues committed cleanup after the recipient chooses to %s Memory',
     async (action) => {
