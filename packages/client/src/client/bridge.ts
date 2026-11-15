@@ -1368,7 +1368,9 @@ export function parseChannelMessage(value: unknown): ChannelMessage | undefined 
         (key) => typeof auto[key] !== 'string' || (auto[key] as string).length === 0,
       ) ||
       typeof auto['input'] !== 'string' ||
-      (auto['outcome'] !== 'allowed' && auto['outcome'] !== 'rejected')
+      (auto['outcome'] !== 'allowed' &&
+        auto['outcome'] !== 'rejected' &&
+        auto['outcome'] !== 'ask-human')
     )
       return undefined;
     toolAutoApproval = {

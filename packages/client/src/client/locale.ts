@@ -4422,6 +4422,7 @@ export const zh = {
     '选一个模板后，审批员会先按模板替你回答此 Bot 的工具审批，拿不准的才发卡片给你。',
   'autoApproval.hintOn': '{description} 审批员按这个模板替你回答，拿不准的仍发卡片给你。',
   'autoApproval.allowed': '按「{template}」自动批准',
+  'autoApproval.askHuman': '「{template}」已转交你确认',
   'autoApproval.rejected': '按「{template}」自动拒绝',
   'autoApproval.tool': '工具：{tool}',
   'autoApproval.paused.consecutive':
@@ -10409,6 +10410,7 @@ My relationship with you, established lore and topics to avoid: [fill in].
   'autoApproval.hintOn':
     '{description} The Approval Reviewer answers by this template; calls it is unsure about still come to you as cards.',
   'autoApproval.allowed': 'auto-approved by {template}',
+  'autoApproval.askHuman': '{template} sent this to you',
   'autoApproval.rejected': 'auto-rejected by {template}',
   'autoApproval.tool': 'Tool: {tool}',
   'autoApproval.paused.consecutive':

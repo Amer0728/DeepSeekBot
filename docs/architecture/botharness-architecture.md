@@ -1727,3 +1727,5 @@ is constant-time; input-sensitive resolution and legacy text checks remain local
 assert zero Reviewer calls for deterministic Full Access hits and retained management prompting;
 existing saved-rule/device/Grant tests protect the execution fences. This is not an end-to-end
 latency measurement. Runtime and screenshot qualification are recorded separately in the PR.
+
+E3 的 Human 审批卡在允许这次、始终允许或拒绝后保留完整请求，操作区显示禁用的已选结果，详情的手动开合状态不变。Reviewer 的显式 `ask-human` 紧凑结果先写入同一 ChannelStore，再生成 Human 请求；历史拒绝记录不改变两结果 Reviewer 契约。移动端从既有消息投影已验证的只读内容，历史卡不逐卡查询 Host；缓存内容不能授权，缺失或已清除的内容如实显示不可用。当前契约见[审批策略](bot-approval-policy.zh.md)。
