@@ -26,7 +26,7 @@ import { ConfirmDialog, DangerTextButton, FormDialog } from './ds/form-dialog.js
 import { Note } from './ds/note.js';
 import { Select } from './ds/select.js';
 import { SettingsRow, SettingsSection } from './ds/settings-row.js';
-import { space, text } from './ds/tokens.stylex.js';
+import { border, color, space, text } from './ds/tokens.stylex.js';
 import { ChannelSidebarIcon } from './channel-sidebar-icon.js';
 import { SidebarCardList, SidebarCardRow } from './sidebar-card.js';
 import type { BotHarnessTranslate } from './locale.js';
@@ -56,6 +56,10 @@ const styles = stylex.create({
     borderRadius: 0,
     backgroundColor: 'transparent',
     fontWeight: text.regular,
+    outlineStyle: 'solid',
+    outlineWidth: border.focus,
+    outlineColor: { default: 'transparent', ':focus-within': color.fg },
+    outlineOffset: -2,
   },
 });
 
