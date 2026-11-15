@@ -387,6 +387,7 @@ const RequestCard = memo(function RequestCard({
     return (
       <ApprovalCard
         port={approval}
+        contentCleared={message.source?.message.contentPurge !== undefined}
         {...(card.approvalContent === undefined ? {} : { content: card.approvalContent })}
         {...subject}
         {...(card.command === undefined ? {} : { command: card.command })}

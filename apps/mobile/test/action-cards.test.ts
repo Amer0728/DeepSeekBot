@@ -212,6 +212,64 @@ describe('Tool approval card in the DM', () => {
     },
   );
 
+  it('removes retained approval details when canonical content is cleared', async () => {
+    const target = connect(host());
+    const port = approvalPort(target);
+    const view = await render(createElement(ApprovalCard, { port, subject: 'bash' }));
+    await press(button(view, t.details));
+    await press(button(view, t.reject));
+    expect(view.textContent).toContain('ls /tmp/mobile-fixture');
+    await rerender(
+      createElement(ApprovalCard, {
+        port,
+        contentCleared: true,
+        resolution: { kind: 'tool-approval', outcome: 'rejected' },
+      }),
+    );
+    expect(view.textContent).toContain(t.cardContentUnavailable);
+    expect(view.textContent).not.toContain('ls /tmp/mobile-fixture');
+    expect(view.textContent).not.toContain('/home/qa/');
+    expect(view.querySelector('[data-testid="approval-allow-once"]')).toBeNull();
+  });
+
+  it.each(['load', 'decide'] as const)(
+    'does not restore cleared approval details after a late %s response',
+    async (operation) => {
+      const target = connect(host());
+      const request = await loadApproval(target, approval);
+      let completeLoad: ((value: typeof request) => void) | undefined;
+      let completeDecision: ((value: 'accepted') => void) | undefined;
+      const load = vi.fn(() =>
+        operation === 'load'
+          ? new Promise<typeof request>((resolve) => {
+              completeLoad = resolve;
+            })
+          : Promise.resolve(request),
+      );
+      const decide = vi.fn(
+        () =>
+          new Promise<'accepted'>((resolve) => {
+            completeDecision = resolve;
+          }),
+      );
+      const onSettled = vi.fn();
+      const port = { load, decide };
+      const view = await render(createElement(ApprovalCard, { port, onSettled, subject: 'bash' }));
+      if (operation === 'decide') await press(button(view, t.reject));
+      await rerender(createElement(ApprovalCard, { port, onSettled, contentCleared: true }));
+      await act(async () => {
+        if (operation === 'load') completeLoad?.(request);
+        else completeDecision?.('accepted');
+      });
+      await settle();
+      expect(view.textContent).toContain(t.cardContentUnavailable);
+      expect(view.textContent).not.toContain('ls /tmp/mobile-fixture');
+      expect(view.textContent).not.toContain('/home/qa/');
+      expect(onSettled).not.toHaveBeenCalled();
+      expect(load).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('says so when another device decided while the card was open', async () => {
     const target = connect(host());
     const view = await render(card(target));

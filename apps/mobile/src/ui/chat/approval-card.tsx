@@ -97,34 +97,42 @@ function settledLine(
   return state(phase.outcome, true);
 }
 
-export function ApprovalCard({
-  port,
-  subject,
-  command,
-  content,
-  resolution,
-  decidedHere = false,
-  focused = false,
-  wide = false,
-  onSettled,
-}: {
+interface ApprovalCardProps {
   port: ApprovalCardPort;
   subject?: string;
   command?: string;
   content?: ApprovalContent;
+  contentCleared?: boolean;
   resolution?: Extract<CardResolution, { kind: 'tool-approval' }>;
   decidedHere?: boolean;
   focused?: boolean;
   group?: BubbleGroup;
   wide?: boolean;
   onSettled?(result: DecisionResult): void;
-}) {
+}
+
+export function ApprovalCard(props: ApprovalCardProps) {
+  return <ApprovalCardContent key={props.contentCleared ? 'cleared' : 'available'} {...props} />;
+}
+
+function ApprovalCardContent({
+  port,
+  subject,
+  command,
+  content,
+  contentCleared = false,
+  resolution,
+  decidedHere = false,
+  focused = false,
+  wide = false,
+  onSettled,
+}: ApprovalCardProps) {
   const t = useStrings();
-  const known = useRef(resolution !== undefined);
+  const known = useRef(contentCleared || resolution !== undefined);
   const current = useRef({ port, pending: false, active: false });
   if (current.current.port !== port) {
     current.current = { port, pending: false, active: false };
-    known.current = resolution !== undefined;
+    known.current = contentCleared || resolution !== undefined;
   }
   const submission = current.current;
   const [phase, setPhase] = useState<Phase>(
@@ -132,6 +140,7 @@ export function ApprovalCard({
   );
 
   const load = useCallback(async () => {
+    if (contentCleared) return;
     setPhase({ kind: 'loading' });
     try {
       const request = await port.load();
@@ -152,7 +161,7 @@ export function ApprovalCard({
       if (!submission.active || current.current !== submission) return;
       setPhase({ kind: 'failed' });
     }
-  }, [port, submission]);
+  }, [contentCleared, port, submission]);
 
   const mount = useMounted<ViewInstance>(() => {
     submission.active = true;
@@ -163,11 +172,11 @@ export function ApprovalCard({
   }, [load, submission]);
 
   const live = phase.kind === 'pending' || phase.kind === 'settled' ? phase.request : undefined;
-  const request = live ?? content;
-  const tool = request?.toolName ?? subject ?? '';
+  const request = contentCleared ? undefined : (live ?? content);
+  const tool = contentCleared ? '' : (request?.toolName ?? subject ?? '');
   const label =
     request === undefined
-      ? command === undefined
+      ? contentCleared || command === undefined
         ? tool
         : briefCommand(command)
       : requestLabel(request);
@@ -194,7 +203,7 @@ export function ApprovalCard({
               <CardNote live>{line.text}</CardNote>
             </View>
           )}
-          {resolution !== undefined ? null : (
+          {contentCleared || resolution !== undefined ? null : (
             <CardButtons>
               <Button symbol="refresh" label={t.tryAgain} onPress={() => void load()} />
             </CardButtons>
