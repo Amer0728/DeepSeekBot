@@ -1,6 +1,8 @@
 import { OWNER_HUMAN_CONTEXT } from '../src/humans/context.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import nativeFs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -119,6 +121,33 @@ describe('Approval Template library', () => {
       JSON.stringify({ template: 'cautious', padding: atLimit }),
     );
     expect(library.global()).toEqual({ kind: 'invalid' });
+  });
+
+  it('caps actual file I/O and closes the descriptor after rejecting external growth', () => {
+    const dir = tempDir();
+    const library = createApprovalTemplateLibrary(dir);
+    const path = join(dir, 'external.md');
+    writeFileSync(path, 'x'.repeat(65_559));
+    const opened = vi.spyOn(nativeFs, 'openSync');
+    const read = vi.spyOn(nativeFs, 'readSync');
+    const closed = vi.spyOn(nativeFs, 'closeSync');
+    syncBuiltinESMExports();
+    try {
+      expect(library.get('external') === undefined).toBe(true);
+      expect(opened).toHaveBeenCalledExactlyOnceWith(path, 'r');
+      const descriptor = opened.mock.results[0]!.value;
+      expect(read.mock.calls.length).toBeGreaterThan(0);
+      expect(read.mock.calls.every((call) => call[0] === descriptor)).toBe(true);
+      expect(read.mock.results.reduce((total, result) => total + Number(result.value), 0)).toBe(
+        APPROVAL_TEMPLATE_TEXT_LIMIT + 1,
+      );
+      expect(closed).toHaveBeenCalledExactlyOnceWith(descriptor);
+    } finally {
+      opened.mockRestore();
+      read.mockRestore();
+      closed.mockRestore();
+      syncBuiltinESMExports();
+    }
   });
 
   it('refuses bad names, empty text, unknown templates and changes to built-ins', () => {
