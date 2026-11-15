@@ -67,7 +67,8 @@ export function ApprovalTemplateLibrarySettings({
   store: ClientStore;
   t: BotHarnessTranslate;
 }): ReactElement {
-  const [globalDefault, setGlobalDefault] = useState<string | null>(null);
+  const [globalDefault, setGlobalDefault] = useState<string | null>();
+  const [globalError, setGlobalError] = useState(false);
   const [templates, setTemplates] = useState<ApprovalTemplateView[]>();
   const [loadError, setLoadError] = useState<string>();
   const [editor, setEditor] = useState<Editor>();
@@ -80,6 +81,7 @@ export function ApprovalTemplateLibrarySettings({
     const next = await loadApprovalTemplates(call);
     setTemplates(next.templates);
     setGlobalDefault(next.globalDefault ?? null);
+    setGlobalError(false);
     setLoadError(undefined);
   };
   const mount = useMountedResource<HTMLDivElement>(() => {
@@ -98,6 +100,24 @@ export function ApprovalTemplateLibrarySettings({
       live = false;
     };
   }, [call]);
+
+  const updateGlobal = (
+    action: { kind: 'reload' } | { kind: 'select'; name: string | null },
+  ): void => {
+    if (busy) return;
+    setBusy(true);
+    setGlobalError(false);
+    const operation =
+      action.kind === 'reload'
+        ? reload()
+        : setGlobalApprovalTemplate(call, action.name).then(reload);
+    void operation
+      .catch(() => {
+        setGlobalDefault(undefined);
+        setGlobalError(true);
+      })
+      .finally(() => setBusy(false));
+  };
 
   const close = (): void => {
     setEditor(undefined);
@@ -269,22 +289,54 @@ export function ApprovalTemplateLibrarySettings({
         {templates === undefined ? null : (
           <SettingsRow
             title={t('autoApproval.globalDefault')}
+            description={
+              globalError ? (
+                <Note tone="danger">{t('autoApproval.globalUnknown')}</Note>
+              ) : globalDefault !== undefined &&
+                globalDefault !== null &&
+                !list.some((template) => template.name === globalDefault) ? (
+                t('autoApproval.unavailable')
+              ) : undefined
+            }
             control={
-              <Select
-                label={t('autoApproval.globalDefault')}
-                value={globalDefault ?? 'off'}
-                disabled={busy || templates === undefined}
-                options={[
-                  { value: 'off', label: t('autoApproval.off') },
-                  ...list.map((template) => ({
-                    value: template.name,
-                    label: templateTitle(t, template.name, template.title),
-                  })),
-                ]}
-                onChange={(value) =>
-                  run(() => setGlobalApprovalTemplate(call, value === 'off' ? null : value))
-                }
-              />
+              <>
+                <Select
+                  label={t('autoApproval.globalDefault')}
+                  value={globalDefault === undefined ? '@unknown' : (globalDefault ?? 'off')}
+                  disabled={busy || globalDefault === undefined}
+                  options={[
+                    ...(globalDefault === undefined
+                      ? [{ value: '@unknown', label: t('autoApproval.unreadable') }]
+                      : globalDefault !== null &&
+                          !list.some((template) => template.name === globalDefault)
+                        ? [
+                            {
+                              value: globalDefault,
+                              label: t('autoApproval.templateMissing', { name: globalDefault }),
+                            },
+                          ]
+                        : []),
+                    { value: 'off', label: t('autoApproval.off') },
+                    ...list.map((template) => ({
+                      value: template.name,
+                      label: templateTitle(t, template.name, template.title),
+                    })),
+                  ]}
+                  onChange={(value) =>
+                    updateGlobal({ kind: 'select', name: value === 'off' ? null : value })
+                  }
+                />
+                {globalError ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => updateGlobal({ kind: 'reload' })}
+                  >
+                    {t('autoApproval.reload')}
+                  </Button>
+                ) : null}
+              </>
             }
           />
         )}

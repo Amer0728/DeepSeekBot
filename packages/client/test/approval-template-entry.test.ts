@@ -70,3 +70,23 @@ it('still displays Off after a successful explicit empty-selection read', async 
   expect(choice?.textContent).toContain(t('autoApproval.off'));
   expect(host.textContent).toContain(t('autoApproval.hintOff'));
 });
+
+it('preserves a missing specific template name in the selector', async () => {
+  const actions = {
+    approvalTemplates: async () => ({
+      templates: [],
+      selected: 'night-shift',
+      globalDefault: null,
+    }),
+    setBotApprovalTemplate: vi.fn(async () => {}),
+  };
+  await act(async () =>
+    root.render(
+      createElement(ApprovalTemplateEntry, { botSlug: 'ada', actions, disabled: false, t }),
+    ),
+  );
+  const choice = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]');
+  expect(choice?.textContent).toContain('night-shift');
+  expect(choice?.textContent).toContain('不可用');
+  expect(actions.setBotApprovalTemplate).not.toHaveBeenCalled();
+});

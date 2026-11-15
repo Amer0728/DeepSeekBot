@@ -176,6 +176,17 @@ export function ApprovalTemplateEntry({
                       },
                     ]
                   : []),
+                ...(state.loaded &&
+                state.selected !== null &&
+                state.selected !== INHERIT &&
+                !state.templates.some((template) => template.name === state.selected)
+                  ? [
+                      {
+                        value: state.selected,
+                        label: t('autoApproval.templateMissing', { name: state.selected }),
+                      },
+                    ]
+                  : []),
                 { value: INHERIT, label: t('autoApproval.inherit') },
                 { value: OFF, label: t('autoApproval.off') },
                 ...state.templates.map((template) => ({
