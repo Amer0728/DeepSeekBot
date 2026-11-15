@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { cliEffects, brokerCliEffects } from '../src/bots/cli-effects.js';
 import {
   decideToolApproval,
   toolEffects,
@@ -402,4 +403,161 @@ it('shares typed native CLI effects while keeping unknown command provenance opa
       argv: ['marketplace-upload', 'fixture-bot', '--out=fixture.json'],
     }),
   ).toMatchObject({ changes: 'irreversible', reach: 'external' });
+});
+
+it.each([
+  {
+    argv: ['device-notifications', '--device-file', 'paired.json', '--delivery', 'push'],
+    expected: {
+      changes: 'reversible',
+      reach: 'external',
+      authority: 'management',
+      personalData: true,
+    },
+  },
+  {
+    argv: [
+      'device-notifications',
+      '--device-file',
+      'paired.json',
+      '--delivery',
+      'push',
+      '--out',
+      'result.json',
+    ],
+    expected: {
+      changes: 'reversible',
+      reach: 'external',
+      authority: 'management',
+      personalData: true,
+    },
+  },
+  {
+    argv: ['device-notifications', '--device-file', 'paired.json', '--preferences-stdin'],
+    expected: {
+      changes: 'reversible',
+      reach: 'external',
+      authority: 'management',
+      personalData: true,
+    },
+  },
+  {
+    argv: [
+      'device-notifications',
+      '--device-file',
+      'paired.json',
+      '--preferences-stdin',
+      '--out',
+      'result.json',
+    ],
+    expected: {
+      changes: 'reversible',
+      reach: 'external',
+      authority: 'management',
+      personalData: true,
+    },
+  },
+  {
+    argv: ['phone-notifications', '--device-file', 'paired.json', '--delivery', 'push'],
+    expected: {
+      changes: 'reversible',
+      reach: 'external',
+      authority: 'management',
+      personalData: true,
+    },
+  },
+  {
+    argv: [
+      'phone-notifications',
+      '--device-file',
+      'paired.json',
+      '--delivery',
+      'push',
+      '--out',
+      'result.json',
+    ],
+    expected: {
+      changes: 'reversible',
+      reach: 'external',
+      authority: 'management',
+      personalData: true,
+    },
+  },
+  {
+    argv: ['phone-notifications', '--device-file', 'paired.json', '--preferences-stdin'],
+    expected: {
+      changes: 'reversible',
+      reach: 'external',
+      authority: 'management',
+      personalData: true,
+    },
+  },
+  {
+    argv: [
+      'phone-notifications',
+      '--device-file',
+      'paired.json',
+      '--preferences-stdin',
+      '--out',
+      'result.json',
+    ],
+    expected: {
+      changes: 'reversible',
+      reach: 'external',
+      authority: 'management',
+      personalData: true,
+    },
+  },
+  {
+    argv: ['cloud', 'import', '--input-stdin'],
+    expected: {
+      changes: 'reversible',
+      reach: 'external',
+      authority: 'management',
+      secrets: true,
+      personalData: true,
+    },
+  },
+  {
+    argv: ['cloud', 'remove', '--input-stdin', '--confirm'],
+    expected: {
+      changes: 'irreversible',
+      reach: 'local',
+      authority: 'management',
+      secrets: true,
+      personalData: true,
+    },
+  },
+  {
+    argv: ['cloud', 'import', '--input-stdin', '--out', 'result.json'],
+    expected: {
+      changes: 'reversible',
+      reach: 'external',
+      authority: 'management',
+      secrets: true,
+      personalData: true,
+    },
+  },
+  {
+    argv: ['cloud', 'remove', '--input-stdin', '--out', 'result.json', '--confirm'],
+    expected: {
+      changes: 'irreversible',
+      reach: 'workspace',
+      authority: 'management',
+      secrets: true,
+      personalData: true,
+    },
+  },
+  {
+    argv: ['share-draft-export', 'ada'],
+    expected: {
+      changes: 'reversible',
+      reach: 'workspace',
+      personalData: true,
+    },
+  },
+])('preserves real notification/cloud/workspace effects for $argv', ({ argv, expected }) => {
+  expect(cliEffects(argv)).toEqual(expected);
+  expect(brokerCliEffects('deepseekbot ' + argv[0], { patch: { argv } })).toEqual(expected);
+  expect(toolEffects('deepseekbot_cli', { argv, stdin: '' })).toEqual(expected);
 });

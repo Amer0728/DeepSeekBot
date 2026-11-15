@@ -425,7 +425,7 @@ export const CLI_EFFECTS = {
   'settings-set': { effects: opaque, brokerRead: false },
   'share-draft-decide': { effects: write, brokerRead: false },
   'share-draft-discard': { effects: destructive, brokerRead: false },
-  'share-draft-export': { effects: write, brokerRead: false },
+  'share-draft-export': { effects: { ...write, reach: 'workspace' }, brokerRead: false },
   'share-draft-file': { effects: read, brokerRead: true },
   'share-draft-finish': { effects: write, brokerRead: false },
   'share-draft-show': { effects: read, brokerRead: true },
@@ -566,7 +566,15 @@ function familyEffects(
     case 'private-tunnel-enable':
       return { ...externalManagement, ...(values['token-stdin'] ? { secrets: true } : {}) };
     case 'cloud':
-      return action === 'list' ? read : action === 'policy' ? management : secretManagement;
+      return action === 'list'
+        ? read
+        : action === 'policy'
+          ? management
+          : action === 'import'
+            ? externalSecretManagement
+            : action === 'remove'
+              ? destructiveSecretManagement
+              : undefined;
     case 'approval-template':
       return action === 'list' || action === 'show'
         ? read
@@ -601,7 +609,7 @@ function familyEffects(
       return values['patch-stdin'] ? management : read;
     case 'phone-notifications':
     case 'device-notifications':
-      return values['preferences-stdin'] || values.delivery ? management : externalRead;
+      return values['preferences-stdin'] || values.delivery ? externalManagement : externalRead;
     case 'device-activity':
       return action === 'capability' ? externalRead : externalWrite;
     case 'onboarding':
