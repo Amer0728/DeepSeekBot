@@ -30,6 +30,7 @@ import {
   addPeopleErrorText,
   canAddPeople,
 } from '../src/client/channel-add-people.js';
+import { memberHumanName } from '../src/client/group-member-controls.js';
 import { en, zhTranslate } from '../src/client/locale.js';
 import type { TeamViewer } from '../src/client/team-bridge.js';
 import {
@@ -178,5 +179,15 @@ describe('Channel invitations client', () => {
       await act(async () => root.unmount());
       container.remove();
     }
+  });
+
+  it("names each person in the member list from the viewer's side", () => {
+    const owner = { humanId: 'local-human', displayName: 'Human' };
+    const alice = { humanId: 'h-alice', displayName: 'Alice' };
+    expect(memberHumanName(owner, 'local-human', zhTranslate)).toBe(
+      zhTranslate('channelActivity.human'),
+    );
+    expect(memberHumanName(owner, 'h-alice', zhTranslate)).toBe(zhTranslate('team.members.owner'));
+    expect(memberHumanName(alice, 'h-alice', zhTranslate)).toBe('Alice');
   });
 });
