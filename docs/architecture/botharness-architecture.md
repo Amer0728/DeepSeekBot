@@ -359,8 +359,8 @@ flowchart TD
   Start["Host starts"] --> Lease{"Acquire profile writer lease"}
   Lease -- "busy" --> ReadOnly["Fail closed<br/>read-only diagnostics"]
   Lease -- "owned" --> Open["Open botharness.db"]
-  Open --> Gen{"Schema generation supported?"}
-  Gen -- "newer / corrupt" --> Recovery["Recovery mode<br/>no operational writes or wakes"]
+  Open --> Gen{"Schema generation + ledger supported?"}
+  Gen -- "newer / divergent / corrupt" --> Recovery["Recovery mode<br/>no operational writes or wakes"]
   Gen -- "current" --> Integrity["Integrity checks"]
   Gen -- "older" --> Copy["Migrate isolated temp copy"]
   Copy --> Verify["Verify schema + integrity"]
@@ -374,6 +374,8 @@ flowchart TD
 ```
 
 一个 DSH profile 同时只允许一个 BotHarness writer。所有 module migration 合并成单调递增的 Schema Generation；迁移只在临时副本上完成，校验后原子替换。打开、迁移或页完整性检查失败时进入 recovery mode，不回退到 NDJSON、storage domain 或内存写入。外部工具留下的外键孤儿行不阻止挂载，只记录在诊断和启动日志中；迁移不得新增孤儿（ADR-0258）。
+
+Module migrations use stable ids in an append-only list; generation is computed from position. The Operational Database Owner writes `schema_migrations(generation, id)` alongside each staged migration and verifies the complete applied prefix on every open. Pre-ledger Profiles through generation 153 are backfilled once by the historical execution order. Divergent or unknown history fails with `upgrade-required` without repair. The committed id/body-hash snapshot protects merged migrations; append conflicts retain both entries in merge order ([ADR-0341](../adr/0341-named-schema-migrations-have-an-append-only-ledger.md), [workflow](../agents/schema-migrations.md)).
 
 ## 4 · Messaging 事务与外部副作用
 
