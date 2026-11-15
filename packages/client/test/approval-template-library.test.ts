@@ -232,3 +232,13 @@ it('identifies the selected source when independent templates have the same head
   await clickText('Shared heading · beta');
   expect(document.querySelector('textarea')?.value).toBe('# beta');
 });
+
+it('keeps the visible View action in accessible template names', async () => {
+  await render(async () => ({ ok: true, value: { templates, globalDefault: null } }));
+  const buttons = [...host.querySelectorAll<HTMLButtonElement>('[data-approval-template] button')];
+  expect(buttons).toHaveLength(2);
+  for (const button of buttons) {
+    expect(button.textContent).toBe(t('autoApproval.library.view'));
+    expect(button.getAttribute('aria-label')).toContain(button.textContent);
+  }
+});

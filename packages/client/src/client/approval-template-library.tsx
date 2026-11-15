@@ -574,7 +574,9 @@ export function ApprovalTemplateLibrarySettings({
                     size="sm"
                     aria-label={
                       template.builtIn
-                        ? templateTitle(t, template.name, template.title)
+                        ? t('autoApproval.library.view') +
+                          ' · ' +
+                          templateTitle(t, template.name, template.title)
                         : t('autoApproval.library.editTitle', {
                             title: templateTitle(t, template.name, template.title),
                           })
