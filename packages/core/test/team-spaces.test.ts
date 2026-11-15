@@ -9,9 +9,11 @@ import { FakeAgentHost } from './dsh-agent-host-fixture.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   existsSync,
+  lstatSync,
   linkSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   chmodSync,
@@ -38,6 +40,7 @@ import {
 } from '../src/workspaces/grant-native-tools.js';
 import { memoryOwnership } from '../src/bots/deletion.js';
 import { accountMemoryPath, relocateSpaceMemories } from '../src/workspaces/space-memory.js';
+import type { SpaceAudience } from '../src/workspaces/spaces.js';
 import {
   accountSpaceFiles,
   prepareSpaceTransfer,
@@ -98,18 +101,17 @@ function fixture(home = realpathSync(createTempRoot('m6-spaces-'))) {
 
 describe('M6 spaces and current authority', () => {
   it.each([false, true])(
-    'allows Owner-owned Bots to grant arbitrary native folders with Team enabled=%s',
+    'allows Owner-owned Bots to grant native and own account folders with Team enabled=%s',
     async (enabled) => {
       const f = fixture();
       f.db.transaction((db) =>
         db.prepare('UPDATE team_settings SET enabled = ?').run(Number(enabled)),
       );
       f.createBot(owner, 'owner-bot');
-      const shared = f.core.spaces.create(owner, 'Bob only', {
-        kind: 'members',
-        humanIds: ['bob'],
-      });
-      for (const path of [createTempRoot('owner-native-'), join(f.home, shared.spaceId, 'files')]) {
+      for (const path of [
+        createTempRoot('owner-native-'),
+        join(f.home, 'spaces', owner.humanId, 'files'),
+      ]) {
         const grant = await f.core.grants.create('owner-bot', f.workspace(path));
         expect(f.core.grants.requireActive('owner-bot', grant.id).workspacePath).toBe(
           realpathSync(path),
@@ -144,6 +146,117 @@ describe('M6 spaces and current authority', () => {
       });
     },
   );
+
+  it('contains Owner and manager Bots to shared audiences, including aliases and retained Grants after restart', async () => {
+    const f = fixture();
+    f.createBot(owner, 'owner-audience');
+    f.createBot(alice, 'alice-manager');
+    f.core.team.roles.set(owner, alice.humanId, ['admin']);
+    const held = f.core.team.roles.create(owner, 'Owner held', []).role.roleId;
+    const unheld = f.core.team.roles.create(owner, 'Owner unheld', []).role.roleId;
+    f.db.transaction((db) =>
+      db.prepare('INSERT INTO human_roles VALUES (?, ?)').run(owner.humanId, held),
+    );
+    const audiences: SpaceAudience[] = [
+      { kind: 'members', humanIds: [owner.humanId] },
+      { kind: 'roles', roleIds: [held] },
+      { kind: 'everyone' },
+      { kind: 'members', humanIds: [bob.humanId] },
+      { kind: 'roles', roleIds: [unheld] },
+    ];
+    const allowed: string[] = [];
+    const refused: { id: string; spaceId: string; path: string }[] = [];
+    for (const [index, audience] of audiences.entries()) {
+      const space = f.core.spaces.create(owner, 'Audience ' + index, audience);
+      const path = join(f.home, space.spaceId, 'files');
+      if (index < 3) {
+        const grant = await f.core.grants.create('owner-audience', space.spaceId);
+        expect(f.core.grants.requireActive('owner-audience', grant.id)).toEqual(grant);
+        allowed.push(grant.id);
+        continue;
+      }
+      const denial = { code: 'grant-outside-audience', details: { path, spaceId: space.spaceId } };
+      await expect(f.core.grants.create('owner-audience', space.spaceId)).rejects.toMatchObject(
+        denial,
+      );
+      await expect(f.core.grants.create('alice-manager', space.spaceId)).rejects.toMatchObject(
+        denial,
+      );
+      expect(() => f.core.spaces.assertPath('owner-audience', path)).toThrow(
+        'grant-outside-audience',
+      );
+      const source = join(path, 'secret');
+      writeFileSync(source, 'outside audience');
+      const alias = join(createTempRoot('owner-shared-alias-'), 'alias');
+      symlinkSync(path, alias, 'dir');
+      await expect(
+        f.core.grants.create('owner-audience', f.workspace(alias)),
+      ).rejects.toMatchObject(denial);
+      const hardlink = join(createTempRoot('owner-shared-hardlink-'), 'secret');
+      linkSync(source, hardlink);
+      expect(() => f.core.spaces.assertPath('owner-audience', hardlink)).toThrow(
+        'grant-outside-audience',
+      );
+      const id = 'legacy-owner-shared-' + index;
+      f.db.transaction((db) =>
+        db
+          .prepare(`INSERT INTO workspace_grants
+        (id,bot_slug,workspace_id,workspace_path,workspace_title,created_at,orchestrator_write,write_revision)
+        VALUES (?, 'owner-audience', ?, ?, 'Legacy', '2026-11-15', 1, 1)`)
+          .run(id, space.spaceId, path),
+      );
+      refused.push({ id, spaceId: space.spaceId, path });
+    }
+    f.core.schedules.close();
+    f.core.externalMessaging.close();
+    await f.core.runtime.close();
+    f.core.operationalDatabase.close();
+    cores.splice(cores.indexOf(f.core), 1);
+    const restarted = fixture(f.home);
+    for (const id of allowed)
+      expect(restarted.core.grants.requireActive('owner-audience', id).id).toBe(id);
+    for (const { id, path, spaceId } of refused) {
+      const retained = restarted.core.grants
+        .list('owner-audience')
+        .find((grant) => grant.id === id);
+      expect(retained).toBeDefined();
+      expect(retained?.revokedAt).toBeUndefined();
+      expect(() => restarted.core.grants.requireActive('owner-audience', id)).toThrowError(
+        expect.objectContaining({ code: 'grant-outside-audience', details: { path, spaceId } }),
+      );
+    }
+  });
+
+  it('preserves implicit Owner Memory access inside a shared folder without making it grantable', async () => {
+    const f = fixture();
+    const shared = f.core.spaces.create(owner, 'Custom Memory container', {
+      kind: 'members',
+      humanIds: [bob.humanId],
+    });
+    const slug = 'owner-shared-memory';
+    expect(
+      f.core.registry.create({
+        slug,
+        displayName: slug,
+        ownerHumanId: owner.humanId,
+        memoryLocation: join(f.home, shared.spaceId, 'files'),
+      }).ok,
+    ).toBe(true);
+    const memory = f.core.registry.memoryDirFor(slug)!;
+    const proof = memoryOwnership(memory);
+    const file = join(memory, 'private.txt');
+    writeFileSync(file, 'Owner private Memory');
+    linkSync(file, join(createTempRoot('owner-memory-alias-'), 'private.txt'));
+    expect(() => f.core.spaces.assertPath(slug, file)).not.toThrow();
+    expect(readFileSync(file, 'utf8')).toBe('Owner private Memory');
+    expect(memoryOwnership(memory)).toEqual(proof);
+    await expect(f.core.grants.create(slug, f.workspace(memory))).rejects.toMatchObject({
+      code: 'grant-protected-path',
+    });
+    await expect(f.core.grants.create(slug, shared.spaceId)).rejects.toMatchObject({
+      code: 'grant-protected-path',
+    });
+  });
 
   it('provisions one revocable read/write account Grant for a new member Bot, and never restores a revoked default', async () => {
     const f = fixture();
@@ -505,7 +618,7 @@ describe('M6 spaces and current authority', () => {
     expect(f.core.team.roles.delete(owner, unused.roleId)).toBeNull();
   });
 
-  it('grants member files and covered shared roots while preserving the Owner exception', async () => {
+  it('grants member files and requires covered shared roots for every Bot owner', async () => {
     const f = fixture();
     f.createBot();
     f.createBot(bob);
@@ -525,8 +638,9 @@ describe('M6 spaces and current authority', () => {
       code: 'grant-outside-audience',
       details: { spaceId: shared.spaceId },
     });
-    await expect(f.core.grants.create('host-bot', shared.spaceId)).resolves.toMatchObject({
-      workspaceId: shared.spaceId,
+    await expect(f.core.grants.create('host-bot', shared.spaceId)).rejects.toMatchObject({
+      code: 'grant-outside-audience',
+      details: { spaceId: shared.spaceId },
     });
     await expect(f.core.grants.create('host-bot', 'spaces/alice')).rejects.toMatchObject({
       code: 'grant-foreign-space',
@@ -733,7 +847,7 @@ describe('M6 Memory migration and offboarding', () => {
     expect(memoryOwnership(path)).toEqual(proof);
   });
 
-  it.each([147, 149])(
+  it.each([147, 149, 150])(
     'upgrades generation %s through the required migrations, preserving Channel access and Memory ownership',
     async (generation) => {
       const home = realpathSync(createTempRoot('m6-upgrade-'));
@@ -776,6 +890,17 @@ describe('M6 Memory migration and offboarding', () => {
           return { ok: true };
         },
       });
+      expect(registry.create({ slug: 'old-owner', displayName: 'Owner' }).ok).toBe(true);
+      const ownerMemory = registry.memoryDirFor('old-owner')!;
+      const ownerProof = memoryOwnership(ownerMemory);
+      const ownerNative = realpathSync(createTempRoot('m6-upgrade-owner-native-'));
+      db.transaction((connection) =>
+        connection
+          .prepare(`INSERT INTO workspace_grants
+        (id,bot_slug,workspace_id,workspace_path,workspace_title,created_at,orchestrator_write,write_revision)
+        VALUES ('old-owner-native','old-owner','old-owner-native',?,'Native','2026-11-15',1,1)`)
+          .run(ownerNative),
+      );
       for (const slug of ['old-private', 'old-tob', 'old-retained', 'old-erasing'])
         expect(
           registry.create({
@@ -790,6 +915,11 @@ describe('M6 Memory migration and offboarding', () => {
       const legacyWorkspace = join(home, 'botharness/tob-workspaces/old-tob');
       mkdirSync(join(legacyWorkspace, 'notes'), { recursive: true });
       writeFileSync(join(legacyWorkspace, 'notes/kept.txt'), 'Tob file');
+      writeFileSync(join(legacyWorkspace, 'report.txt'), 'Tob report');
+      symlinkSync('report.txt', join(legacyWorkspace, 'report-link'));
+      symlinkSync('not-yet-created', join(legacyWorkspace, 'dangling-link'));
+      symlinkSync(join(home, 'spaces/bob/files'), join(legacyWorkspace, 'foreign-link'), 'dir');
+      symlinkSync(join(home, 'botharness'), join(legacyWorkspace, 'protected-link'), 'dir');
       const erasingPath = registry.memoryDirFor('old-erasing')!;
       db.transaction((connection) => {
         connection
@@ -837,6 +967,12 @@ describe('M6 Memory migration and offboarding', () => {
       prior.close();
       const f = fixture(home);
       expect(f.core.operationalDatabase.generation).toBe(151);
+      f.workspace(ownerNative, 'old-owner-native');
+      expect(f.core.grants.requireActive('old-owner', 'old-owner-native').workspacePath).toBe(
+        ownerNative,
+      );
+      expect(f.core.registry.memoryDirFor('old-owner')).toBe(ownerMemory);
+      expect(memoryOwnership(ownerMemory)).toEqual(ownerProof);
       expect(
         f.db.read((connection) =>
           connection
@@ -867,6 +1003,18 @@ describe('M6 Memory migration and offboarding', () => {
       expect(readFileSync(join(home, 'spaces/alice/files/notes/kept.txt'), 'utf8')).toBe(
         'Tob file',
       );
+      const migrated = join(home, 'spaces/alice/files');
+      expect(lstatSync(join(migrated, 'report-link')).isSymbolicLink()).toBe(true);
+      expect(readlinkSync(join(migrated, 'report-link'))).toBe('report.txt');
+      expect(readFileSync(join(migrated, 'report-link'), 'utf8')).toBe('Tob report');
+      expect(lstatSync(join(migrated, 'dangling-link')).isSymbolicLink()).toBe(true);
+      for (const [name, code] of [
+        ['foreign-link', 'grant-foreign-space'],
+        ['protected-link', 'grant-protected-path'],
+      ])
+        expect(() => f.core.grants.validatePath?.('old-tob', join(migrated, name!))).toThrowError(
+          expect.objectContaining({ code }),
+        );
       expect(f.core.registry.get('old-tob')?.workspaces).toEqual([
         join(home, 'spaces/alice/files'),
       ]);

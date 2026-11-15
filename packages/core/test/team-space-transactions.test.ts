@@ -15,7 +15,11 @@ import { memoryOwnership } from '../src/bots/deletion.js';
 import { accountMemoryPath, relocateSpaceMemories } from '../src/workspaces/space-memory.js';
 import { createSqliteChannelStore } from '../src/channels/sqlite-store.js';
 import { TeamService } from '../src/team/service.js';
-import { relocateTobWorkspaces } from '../src/workspaces/space-lifecycle.js';
+import {
+  relocateTobWorkspaces,
+  prepareSpaceTransfer,
+  recoverSpaceTransfers,
+} from '../src/workspaces/space-lifecycle.js';
 import { WorkspaceSpaces } from '../src/workspaces/spaces.js';
 import { defaultSpaceMemoryPath } from '../src/workspaces/space-memory.js';
 import { OWNER_HUMAN_CONTEXT as owner } from '../src/humans/context.js';
@@ -107,6 +111,24 @@ function legacyMemory(f: ReturnType<typeof fixture>) {
 }
 
 describe('M6 durable filesystem transactions', () => {
+  it('moves and restores symlink entries without resolving their targets during rollback and recovery', () => {
+    const f = fixture();
+    const source = join(f.home, 'spaces/alice/files');
+    const target = join(f.home, 'spaces/bob/files');
+    fs.writeFileSync(join(source, 'report.txt'), 'report');
+    fs.symlinkSync('report.txt', join(source, 'report-link'));
+    fs.symlinkSync('missing', join(source, 'dangling-link'));
+    for (const recover of [false, true]) {
+      const transfer = prepareSpaceTransfer(f.db, f.home, 'alice', 'bob', []);
+      expect(fs.lstatSync(join(target, 'report-link')).isSymbolicLink()).toBe(true);
+      expect(fs.lstatSync(join(target, 'dangling-link')).isSymbolicLink()).toBe(true);
+      if (recover) recoverSpaceTransfers(f.db);
+      else transfer.rollback();
+      expect(fs.readlinkSync(join(source, 'report-link'))).toBe('report.txt');
+      expect(fs.readFileSync(join(source, 'report-link'), 'utf8')).toBe('report');
+      expect(fs.readlinkSync(join(source, 'dangling-link'))).toBe('missing');
+    }
+  });
   it('restores an interrupted Owner rename before excluding accepted erase cleanup', () => {
     const f = fixture();
     const slug = 'owner-pending';

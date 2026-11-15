@@ -420,6 +420,20 @@ export class WorkspaceSpaces {
         for (const memory of bots)
           if (within(path, memory.memory)) this.refuse('grant-protected-path', path);
       }
+      const ownMemory = !grant && bot !== undefined && within(bot.memory, path);
+      for (const row of rows)
+        if (
+          !ownMemory &&
+          row.kind === 'shared' &&
+          (within(this.path(row.space_id), path) ||
+            (!hostOwner && within(path, this.path(row.space_id)))) &&
+          !this.includes(
+            spaceAudienceSchema.parse(JSON.parse(z.string().parse(row.audience_json))),
+            owner,
+            roleIds,
+          )
+        )
+          this.refuse('grant-outside-audience', path, row.space_id);
       if (hostOwner) {
         for (const row of rows)
           if (
@@ -428,7 +442,6 @@ export class WorkspaceSpaces {
             within(this.path(row.space_id), path)
           )
             this.refuse('grant-foreign-space', path, row.space_id);
-        const ownMemory = !grant && bot !== undefined && within(bot.memory, path);
         const managed = rows.some((row) => within(this.path(row.space_id), path));
         if (!ownMemory && !managed && within(this.home, path))
           this.refuse('grant-protected-path', path);
@@ -441,6 +454,17 @@ export class WorkspaceSpaces {
               containsFile(this.path(row.space_id), identity, path)
             )
               this.refuse('grant-foreign-space', path, row.space_id);
+            else if (
+              !ownMemory &&
+              row.kind === 'shared' &&
+              !this.includes(
+                spaceAudienceSchema.parse(JSON.parse(z.string().parse(row.audience_json))),
+                owner,
+                roleIds,
+              ) &&
+              containsFile(this.path(row.space_id), identity, path)
+            )
+              this.refuse('grant-outside-audience', path, row.space_id);
           if (
             readdirSync(this.home).some(
               (name) =>
@@ -461,15 +485,6 @@ export class WorkspaceSpaces {
         if (!within(root, path) && !within(path, root)) continue;
         if (row.kind === 'account' && row.owner_human_id !== owner)
           this.refuse('grant-foreign-space', path, row.space_id);
-        if (
-          row.kind === 'shared' &&
-          !this.includes(
-            spaceAudienceSchema.parse(JSON.parse(z.string().parse(row.audience_json))),
-            owner,
-            roleIds,
-          )
-        )
-          this.refuse('grant-outside-audience', path, row.space_id);
       }
       for (const memory of bots)
         if (
@@ -481,7 +496,6 @@ export class WorkspaceSpaces {
             path,
             rows.find((row) => within(this.path(row.space_id), memory.memory))?.space_id,
           );
-      const ownMemory = !grant && bot !== undefined && within(bot.memory, path);
       const managed = rows.some((row) => within(this.path(row.space_id), path));
       if (!ownMemory && !managed && (within(this.home, path) || within(path, this.home)))
         this.refuse('grant-protected-path', path);
@@ -509,6 +523,7 @@ export class WorkspaceSpaces {
           )
             this.refuse('grant-foreign-space', path, row.space_id);
           if (
+            !ownMemory &&
             row.kind === 'shared' &&
             !this.includes(
               spaceAudienceSchema.parse(JSON.parse(z.string().parse(row.audience_json))),

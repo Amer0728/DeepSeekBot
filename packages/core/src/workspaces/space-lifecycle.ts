@@ -61,22 +61,22 @@ const moveSchema = z.object({
 });
 type Move = z.infer<typeof moveSchema>;
 function addMove(moves: Move[], source: string, target: string): void {
-  if (!existsSync(source)) return;
-  if (canonicalPath(source) !== source || canonicalPath(dirname(target)) !== dirname(target))
+  const stat = lstatSync(source, { throwIfNoEntry: false });
+  if (!stat) return;
+  if (
+    canonicalPath(dirname(source)) !== dirname(source) ||
+    canonicalPath(dirname(target)) !== dirname(target)
+  )
     throw new TeamError('grant-protected-path');
-  if (existsSync(target)) {
-    if (
-      lstatSync(source).isDirectory() &&
-      lstatSync(target).isDirectory() &&
-      canonicalPath(target) === target
-    ) {
+  const destination = lstatSync(target, { throwIfNoEntry: false });
+  if (destination) {
+    if (stat.isDirectory() && destination.isDirectory() && canonicalPath(target) === target) {
       for (const name of readdirSync(source).sort())
         addMove(moves, join(source, name), join(target, name));
       return;
     }
     throw new TeamError('space-name-taken');
   }
-  const stat = lstatSync(source);
   moves.push({ source, target, device: stat.dev, inode: stat.ino });
 }
 function applyMoves(moves: Move[]): void {
@@ -89,9 +89,9 @@ function applyMoves(moves: Move[]): void {
 }
 function undo(moves: Move[]): void {
   for (const move of [...moves].reverse()) {
-    if (existsSync(move.source)) continue;
-    if (!existsSync(move.target)) throw new Error('space-transfer-path-missing');
-    const stat = lstatSync(move.target);
+    if (lstatSync(move.source, { throwIfNoEntry: false })) continue;
+    const stat = lstatSync(move.target, { throwIfNoEntry: false });
+    if (!stat) throw new Error('space-transfer-path-missing');
     if (stat.dev !== move.device || stat.ino !== move.inode)
       throw new Error('space-transfer-identity-changed');
     mkdirSync(dirname(move.source), { recursive: true });
