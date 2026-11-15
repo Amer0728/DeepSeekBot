@@ -1109,9 +1109,21 @@
         "setting:packages/client/src/client/team-usage-section.tsx:{t('team.usage.period')}",
         "setting:packages/client/src/client/team-audit.tsx:{object.name}",
         "setting:packages/client/src/client/team-audit.tsx:{label}",
-        "setting:packages/client/src/client/team-audit.tsx:{t('team.audit.integrity')}"
+        "setting:packages/client/src/client/team-audit.tsx:{t('team.audit.integrity')}",
+        "setting:packages/client/src/client/team-audit.tsx:{t('team.private.open')}"
       ],
-      "commands": ["team-mode", "members", "channels", "roles", "devices", "usage", "models", "dm"]
+      "commands": [
+        "team-mode",
+        "members",
+        "channels",
+        "roles",
+        "devices",
+        "usage",
+        "models",
+        "dm",
+        "private",
+        "audit"
+      ]
     },
     {
       "id": "team-member-browser-sign-out",
