@@ -378,7 +378,7 @@ export function privateBotCreations(
 ): BotCreationService {
   const key = (value: string): string => {
     checkedKey(value);
-    if (human.humanId === OWNER_HUMAN_CONTEXT.humanId && isOwner()) return value;
+    if (human.humanId === OWNER_HUMAN_CONTEXT.humanId) return value;
     return (
       'member:' +
       createHash('sha256')
