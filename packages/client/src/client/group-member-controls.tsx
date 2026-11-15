@@ -31,6 +31,7 @@ import { personaBotActivity } from './persona-activity.js';
 import { store, type BotSummary, type ChannelSummary } from './store.js';
 import { useSubmission } from './submission.js';
 import { IconButton } from './ds/icon-button.js';
+import { AddPeopleAction } from './channel-add-people.js';
 
 const styles = stylex.create({
   attentionHeading: {
@@ -386,6 +387,7 @@ function MembersHeaderActionForChannel({
     (group.joinRequests?.filter((item) => item.status === 'pending').length ?? 0);
   return (
     <>
+      <AddPeopleAction channelId={channelId} actions={actions} t={t} />
       <Tooltip label={t('group.invite')} side="bottom" delayMs={500}>
         <IconButton
           size="row"
