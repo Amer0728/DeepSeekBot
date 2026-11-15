@@ -1730,7 +1730,7 @@
       "behaviors": ["desktop.group.manage"],
       "reason": "Task cookie profile with optional restart/join phases; group name/avatar, membership decisions and refresh persistence.",
       "task": 1967,
-      "sha256": "feadf11fb1b067426dacf1ebaa816ce3bdc1533fb9a001cdcc518bceb5e53d0f"
+      "sha256": "424ca27bf88a299440ca73d7c916eeb1c4444f4616c2d7c86ea4cd14c77dc881"
     },
     {
       "path": "scripts/e2e-group-motion-matrix.mjs",
