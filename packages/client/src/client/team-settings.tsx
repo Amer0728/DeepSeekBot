@@ -256,7 +256,7 @@ export function TeamSection({ call, t }: TeamSectionProps): ReactElement {
   const auditView =
     view.enabled && canManage(viewer, AUDIT_VIEW) ? <AuditLogSection call={call} t={t} /> : null;
   const privateView =
-    view.enabled && !manageMembers && canManage(viewer, PRIVATE_VIEW) ? (
+    view.enabled && canManage(viewer, PRIVATE_VIEW) ? (
       <PrivateContentSection call={call} t={t} />
     ) : null;
   const sheetMember =
