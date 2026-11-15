@@ -1723,3 +1723,7 @@ is constant-time; input-sensitive resolution and legacy text checks remain local
 assert zero Reviewer calls for deterministic Full Access hits and retained management prompting;
 existing saved-rule/device/Grant tests protect the execution fences. This is not an end-to-end
 latency measurement. Runtime and screenshot qualification are recorded separately in the PR.
+
+### CLI effect declaration ownership
+
+The application-defined CLI declaration table in `bots/cli-effects.ts` supplies effects to direct command dispatch and Channel Tool Approval for typed and exact-argv Tob operations. Each declaration separately retains the broker's existing read admission; effect metadata does not confer caller authority. The broker continues to own Human DM provenance, target authorization, exact operation identity and live revocation fences. Unknown commands and arbitrary Shell text retain the existing protected path. The dispatch inventory check follows real command-family arrays and entry branches rather than help or search text.

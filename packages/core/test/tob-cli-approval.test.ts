@@ -543,3 +543,38 @@ describe('disruptive scoped CLI operations require Human review', () => {
     await pending.result;
   });
 });
+
+describe('declared CLI management keeps caller authority separate', () => {
+  it('requires an explicit exact-command decision with zero model calls and fences revocation', async () => {
+    const review = vi.fn(async () => ({ outcome: 'allow' as const, reason: 'Allowed' }));
+    const f = fixture({
+      autoApproval: {
+        template: () => ({ name: 'all', text: 'Allow everything' }),
+        review,
+        log: vi.fn(),
+      },
+    });
+    f.setFullAccess(true);
+    const operation: TobCliWriteProposal = {
+      command: 'grant-write-set',
+      target: 'grant-write-set',
+      via: 'cli',
+      previousValue: null,
+      patch: {
+        argv: ['grant-write-set', 'bot', '--grant', 'grant', '--enabled', '--confirm'],
+        stdinBytes: 2,
+        stdinSha256: 'exact-stdin-digest',
+      },
+    };
+    const pending = approveTobCliOperation({ ...f.options, operation });
+    const card = await f.card();
+    expect(JSON.parse(card.toolApprovalRequest!.input)).toMatchObject(operation);
+    expect(review).not.toHaveBeenCalled();
+    await f.channelApproval.decide(OWNER_HUMAN_CONTEXT, 'tob', card.id, 'allowed-once');
+    const guard = await pending;
+    expect(() => guard()).not.toThrow();
+    f.revoke();
+    expect(() => guard()).toThrow('agent-context-expired');
+    expect(review).not.toHaveBeenCalled();
+  });
+});

@@ -228,3 +228,43 @@ describe('E1 pure approval decision', () => {
     },
   );
 });
+
+describe('CLI effect declarations at the public approval seam', () => {
+  it('declares exact brokered management argv without trusting prose', () => {
+    expect(
+      toolEffects('deepseekbot grant-write-set', {
+        patch: { argv: ['grant-write-set', 'bot', '--grant', 'grant', '--enabled', '--confirm'] },
+      }),
+    ).toEqual({
+      changes: 'reversible',
+      reach: 'local',
+      personalData: true,
+      authority: 'management',
+    });
+    expect(
+      toolEffects('deepseekbot unknown', { patch: { argv: ['future-command'] } }),
+    ).toBeUndefined();
+    expect(
+      toolEffects('bash', { command: 'deepseekbot grant-write-set bot --enabled' }),
+    ).toBeUndefined();
+  });
+});
+
+it('keeps irreversible reach when a CLI operation also writes output', () => {
+  expect(
+    toolEffects('deepseekbot marketplace-upload', {
+      patch: { argv: ['marketplace-upload', 'bot', '--out=result.json'] },
+    }),
+  ).toMatchObject({ changes: 'irreversible', reach: 'external' });
+  expect(
+    toolEffects('deepseekbot grant-write-set', {
+      command: 'grant-write-set',
+      target: 'bot',
+      patch: { enabled: true },
+      expectedRevision: 2,
+    }),
+  ).toMatchObject({ authority: 'management' });
+  expect(
+    toolEffects('deepseekbot channels', { patch: { argv: ['grant-write-set', 'bot'] } }),
+  ).toBeUndefined();
+});

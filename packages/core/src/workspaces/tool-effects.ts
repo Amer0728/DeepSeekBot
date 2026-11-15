@@ -1,3 +1,4 @@
+import { brokerCliEffects } from '../bots/cli-effects.js';
 import { requiresHumanDecision } from './approval-templates.js';
 
 export interface ToolEffects {
@@ -144,6 +145,7 @@ function inputText(args: unknown): string {
 }
 
 export function toolEffects(name: string, args: unknown): ToolEffects | undefined {
+  if (name.startsWith('deepseekbot ')) return brokerCliEffects(name, args);
   const declared = declaration(name);
   if (!declared) return undefined;
   const { approval: _approval, ...effects } = declared;

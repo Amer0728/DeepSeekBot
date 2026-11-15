@@ -2107,3 +2107,7 @@ deepseekbot models allowed [--as <username>]
 ```
 
 Tool effect declarations (E1) preserve the existing tool commands and approval outcomes. Full Access, saved rules, Secrets, device targets and Workspace Grants retain their existing checks; no new route or CLI authority is introduced.
+
+### Command effects and caller authority
+
+The CLI and Tob broker share application-defined command effect declarations. Lint checks actual command registration arrays and entry dispatch branches, independently of the search index. A declaration is not authorization: direct online commands retain authenticated Host owner checks; the broker retains Human DM origin, target ownership, exact argv and stdin hash, confirmation flags, revisions, cancellation and live execution fences. Unknown commands remain undeclared, retain broker approval, and receive the existing CLI refusal. Mixed-purpose commands keep conservative declarations and their existing approval gates; unmigrated Shell text protection remains active.
