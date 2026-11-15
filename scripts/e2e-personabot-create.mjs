@@ -168,7 +168,7 @@ function minimalAudienceDirectory(value) {
     Array.isArray(value?.roles) &&
     Array.isArray(value?.members) &&
     Object.keys(value).sort().join(',') === 'members,roles' &&
-    value.roles.every((role) => Object.keys(role).sort().join(',') === 'name,roleId') &&
+    value.roles.every((role) => Object.keys(role).sort().join(',') === 'builtin,name,roleId') &&
     value.members.every((member) => Object.keys(member).sort().join(',') === 'displayName,humanId')
   );
 }
