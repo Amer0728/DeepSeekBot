@@ -279,11 +279,11 @@ _避免使用_：debug flag、admin mode、agent permission、read boundary
 _避免使用_：全局 skill、system skill、built-in skill
 
 **Project Skill**：
-属于某个目录的 Skill。这个目录可以是 PersonaBot 的 Memory Repository，也可以是 Workspace Grant 覆盖的文件夹，由该目录的文件访问权限决定谁能看到它。PersonaBot 的 Skill 就是其 Memory Repository 下的 Project Skill，并不是另一种 Skill。
+属于某个目录的 Skill。这个目录可以是 PersonaBot 的 Memory Repository，也可以是 Workspace Grant 覆盖的文件夹，对该目录的访问权限决定哪些 PersonaBot 能发现这个 Skill、读取它的文件；但它不限制谁能通过 Skill Invocation 收到它的文本。PersonaBot 的 Skill 就是其 Memory Repository 下的 Project Skill，并不是另一种 Skill。
 _避免使用_：Bot Skill、workspace skill、私有 skill
 
 **Skill Invocation**：
-Human 在消息中对某个 Skill 的显式引用，像 mention 一样显示为 chip。它把该 Skill 的文本插入消息，但不指向任何对象：由哪个 PersonaBot 阅读并执行，取决于消息里的 mention 和正常路由，与 Skill 归属于谁无关。
+Human 在消息中对某个 Skill 的显式引用。它携带该 Skill 在消息发送时的文本，但不指向任何对象：由哪个 PersonaBot 阅读并执行，取决于消息里的 mention 和正常路由，与 Skill 归属于谁无关。
 _避免使用_：skill command、slash command、skill call
 
 ### Computer
