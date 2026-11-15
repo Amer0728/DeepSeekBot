@@ -1,3 +1,4 @@
+import { readBoundedFileSync } from './bounded-file.mjs';
 import { execFile } from 'node:child_process';
 import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,6 +23,9 @@ const url = new URL(instance.url);
 const token = url.searchParams.get('token');
 if (!token) throw new Error('Private authenticated instance required');
 const budget = JSON.parse(readFileSync(new URL('./perf-budgets/tob-cli.json', import.meta.url)));
+const rounds = process.argv.includes('--rounds') ? Number(argument('--rounds')) : budget.rounds;
+if (!Number.isInteger(rounds) || rounds < 1 || rounds > budget.rounds)
+  throw new Error('Round count must stay within the recorded cohort cap');
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const run = (argv, stdin = '') =>
   new Promise((resolve, reject) => {
@@ -66,8 +70,7 @@ const nativeAudit = async () => {
     .map((name) => join(directory, name, id, 'session.v4.jsonl.zstd'))
     .filter(existsSync);
   if (matches.length !== 1) throw new Error('Native audit identity unavailable');
-  const bytes = readFileSync(matches[0]);
-  if (bytes.length > 16 * 1024 * 1024) throw new Error('Native audit exceeds capture bound');
+  const bytes = readBoundedFileSync(matches[0], 16 * 1024 * 1024);
   const counts = {};
   let offset = 0,
     outputBytes = 0,
@@ -101,7 +104,7 @@ const nativeAudit = async () => {
 const auditBefore = await nativeAudit();
 const samples = [],
   failures = [];
-for (let round = 0; round < budget.rounds; round++) {
+for (let round = 0; round < rounds; round++) {
   let id;
   try {
     const direct = await run(fixture.argv);
@@ -147,8 +150,14 @@ for (let round = 0; round < budget.rounds; round++) {
     samples.push({ round, correct: false, error: 'journey-failed' });
     failures.push('journey-failed');
   } finally {
-    if (id) await run(['tob-cli', 'cancel', id]);
+    if (id)
+      try {
+        await run(['tob-cli', 'cancel', id]);
+      } catch {
+        failures.push('cancel-request-failed');
+      }
   }
+  if (failures.length) break;
 }
 const auditAfter = await nativeAudit();
 if (auditBefore.sessionId && auditBefore.sessionId !== auditAfter.sessionId)
@@ -179,6 +188,7 @@ const result = {
     'packages/deepseekbot/dist/deepseekbot.mjs',
   ].map((file) => ({ file, sha256: hash(readFileSync(new URL('../' + file, import.meta.url))) })),
   samples,
+  protocol: { rounds, stopOnFirstFailure: true },
   nativeAudit: { before: auditBefore, after: auditAfter },
   budget,
   failures,
