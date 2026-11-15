@@ -65,7 +65,9 @@ it.each([144, 145, 146])(
         mountOperationalDatabase({ dshHome: home, schemaPlan: e4SchemaPlan }),
       );
       expect(owner.mode).toBe('ready');
-      expect(owner.generation).toBe(147);
+      expect(owner.generation).toBe(
+        BOT_HARNESS_SCHEMA_PLAN.generationOf('host-relationship-revocation'),
+      );
       const current = attachOperationalModule(owner, 'migration-fixture');
       const reopened = createDevicePairing({ database: current, hostName: 'Existing' });
       expect(reopened.admit(`Device ${deviceId}.${secret}`).ok).toBe(true);

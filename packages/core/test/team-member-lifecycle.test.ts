@@ -677,7 +677,7 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       ),
     });
     const port = attachOperationalModule(previous, 'm2-m9-old');
-    expect(previous.generation).toBe(144);
+    expect(previous.generation).toBe(BOT_HARNESS_SCHEMA_PLAN.generationOf('host-relationship'));
     port.transaction((db) => {
       db.prepare(`INSERT INTO host_relationships
         (relationship_id, peer_host_id, peer_name, peer_key, peer_routes, direction, state, expires_at, created_at, updated_at)
@@ -710,7 +710,7 @@ describe('M2 × M9 member lifecycle integration', { timeout: 60_000 }, () => {
       }),
     );
     expect(upgraded.mode).toBe('ready');
-    expect(upgraded.generation).toBe(145);
+    expect(upgraded.generation).toBe(BOT_HARNESS_SCHEMA_PLAN.generationOf('member-lifecycle'));
     const check = attachOperationalModule(upgraded, 'm2-m9-new');
     expect(
       check.read((db) =>

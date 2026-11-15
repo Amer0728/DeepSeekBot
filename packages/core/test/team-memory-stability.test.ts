@@ -162,7 +162,7 @@ describe('Team switches preserve Memory across upgrades and restarts', () => {
       );
       prior.close();
       let core = boot(home);
-      expect(core.operationalDatabase.generation).toBe(153);
+      expect(core.operationalDatabase.generation).toBe(BOT_HARNESS_SCHEMA_PLAN.targetGeneration);
       await core.team.setOwnerPassword(owner, 'Memory-stability-2026!');
       for (const [step, enabled] of [false, true, false, true].entries()) {
         await core.team.setMode(owner, enabled);

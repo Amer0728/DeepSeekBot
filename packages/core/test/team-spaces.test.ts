@@ -1082,7 +1082,7 @@ describe('M6 Memory migration and offboarding', () => {
         staged.close();
       }
       const f = fixture(home);
-      expect(f.core.operationalDatabase.generation).toBe(153);
+      expect(f.core.operationalDatabase.generation).toBe(BOT_HARNESS_SCHEMA_PLAN.targetGeneration);
       f.workspace(ownerNative, 'old-owner-native');
       expect(f.core.grants.requireActive('old-owner', 'old-owner-native').workspacePath).toBe(
         ownerNative,
