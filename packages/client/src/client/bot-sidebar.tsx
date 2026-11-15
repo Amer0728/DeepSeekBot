@@ -1,3 +1,4 @@
+import { BotCreateSourceModal } from './bot-create-source.js';
 import { MEMBER_MENU_ITEMS, menuItemAllowed } from './team-menu.js';
 import { PublicChannelsDialog } from './public-channels-dialog.js';
 import { isHumanDmChannel } from './channel-kind.js';
@@ -1045,6 +1046,7 @@ function RailChannel({
 }
 
 type CreateRequest =
+  | { kind: 'bot-source'; sectionId?: string }
   | { kind: 'bot'; source: 'empty' | 'git' | 'zip'; sectionId?: string }
   | {
       kind: 'section';
@@ -1592,6 +1594,7 @@ export function BotSidebar({
 
   const selectMenu = (id: string): void => {
     setMenuOpen(false);
+    if (id === 'bot') setCreateRequest({ kind: 'bot-source' });
     const source = botCreateSource(id);
     if (source !== undefined) setCreateRequest({ kind: 'bot', source });
     if (id === 'channel') setCreateRequest({ kind: 'channel' });
@@ -2162,7 +2165,9 @@ export function BotSidebar({
   }
 
   const createSectionId =
-    createRequest?.kind === 'channel' || createRequest?.kind === 'bot'
+    createRequest?.kind === 'channel' ||
+    createRequest?.kind === 'bot' ||
+    createRequest?.kind === 'bot-source'
       ? createRequest.sectionId
       : undefined;
   const createSection =
@@ -2351,6 +2356,21 @@ export function BotSidebar({
     : undefined;
   const creationDialogs = (
     <>
+      {createRequest?.kind === 'bot-source' ? (
+        <BotCreateSourceModal
+          t={t}
+          member={member}
+          localImports={!hostTabs || remoteHostsState.tab === 'local'}
+          onClose={() => setCreateRequest(undefined)}
+          onSelect={(source) =>
+            setCreateRequest({
+              kind: 'bot',
+              source,
+              ...(createRequest.sectionId ? { sectionId: createRequest.sectionId } : {}),
+            })
+          }
+        />
+      ) : null}
       <span ref={createFromWelcome} hidden aria-hidden="true" />
       {createRequest?.kind === 'channel' ||
       createRequest?.kind === 'message-person' ||
@@ -2368,6 +2388,15 @@ export function BotSidebar({
                       ? {}
                       : { sectionId: createRequest.sectionId }),
                   }
+          }
+          onBack={
+            createRequest.kind === 'bot'
+              ? () =>
+                  setCreateRequest({
+                    kind: 'bot-source',
+                    ...(createRequest.sectionId ? { sectionId: createRequest.sectionId } : {}),
+                  })
+              : undefined
           }
           actions={actions}
           t={t}
@@ -3081,6 +3110,8 @@ export function BotSidebar({
                           items={sectionCreateMenuItems(t, gitReady(state.git), member)}
                           onSelect={(id) => {
                             setSectionCreateMenuId(undefined);
+                            if (id === 'bot')
+                              setCreateRequest({ kind: 'bot-source', sectionId: section.id });
                             const source = botCreateSource(id);
                             if (source !== undefined) {
                               setCreateRequest({
@@ -3112,6 +3143,12 @@ export function BotSidebar({
       </div>
       {createRequest?.kind === 'bot' && createRequest.source === 'zip' ? (
         <ImportBotZipModal
+          onBack={() =>
+            setCreateRequest({
+              kind: 'bot-source',
+              ...(createRequest.sectionId ? { sectionId: createRequest.sectionId } : {}),
+            })
+          }
           target={<LocalCreationTarget t={t} />}
           t={t}
           actions={actions}
@@ -4100,7 +4137,7 @@ export function ChannelMoveMenu({
 }
 
 function botCreateSource(id: string): 'empty' | 'git' | 'zip' | undefined {
-  if (id === 'bot' || id === 'bot:empty') return 'empty';
+  if (id === 'bot:empty') return 'empty';
   if (id === 'bot:git') return 'git';
   if (id === 'bot:zip') return 'zip';
   return undefined;
@@ -4120,21 +4157,7 @@ function menuItems(
       id: 'bot',
       label: t('roster.menu.createBot'),
       icon: <IconAgentPresetOutlineRegular size={16} />,
-      submenu: [
-        { id: 'bot:empty', label: t('roster.menu.createBot.empty'), disabled },
-        ...(member
-          ? []
-          : [
-              { id: 'bot:git', label: t('roster.menu.createBot.git'), disabled },
-              {
-                id: 'bot:zip',
-                label: localImports
-                  ? t('roster.menu.createBot.zip')
-                  : `${t('roster.menu.createBot.zip')} · ${t('environment.create.localOnly')}`,
-                disabled: disabled || !localImports,
-              },
-            ]),
-      ],
+      disabled,
     },
     {
       id: 'channel',
