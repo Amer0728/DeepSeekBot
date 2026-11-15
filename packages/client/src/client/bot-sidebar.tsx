@@ -9,7 +9,6 @@ import { useSearchOpenMark } from './search-open-mark.js';
 import { observeHumanAttention } from './messaging-defaults-live.js';
 export { unreadCountLabel } from './unread-count.js';
 import { Menu } from './appearance-primitives.js';
-import { ConnectionsDialog } from './connections-dialog.js';
 import { ALL_HOSTS, remoteHosts } from './remote-hosts.js';
 import { useChannelDockActive } from './channel-dock.js';
 import { HostMark, RemoteHostRows, useRemoteHosts } from './host-tabs.js';
@@ -1081,7 +1080,6 @@ export function BotSidebar({
 }: SidebarProps): ReactElement {
   const state = useClientFields(SIDEBAR_FIELDS);
   const hostTabs = useChannelDockActive();
-  const [addingRemote, setAddingRemote] = useState(false);
   const teamMode = useTeamMode(actions.teamCall);
   const member = memberPage() || teamMode?.viewer.kind === 'member';
   const remoteHostsState = useRemoteHosts();
@@ -1609,7 +1607,6 @@ export function BotSidebar({
     if (id === 'marketplace') setCreateRequest({ kind: 'marketplace' });
     if (id === 'public-channels') setCreateRequest({ kind: 'public-channels' });
     if (id === 'message-person') setCreateRequest({ kind: 'message-person' });
-    if (id === 'remote') setAddingRemote(true);
   };
 
   const selectSortMenu = (id: string): void => {
@@ -2319,7 +2316,6 @@ export function BotSidebar({
           items={menuItems(
             t,
             hostTabs && remoteHostsState.tab !== 'local' ? true : gitReady(state.git),
-            hostTabs,
             !hostTabs || remoteHostsState.tab === 'local',
             teamMode?.enabled === true &&
               !(
@@ -2348,15 +2344,6 @@ export function BotSidebar({
         />
       </div>
       {headerEnd}
-      {addingRemote ? (
-        <ConnectionsDialog
-          joinComputer
-          onClose={() => {
-            setAddingRemote(false);
-          }}
-          t={t}
-        />
-      ) : null}
     </div>
   );
   const remoteTab = hostTabs
@@ -4122,7 +4109,6 @@ function botCreateSource(id: string): 'empty' | 'git' | 'zip' | undefined {
 function menuItems(
   t: BotHarnessTranslate,
   gitAvailable: boolean,
-  remotes: boolean,
   localImports = true,
   team = false,
   member = false,
@@ -4186,15 +4172,6 @@ function menuItems(
       disabled: !localImports,
       icon: <IconGlobeOutlineRegular size={16} />,
     },
-    ...(remotes
-      ? [
-          {
-            id: 'remote',
-            label: t('remoteHosts.add'),
-            icon: <ChannelSidebarIcon name="monitor" size={16} />,
-          },
-        ]
-      : []),
   ];
 }
 
@@ -4203,7 +4180,7 @@ function sectionCreateMenuItems(
   gitAvailable: boolean,
   member: boolean,
 ): MenuEntry[] {
-  return menuItems(t, gitAvailable, false, true, false, member).filter(
+  return menuItems(t, gitAvailable, true, false, member).filter(
     (item) => item.id === 'bot' || item.id === 'channel',
   );
 }
