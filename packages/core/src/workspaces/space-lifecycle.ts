@@ -325,15 +325,24 @@ export function prepareSpaceTransfer(
 }
 
 export function relocateTobWorkspaces(db: OperationalDatabaseModulePort, home: string): void {
+  const legacyRoot = join(home, 'botharness', 'tob-workspaces') + sep;
   const bots = z
     .array(z.object({ slug: z.string(), humanId: z.string(), name: z.string(), body: z.string() }))
     .parse(
       db.read((connection) =>
         connection
           .prepare(
-            `SELECT t.bot_slug AS slug, t.human_id AS humanId, h.display_name AS name, b.body FROM tob_identity t JOIN persona_bots b ON b.slug = t.bot_slug JOIN humans h ON h.human_id = t.human_id`,
+            `WITH legacy AS (
+              SELECT slug, owner_human_id, body, ? || slug AS workspace_path FROM persona_bots
+            )
+            SELECT b.slug, b.owner_human_id AS humanId, h.display_name AS name, b.body
+            FROM legacy b JOIN humans h ON h.human_id = b.owner_human_id
+            WHERE EXISTS (SELECT 1 FROM json_each(b.body, '$.workspaces') w WHERE w.value = b.workspace_path)
+              OR EXISTS (SELECT 1 FROM workspace_grants g WHERE g.bot_slug = b.slug AND g.revoked_at IS NULL
+                AND (g.workspace_path = b.workspace_path
+                  OR substr(g.workspace_path, 1, length(b.workspace_path) + 1) = b.workspace_path || ?))`,
           )
-          .all(),
+          .all(legacyRoot, sep),
       ),
     );
   const memoryPaths = z

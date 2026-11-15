@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
 import { Peer } from '@deepseek-ai/dsh-client-connection';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createCore } from '../src/plugin.js';
 import { createBridgeMethodsForHumans } from '../src/bridge/methods.js';
@@ -33,6 +33,7 @@ function fixture(dshHome = createTempRoot('m13-minimal-member-')) {
       db.prepare("INSERT INTO human_roles VALUES ('member', 'member')").run();
       db.prepare('UPDATE team_settings SET enabled = 1').run();
     });
+  core.spaces.ensureAccount(human.humanId);
   const methods = createBridgeMethodsForHumans({
     ...core,
     modelCatalog: { list: async () => [], validate: async () => {} },
@@ -158,7 +159,12 @@ describe('M13 minimal members', () => {
     await f.core.team.setOwnerPassword(owner, 'owner-password-1');
     const member = await f.core.team.createMember(owner, 'fresh', 'Fresh');
     const human = humanContext(member.member.humanId);
+    const account = f.core.spaces.path('spaces/' + human.humanId);
+    rmdirSync(join(account, 'files'));
+    rmdirSync(account);
+    expect(existsSync(account)).toBe(false);
     await f.core.team.signIn('fresh', member.initialPassword, 'm13-sign-in');
+    expect(existsSync(join(account, 'files'))).toBe(true);
     await f.core.team.setMode(owner, false);
     await f.core.team.setMode(owner, true);
     expect(f.core.registry.list(human.humanId)).toEqual([]);

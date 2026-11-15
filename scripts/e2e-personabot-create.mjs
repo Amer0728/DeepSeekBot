@@ -138,7 +138,7 @@ function creationCli(instance, command, input) {
   }
 }
 
-function audienceDirectoryCli(instance, as) {
+function verificationCli(instance, as, command = ['spaces', 'audience-directory']) {
   const login = new URL(instance.url);
   const token = login.searchParams.get('token');
   const result = spawnSync(
@@ -148,8 +148,7 @@ function audienceDirectoryCli(instance, as) {
       '--host',
       login.origin,
       ...(as ? ['--as', as] : []),
-      'spaces',
-      'audience-directory',
+      ...command,
     ],
     {
       cwd: root,
@@ -160,7 +159,7 @@ function audienceDirectoryCli(instance, as) {
       maxBuffer: 1024 * 1024,
     },
   );
-  if (result.error) throw new Error('Audience directory CLI did not settle');
+  if (result.error) throw new Error('Verification CLI did not settle');
   return { status: result.status, value: JSON.parse(result.stdout) };
 }
 function minimalAudienceDirectory(value) {
@@ -336,7 +335,13 @@ try {
       'workspaces.manageShared',
     ]).role;
     seed.team.roles.set(owner, memberHuman.humanId, [manager.roleId]);
-    const memberTob = await seed.tob.ensure(memberHuman);
+    if (seed.tob.slug(memberHuman) !== undefined) throw new Error('Member unexpectedly has a Tob');
+    const formerTob = seed.registry.create({
+      slug: 'former-member-tob-memory',
+      displayName: 'Former member Tob',
+      ownerHumanId: memberHuman.humanId,
+    });
+    if (!formerTob.ok) throw new Error('Former member Tob fixture could not be created');
     const custom = seed.registry.get(customCli.bot.id);
     const privateMember = seed.registry.create({
       slug: 'member-private-memory',
@@ -350,7 +355,7 @@ try {
       ownerTob.botSlug,
       custom.slug,
       privateMember.record.slug,
-      memberTob.botSlug,
+      formerTob.record.slug,
     ].map((botSlug) => {
       const path = seed.registry.memoryDirFor(botSlug);
       writeFileSync(join(path, 'switch-kept.txt'), botSlug);
@@ -403,8 +408,15 @@ try {
   }
   current = launch(port, false);
   pid = current.pid;
-  const ownerDirectory = audienceDirectoryCli(current);
-  const memberDirectory = audienceDirectoryCli(current, 'memory-member');
+  const noTob = verificationCli(current, 'memory-member', ['tob-home']);
+  if (
+    noTob.status !== 0 ||
+    noTob.value?.available !== false ||
+    Object.keys(noTob.value).join(',') !== 'available'
+  )
+    throw new Error('Member Tob home did not report no Tob');
+  const ownerDirectory = verificationCli(current);
+  const memberDirectory = verificationCli(current, 'memory-member');
   if (
     ownerDirectory.status !== 0 ||
     memberDirectory.status !== 0 ||
@@ -416,7 +428,7 @@ try {
     humanId: member.member.humanId,
     roleIds: ['member'],
   });
-  const refusedDirectory = audienceDirectoryCli(current, 'memory-member');
+  const refusedDirectory = verificationCli(current, 'memory-member');
   if (
     refusedDirectory.status === 0 ||
     refusedDirectory.value?.error?.code !== 'permission-required' ||
@@ -430,6 +442,11 @@ try {
     pid = undefined;
     current = launch(port, false);
     pid = current.pid;
+    if (enabled) {
+      const noTob = verificationCli(current, 'memory-member', ['tob-home']);
+      if (noTob.status !== 0 || noTob.value?.available !== false)
+        throw new Error('Team switch allocated a member Tob');
+    }
     const currentOptions = await rpc(port, 'botharness', 'workspaceOptions');
     if (!currentOptions.workspaces.some((entry) => entry.id === workspaceId))
       throw new Error('Owner native Workspace option disappeared after changing Team mode');
@@ -667,6 +684,7 @@ try {
       workspaceCreated: true,
       ownerNativeGrantsInBothModes: true,
       spaceAudienceDirectoryCliParity: true,
+      memberTobAbsent: true,
       memoryStableAcrossTeamSwitchesAndRestarts: true,
       personaBotCreated: true,
       persistedAfterRestart: true,
