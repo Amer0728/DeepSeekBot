@@ -10,6 +10,7 @@ vi.mock('../src/client/channel-sidebar-icon', () => ({ ChannelSidebarIcon: () =>
 import { isChannelMessage } from '../../core/src/channels/channel';
 import { parseChannelMessage } from '../src/client/bridge';
 import { AutoApprovalLine } from '../src/client/approval-template-entry';
+import { OpaqueToolWarning } from '../src/client/approval-mask';
 import { zhTranslate } from '../src/client/locale';
 
 it.each(['allowed', 'ask-human', 'rejected'] as const)(
@@ -68,6 +69,49 @@ it.each(['allowed', 'ask-human', 'rejected'] as const)(
     } finally {
       act(() => root.unmount());
       host.remove();
+    }
+  },
+);
+
+it.each(['allowed-once', 'allowed-always-tool', 'rejected'] as const)(
+  'retains the original opaque warning after %s',
+  async (state) => {
+    const host = document.createElement('div');
+    const root = createRoot(host);
+    try {
+      await act(async () =>
+        root.render(
+          createElement(OpaqueToolWarning, {
+            approval: {
+              masked: false,
+              kind: 'tool-approval',
+              botSlug: 'ada',
+              state,
+              requestedAt: '2026-11-16T01:00:00Z',
+              opaque: true,
+            },
+            t: zhTranslate,
+          }),
+        ),
+      );
+      expect(host.textContent).toContain(zhTranslate('approval.opaqueWarning'));
+      await act(async () =>
+        root.render(
+          createElement(OpaqueToolWarning, {
+            approval: {
+              masked: true,
+              kind: 'tool-approval',
+              botSlug: 'ada',
+              state,
+              requestedAt: '2026-11-16T01:00:00Z',
+            },
+            t: zhTranslate,
+          }),
+        ),
+      );
+      expect(host.textContent).toBe('');
+    } finally {
+      act(() => root.unmount());
     }
   },
 );
