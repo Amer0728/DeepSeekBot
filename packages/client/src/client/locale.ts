@@ -2719,6 +2719,7 @@ export const zh = {
   'composer.submissionNotDelivered': 'Host 没有收到这条消息。可点「发送失败」放回输入框后重发。',
   'message.restoreBlocked': '输入框已有草稿，请先处理草稿再恢复失败消息。',
   'main.group.note': '邀请 Bot 加入，或在频道侧栏的「外部连接器」中接入外部会话。',
+  'main.group.memberNote': '给频道里的所有人发第一条消息。',
   'main.localChat': '本地对话',
   'main.localChat.with': '这是与 {name} 的本地对话',
   'main.localChat.hint': '直接发消息即可；Bot 会自行安排事项，并在这里回复结果。',
@@ -8512,6 +8513,7 @@ My relationship with you, established lore and topics to avoid: [fill in].
     "Average output speed of the last {count} Bot replies among this chat's latest 200 messages",
   'main.group.note':
     'Invite Bots or connect an external conversation under External connectors in the Channel sidebar.',
+  'main.group.memberNote': 'Send the first message to everyone in this channel.',
   'main.localChat': 'Local chat',
   'main.localChat.with': 'This is a local conversation with {name}',
   'message.mention.openDm': 'Open DM with {bot}',

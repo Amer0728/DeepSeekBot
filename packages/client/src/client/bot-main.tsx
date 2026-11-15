@@ -1190,13 +1190,14 @@ function EmptyConversation({
   bot: BotSummary | undefined;
   t: BotHarnessTranslate;
 }): ReactElement {
+  const member = useTeamMember();
   return (
     <div className="bh-chat-empty" {...stylex.props(messageStyles.emptyContainer)}>
       <PanelEmptyState icon="messages-circle">
         {isHumanDmChannel(channel)
           ? t('main.humanChat.hint')
           : channel?.type === 'group'
-            ? `${channel.name} · ${t('main.group.note')}`
+            ? `${channel.name} · ${t(member ? 'main.group.memberNote' : 'main.group.note')}`
             : `${bot === undefined ? t('main.localChat') : t('main.localChat.with', { name: bot.displayName })} · ${t('main.localChat.hint')}`}
       </PanelEmptyState>
     </div>
