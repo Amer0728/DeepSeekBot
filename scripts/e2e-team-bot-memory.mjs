@@ -157,6 +157,8 @@ try {
   memory(alice, 'memory-restore-commit', '--sha', first.sha, '--expected-head', second.sha);
   assert.equal(memory(alice, 'memory-file', '--path', 'm4200.md').file.body, 'M4200 version one');
   assert(memory(alice, 'memory-checkpoints').checkpoints.length > 0);
+  const headBeforeRefusal = memory(alice, 'memory-snapshot').snapshot.head;
+  const bodyBeforeRefusal = memory(alice, 'memory-file', '--path', 'm4200.md').file.body;
   run(
     [
       '--as',
@@ -171,6 +173,8 @@ try {
     undefined,
     'memory-conflict',
   );
+  assert.equal(memory(alice, 'memory-snapshot').snapshot.head, headBeforeRefusal);
+  assert.equal(memory(alice, 'memory-file', '--path', 'm4200.md').file.body, bodyBeforeRefusal);
   const imageBot = slug;
   const imageBytes = readFileSync(
     join(root, 'packages/core/test/fixtures/memory-images/green.svg'),

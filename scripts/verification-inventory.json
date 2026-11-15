@@ -1922,7 +1922,7 @@
       "behaviors": ["team.own-bot-memory"],
       "reason": "Fresh named Host; member role, private Bot, saves, history, versions, restores, cross-member refusal and off/on preservation; no model or UI qualification.",
       "task": 4200,
-      "sha256": "d6deec8311475821b8acdc37b6559a229e57950e382a8e8c60e076c5cecf9e58"
+      "sha256": "d66dc41124b2f78f70eb10a685f8a4176a67b7a0ad4f3076e90e91b47683856e"
     },
     {
       "path": "scripts/e2e-message-inline-actions.mjs",
