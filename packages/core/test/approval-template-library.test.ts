@@ -1,3 +1,7 @@
+import {
+  decodeApprovalTemplateGuidance,
+  encodeApprovalTemplateGuidance,
+} from '../src/workspaces/approval-template-guidance.js';
 import { OWNER_HUMAN_CONTEXT } from '../src/humans/context.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -61,6 +65,48 @@ function fakeRegistry(records: Partial<PersonaBotRecord>[]) {
 }
 
 describe('Approval Template library', () => {
+  it('round-trips three-part guidance and preserves every byte of legacy Markdown on conversion', () => {
+    const legacy = '# Legacy\r\n\r\n## Allow\r\n- Read.\r\n<!-- custom -->\r\n';
+    const parts = decodeApprovalTemplateGuidance(legacy);
+    expect(parts).toEqual({ alwaysAsk: [], alwaysAllow: [], freeText: legacy });
+    const library = createApprovalTemplateLibrary(tempDir());
+    const text = encodeApprovalTemplateGuidance({
+      ...parts,
+      alwaysAsk: ['发送消息'],
+      alwaysAllow: ['Read files'],
+    });
+    expect(library.create('structured', text)).toMatchObject({ ok: true });
+    expect(decodeApprovalTemplateGuidance(library.get('structured')!.text)).toEqual({
+      ...parts,
+      alwaysAsk: ['发送消息'],
+      alwaysAllow: ['Read files'],
+    });
+    expect(
+      library.create(
+        'too-large',
+        encodeApprovalTemplateGuidance({ ...parts, freeText: '界'.repeat(11000) }),
+      ),
+    ).toEqual({ ok: false, reason: 'invalid-text' });
+    expect(library.create('broken', '<!-- botharness:approval-guidance:v1 -->\n{}')).toEqual({
+      ok: false,
+      reason: 'invalid-text',
+    });
+  });
+  it('refuses oversized structured input before spending work on JSON decoding', () => {
+    const library = createApprovalTemplateLibrary(tempDir());
+    const input =
+      '<!-- botharness:approval-guidance:v1 -->\n' +
+      ' '.repeat(APPROVAL_TEMPLATE_TEXT_LIMIT) +
+      '{}';
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      expect(library.create('oversized', input)).toEqual({ ok: false, reason: 'invalid-text' });
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
   it('keeps each Human template as one Markdown file next to the read-only built-ins', () => {
     const dir = join(tempDir(), 'approval-templates');
     const library = createApprovalTemplateLibrary(dir);
@@ -334,6 +380,19 @@ describe('Approval Template bridge methods', () => {
     expect(registry.get('bob')?.approvalTemplate).toBeUndefined();
   });
 
+  it('keeps copies independent and saving alone leaves Bot/global selections intact', () => {
+    const { bridge, library, registry } = methods();
+    library.setGlobal('cautious');
+    registry.setApprovalTemplate('bob', '@global');
+    bridge.approvalTemplateCreate({ name: 'original', text: MINE });
+    bridge.approvalTemplateCreate({ name: 'copy', from: 'original' });
+    bridge.approvalTemplateUpdate({ name: 'original', text: '# Changed' });
+    expect(library.get('copy')?.text).toBe(MINE);
+    expect(library.get('copy')).not.toHaveProperty('from');
+    expect(registry.get('bob')?.approvalTemplate).toBe('@global');
+    expect(library.global()).toEqual({ kind: 'selected', name: 'cautious' });
+  });
+
   it('creates, copies, edits and lists templates with the Bots that use them', () => {
     const { bridge } = methods();
     expect(bridge.approvalTemplateCreate({ name: 'night-shift', text: MINE })).toMatchObject({
@@ -482,6 +541,37 @@ describe('deepseekbot approval-template', () => {
       { method: 'approvalTemplateGlobalSet', args: { template: null } },
       { method: 'botApprovalTemplateSet', args: { slug: 'ada', template: '@global' } },
     ]);
+  });
+
+  it('creates a blank draft explicitly and applies only with the explicit target flag', async () => {
+    const live = await host();
+    await invoke(['approval-template', 'create', 'blank', '--blank'], live.url);
+    expect(live.calls).toHaveLength(1);
+    expect(live.calls[0]).toMatchObject({ method: 'approvalTemplateCreate' });
+    const partsFile = join(tempDir(), 'parts.json');
+    const parts = {
+      alwaysAsk: ['Send messages'],
+      alwaysAllow: ['Read files'],
+      freeText: 'Ask when unsure.',
+    };
+    writeFileSync(partsFile, JSON.stringify(parts));
+    await invoke(
+      ['approval-template', 'edit', 'blank', '--parts-file', partsFile, '--apply-to', 'ada'],
+      live.url,
+    );
+    expect(live.calls.slice(1)).toEqual([
+      {
+        method: 'approvalTemplateUpdate',
+        args: { name: 'blank', text: encodeApprovalTemplateGuidance(parts) },
+      },
+      { method: 'botApprovalTemplateSet', args: { slug: 'ada', template: 'blank' } },
+    ]);
+    expect(
+      changesApprovalPolicy(
+        'deepseekbot approval-template create blank --blank --apply-to ada',
+        () => false,
+      ),
+    ).toBe(true);
   });
 
   it('refuses bad usage before calling the Host', async () => {

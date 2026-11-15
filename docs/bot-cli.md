@@ -2102,3 +2102,21 @@ deepseekbot models allowed [--as <username>]
 ```
 
 Tool effect declarations (E1) preserve the existing tool commands and approval outcomes. Full Access, saved rules, Secrets, device targets and Workspace Grants retain their existing checks; no new route or CLI authority is introduced.
+
+### Three-part approval guidance
+
+Create an empty draft explicitly with `deepseekbot approval-template create my-draft --blank`, or an independent copy with `deepseekbot approval-template create my-copy --from cautious`. No source is selected implicitly; copies retain no origin link. Existing `--file` / `--text-stdin` Markdown input remains supported.
+
+For three-part editing, write a UTF-8 JSON file:
+
+```json
+{
+  "alwaysAsk": ["Send messages or spend money"],
+  "alwaysAllow": ["Read local project files"],
+  "freeText": "Ask me when unsure."
+}
+```
+
+Run `deepseekbot approval-template edit my-draft --parts-file guidance.json`. Read it back with `deepseekbot approval-template show my-draft`; `text` contains the versioned representation. Add `--apply-to <bot-id>` to create/edit to save and then select it for that Bot. Without that flag, saving changes no selection. Applying uses the existing Bot selection authorization; if applying fails, the saved draft remains and can be selected separately.
+
+Editing a shared original affects future Reviews for every Bot in its `usedBy` list, including global inheritors. Copy first to work independently. Always ask has priority over Always allow, then free text supplements both. These are fallible natural-language instructions, never deterministic Tool Approval Rules. Conflicts, missing coverage or uncertainty ask the Human. Legacy Markdown remains intact as free text when converted; already-started Reviews retain their captured content/version.

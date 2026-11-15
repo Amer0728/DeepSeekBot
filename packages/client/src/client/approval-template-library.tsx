@@ -1,4 +1,9 @@
-import { useClientFields } from './use-client-store.js';
+import {
+  decodeApprovalTemplateGuidance,
+  encodeApprovalTemplateGuidance,
+  type ApprovalTemplateGuidance,
+} from '../../../core/src/workspaces/approval-template-guidance.js';
+import { useClientFields, useStoreSlice } from './use-client-store.js';
 import { useState, type ReactElement } from 'react';
 import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives';
 import * as stylex from '@stylexjs/stylex';
@@ -10,6 +15,7 @@ import {
   errorMessage,
   loadApprovalTemplates,
   setGlobalApprovalTemplate,
+  setBotApprovalTemplate,
   updateApprovalTemplate,
   type ApprovalTemplateView,
   type BridgeCall,
@@ -24,7 +30,15 @@ import { space } from './ds/tokens.stylex.js';
 import type { BotHarnessTranslate } from './locale.js';
 import { LoadingSkeleton } from './loading-skeleton.js';
 import { useMountedResource } from './mounted-resource.js';
-import type { ClientStore } from './store.js';
+import type { ClientState, ClientStore } from './store.js';
+
+function currentTemplateBot(state: ClientState): string | undefined {
+  const selection = state.selection;
+  if (selection?.kind === 'bot') return selection.slug;
+  if (selection?.kind === 'channel')
+    return state.channels.find((channel) => channel.id === selection.channelId)?.botSlug;
+  return undefined;
+}
 
 const TEMPLATE_LIBRARY_FIELDS = ['bots'] as const;
 
@@ -35,6 +49,7 @@ const styles = stylex.create({
 });
 
 type Editor =
+  | { mode: 'source' }
   | { mode: 'create'; name: string; text: string }
   | { mode: 'view'; template: ApprovalTemplateView }
   | { mode: 'edit'; template: ApprovalTemplateView; text: string };
@@ -52,9 +67,82 @@ function copyName(name: string, taken: readonly ApprovalTemplateView[]): string 
   return candidate;
 }
 
-function copyText(text: string, suffix: string): string {
-  return text.replace(/^(#[ \t]+)(.+)$/mu, (_match, mark: string, title: string) =>
-    title.trimEnd().endsWith(suffix) ? mark + title : mark + title.trimEnd() + ' ' + suffix,
+function GuidanceFields({
+  text,
+  onChange,
+  t,
+}: {
+  text: string;
+  onChange(text: string): void;
+  t: BotHarnessTranslate;
+}): ReactElement {
+  const parts = decodeApprovalTemplateGuidance(text);
+  const update = (next: ApprovalTemplateGuidance): void =>
+    onChange(encodeApprovalTemplateGuidance(next));
+  return (
+    <FieldStack>
+      <Note>{t('autoApproval.library.guidanceHint')}</Note>
+      {(['alwaysAsk', 'alwaysAllow'] as const).map((key) => (
+        <FieldStack key={key}>
+          {parts[key].map((row, index) => (
+            <div key={index}>
+              <TextField
+                label={
+                  t(
+                    key === 'alwaysAsk'
+                      ? 'autoApproval.library.alwaysAsk'
+                      : 'autoApproval.library.alwaysAllow',
+                  ) +
+                  ' ' +
+                  String(index + 1)
+                }
+                value={row}
+                onChange={(value) =>
+                  update({
+                    ...parts,
+                    [key]: parts[key].map((item, position) => (position === index ? value : item)),
+                  })
+                }
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  update({
+                    ...parts,
+                    [key]: parts[key].filter((_, position) => position !== index),
+                  })
+                }
+              >
+                {t('autoApproval.library.removeRow')}
+              </Button>
+            </div>
+          ))}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => update({ ...parts, [key]: [...parts[key], ''] })}
+          >
+            {t('autoApproval.library.addRow', {
+              section: t(
+                key === 'alwaysAsk'
+                  ? 'autoApproval.library.alwaysAsk'
+                  : 'autoApproval.library.alwaysAllow',
+              ),
+            })}
+          </Button>
+        </FieldStack>
+      ))}
+      <TextAreaField
+        label={t('autoApproval.library.freeText')}
+        hint={t('autoApproval.library.freeTextHint')}
+        value={parts.freeText}
+        rows={8}
+        onChange={(freeText) => update({ ...parts, freeText })}
+      />
+    </FieldStack>
   );
 }
 
@@ -73,9 +161,12 @@ export function ApprovalTemplateLibrarySettings({
   const [loadError, setLoadError] = useState<string>();
   const [editor, setEditor] = useState<Editor>();
   const [deleting, setDeleting] = useState<ApprovalTemplateView>();
+  const [applyTo, setApplyTo] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  useClientFields(TEMPLATE_LIBRARY_FIELDS, store);
+  const { bots } = useClientFields(TEMPLATE_LIBRARY_FIELDS, store);
+  const currentBotSlug = useStoreSlice(store, currentTemplateBot);
+  const currentBot = bots.find((bot) => bot.slug === currentBotSlug);
 
   const reload = async (): Promise<void> => {
     const next = await loadApprovalTemplates(call);
@@ -121,8 +212,14 @@ export function ApprovalTemplateLibrarySettings({
 
   const close = (): void => {
     setEditor(undefined);
+    setApplyTo('');
     setDeleting(undefined);
     setError(undefined);
+  };
+  const createDraft = (draft: Extract<Editor, { mode: 'create' }>): void => {
+    setApplyTo('');
+    setError(undefined);
+    setEditor(draft);
   };
   const run = (operation: () => Promise<unknown>): void => {
     if (busy) return;
@@ -165,6 +262,63 @@ export function ApprovalTemplateLibrarySettings({
       );
     }
     if (editor === undefined) return null;
+    if (editor.mode === 'source')
+      return (
+        <FormDialog
+          title={t('autoApproval.library.createTitle')}
+          labels={labels}
+          submitLabel=""
+          onCancel={close}
+        >
+          <Select
+            label={t('autoApproval.library.source')}
+            value="@choose"
+            options={[
+              { value: '@choose', label: t('autoApproval.library.chooseSource') },
+              { value: '@blank', label: t('autoApproval.library.blank') },
+              ...list.map((template) => ({
+                value: template.name,
+                label: template.builtIn
+                  ? templateTitle(t, template.name, template.title)
+                  : templateTitle(t, template.name, template.title) + ' · ' + template.name,
+              })),
+            ]}
+            onChange={(source) => {
+              if (source === '@choose') return;
+              const template = list.find((item) => item.name === source);
+              createDraft({
+                mode: 'create',
+                name: template === undefined ? '' : copyName(template.name, list),
+                text:
+                  template?.text ??
+                  encodeApprovalTemplateGuidance({ alwaysAsk: [], alwaysAllow: [], freeText: '' }),
+              });
+            }}
+          />
+        </FormDialog>
+      );
+    const saveChoice = (
+      <Select
+        label={t('autoApproval.library.saveChoice')}
+        value={applyTo}
+        disabled={busy}
+        options={[
+          { value: '', label: t('autoApproval.library.saveOnly') },
+          ...(currentBot === undefined
+            ? []
+            : [
+                {
+                  value: currentBot.slug,
+                  label: t('autoApproval.library.saveApply', { name: currentBot.displayName }),
+                },
+              ]),
+        ]}
+        onChange={setApplyTo}
+      />
+    );
+    const apply = async (name: string): Promise<void> => {
+      if (applyTo !== '') await setBotApprovalTemplate(call, applyTo, name);
+    };
     if (editor.mode === 'create') {
       const nameProblem =
         editor.name !== '' && !NAME.test(editor.name)
@@ -183,7 +337,13 @@ export function ApprovalTemplateLibrarySettings({
           error={error}
           onCancel={close}
           onSubmit={() =>
-            run(() => createApprovalTemplate(call, editor.name, { text: editor.text }))
+            run(async () => {
+              const template = await createApprovalTemplate(call, editor.name, {
+                text: editor.text,
+              });
+              setEditor({ mode: 'edit', template, text: editor.text });
+              await apply(editor.name);
+            })
           }
         >
           <FieldStack>
@@ -198,13 +358,12 @@ export function ApprovalTemplateLibrarySettings({
               autoComplete="off"
               onChange={(name) => setEditor({ ...editor, name: name.trim() })}
             />
-            <TextAreaField
-              label={t('autoApproval.library.text')}
-              hint={t('autoApproval.library.newHint')}
-              value={editor.text}
-              rows={16}
+            <GuidanceFields
+              text={editor.text}
               onChange={(text) => setEditor({ ...editor, text })}
+              t={t}
             />
+            {saveChoice}
           </FieldStack>
         </FormDialog>
       );
@@ -222,10 +381,10 @@ export function ApprovalTemplateLibrarySettings({
           submitData={{ 'data-approval-template-submit': 'copy' }}
           onCancel={close}
           onSubmit={() =>
-            setEditor({
+            createDraft({
               mode: 'create',
               name: copyName(template.name, list),
-              text: copyText(template.text ?? '', t('autoApproval.library.copySuffix')),
+              text: template.text ?? '',
             })
           }
         >
@@ -248,34 +407,56 @@ export function ApprovalTemplateLibrarySettings({
         labels={labels}
         submitLabel={t('autoApproval.library.save')}
         submitData={{ 'data-approval-template-submit': 'save' }}
-        submitDisabled={editor.text.trim() === '' || editor.text === template.text}
+        submitDisabled={
+          editor.text.trim() === '' || (editor.text === template.text && applyTo === '')
+        }
         busy={busy}
         error={error}
         onCancel={close}
-        onSubmit={() => run(() => updateApprovalTemplate(call, template.name, editor.text))}
+        onSubmit={() =>
+          run(async () => {
+            if (editor.text !== template.text)
+              await updateApprovalTemplate(call, template.name, editor.text);
+            await apply(template.name);
+          })
+        }
         secondary={
-          <DangerTextButton
-            disabled={busy}
-            onClick={() => {
-              setError(undefined);
-              setDeleting(template);
-            }}
-          >
-            {t('autoApproval.library.delete')}
-          </DangerTextButton>
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() =>
+                createDraft({
+                  mode: 'create',
+                  name: copyName(template.name, list),
+                  text: editor.text,
+                })
+              }
+            >
+              {t('autoApproval.library.copy')}
+            </Button>
+            <DangerTextButton
+              disabled={busy}
+              onClick={() => {
+                setError(undefined);
+                setDeleting(template);
+              }}
+            >
+              {t('autoApproval.library.delete')}
+            </DangerTextButton>
+          </>
         }
       >
         {names === undefined ? null : (
           <Callout tone="muted">{t('autoApproval.library.inUse', { names })}</Callout>
         )}
-        <TextAreaField
-          label={t('autoApproval.library.text')}
-          hint={t('autoApproval.library.fileHint', { name: template.name })}
-          value={editor.text}
-          rows={16}
-          initialFocus
+        <GuidanceFields
+          text={editor.text}
           onChange={(text) => setEditor({ ...editor, text })}
+          t={t}
         />
+        {saveChoice}
       </FormDialog>
     );
   })();
@@ -348,7 +529,7 @@ export function ApprovalTemplateLibrarySettings({
               variant="outline"
               size="sm"
               disabled={templates === undefined}
-              onClick={() => setEditor({ mode: 'create', name: '', text: '' })}
+              onClick={() => setEditor({ mode: 'source' })}
             >
               {t('autoApproval.library.create')}
             </Button>
@@ -391,6 +572,13 @@ export function ApprovalTemplateLibrarySettings({
                   <Button
                     variant="outline"
                     size="sm"
+                    aria-label={
+                      template.builtIn
+                        ? templateTitle(t, template.name, template.title)
+                        : t('autoApproval.library.editTitle', {
+                            title: templateTitle(t, template.name, template.title),
+                          })
+                    }
                     onClick={() => {
                       setError(undefined);
                       setEditor(
