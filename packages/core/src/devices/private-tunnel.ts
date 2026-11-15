@@ -58,11 +58,17 @@ export type PrivateTunnelRefusal =
   | 'private-route-id-required'
   | 'private-route-not-found'
   | 'private-route-replace-required'
+  | 'private-route-changed'
   | 'private-route-limit'
   | 'private-tunnel-credential-invalid';
 
 export type PrivateTunnelResult =
-  | { ok: true; status: PrivateTunnelStatus; routeId?: 'quick' | 'custom' }
+  | {
+      ok: true;
+      status: PrivateTunnelStatus;
+      routeId?: 'quick' | 'custom';
+      expectedRevision?: string;
+    }
   | { ok: false; code: PrivateTunnelRefusal };
 
 export interface TunnelRecord {

@@ -1022,11 +1022,28 @@ deepseekbot connection-host <host-id> test-route <origin> --client-id <id>
 deepseekbot connection-host <host-id> remove --client-id <id> --confirm
 deepseekbot connection-host <host-id> revoke-device <device-id> --client-id <id> --confirm
 deepseekbot connection-host <host-id> stop-route lan --client-id <id> --confirm
-deepseekbot connection-host <host-id> stop-route private-tunnel --client-id <id> --confirm
+deepseekbot connection-host <host-id> plan-stop-route private-tunnel --connection-route-id quick --client-id <id>
+deepseekbot connection-host <host-id> stop-route private-tunnel --connection-route-id quick --expected-route-revision <revision> --client-id <id> --confirm
+deepseekbot connection-host <host-id> plan-stop-route lan --client-id <id>
+deepseekbot connection-host <host-id> stop-route lan --handover <trusted-origin> --client-id <id> --confirm
+deepseekbot connection-host <host-id> stop-route lan --confirm-disconnect --client-id <id> --confirm
+deepseekbot connection-host <host-id> plan-revoke-device <device-id> --client-id <id>
+deepseekbot connection-host <host-id> plan-sign-out --client-id <id>
+deepseekbot connection-host <host-id> sign-out --client-id <id> --confirm
+deepseekbot connection-host <host-id> read-operation --client-id <id>
+deepseekbot connection-host <host-id> read-previous-operation --client-id <id>
 deepseekbot connection-host <host-id> select-route <origin-or-automatic> --client-id <id> --confirm
 ```
 
+`plan-*` 先读取具名 Host，报告操作是否可能断开当前 Client。`--handover <trusted-origin>` 验证已有替代路由，明确保存此 Client 的手动路由偏好，等待实际连接切换并回读同一 Host 后才提交操作。没有可用替代路由时，用 `--confirm-disconnect` 明确接受断开，仍须保留 `--confirm`。停止私有路由须指定 `quick` 或 `custom`，其他路由保留。退出登录通过目标 Host 的账号所有者执行；关系断开和单设备撤销保持独立效果。
+
+停止私有线路前，先执行 `plan-stop-route`，将计划返回的配置代次原样传给 `--expected-route-revision`。配置变化或 Host 重启后须重新计划，不能用新读取的代次替换此前确认值。Host 在停止前原子拒绝配置不匹配；代次不匹配、缺失或没有代次的旧记录不能解除私有停止操作的未知结果。
+
+发送前，未知结果保护会原子写入所选 Client 已有 HostStorage 所有者下的带版本执行索引，重新加载后仍保留，不自动重放。共享 Web Lock 覆盖准备、一次写入和确认；缺少 Web Locks 时拒绝危险写入。`read-operation` 在同一锁内重新读取保护记录，通过同一已认证 Host 所有者回读，只在观察到完成后清除匹配代次；原值未变或无法读取仍视为未知。设备授权被撤销并重新登记后，用 `read-previous-operation` 通过同一固定 Host 的新授权明确读取旧操作结果；仅在确认完成后解除写入保护，Host 公钥变化时拒绝回读。旧设备授权的未确认事实独立保留，不继承或重发到新授权；最多保留 32 条未解决记录，达到上限后拒绝新增写入。通过已信任路由恢复连接后再回读。离线时保留已加载的频道和消息，不停止其他所有者的 Tailscale 映射或无关 Host 进程。
+
 `select-route` 先在所选浏览器的现有 Host 记录中保存选择，再等待进行中的请求结束后切换。手动地址必须已获准；失败不会自动换路。传入 `automatic` 恢复既有自动策略，不扩大通道资格。`connection-hosts` 分别报告保存的选择、切换是否待完成和实际当前线路。只影响这个 Client/Host；手机连接详情通过同一 HostClient 行为及手机自己的保存所有者执行。
+
+新执行记录与 SavedHost 凭据分开。旧页面不能安全处理新索引格式，会拒绝更改；请重新加载目标浏览器页面，再管理连接或回读结果。回退代码前，先用当前版本处理未解决记录。不能通过删除未知记录恢复旧页面的写入。旧格式引用的操作仍可读取。
 
 通过现有 Client 控制通道执行，与连接对话框复用同一管理适配器。列表只返回 Host 标识、名称及实际线路观察，不返回设备凭据或私钥。`inspect` 使用该浏览器对目标 Host 的配对授权读取设备与可停止线路。`remove` 仅删除此浏览器的本地连接，保留 Host 数据和设备授权；`revoke-device` 在目标 Host 撤销指定设备；`stop-route` 只关闭指定目标的局域网监听或私有 Tunnel。停止当前线路或撤销当前设备可能令响应中断，未收到确认不能视为成功，需重新检查。未知 Host、线路、设备、过期请求和未确认写入均拒绝。账号分组不改变连接的登录/退出来源或授予管理权限。
 
@@ -1902,12 +1919,15 @@ Bot 已有存活的 Orchestrator Agent 后，`bot-tools` 也会列出其注册�
 
 使用 `device-offer --route-id quick|custom --out <新的绝对路径私有文件>` 创建单条连接的邀请，用于恢复连接或旧版手机；省略 `--route-id` 则邀请包含所有已连通的私有地址。
 
+`private-route stop` 可选传入 `list` 返回的 `--expected-route-revision`，将停止绑定到该配置；省略时，明确的本地 owner 命令保留无条件行为。代次变化时在写入前拒绝。
+
 `private-route list` 读取 Host 的公开 `privateRoutes` 状态。一台 Host 支持 `quick` 和一个 `custom` 连接（Named Tunnel 或自有 HTTPS 入口）：
 
 ```bash
 deepseekbot private-route add quick --confirm
 deepseekbot private-route add custom --origin https://bot.example.com --confirm
 deepseekbot private-route stop quick --confirm
+deepseekbot private-route stop quick --expected-route-revision <list返回的代次> --confirm
 deepseekbot private-route start quick --confirm
 deepseekbot private-route replace custom --hostname bot.example.com --token-stdin --confirm
 deepseekbot private-route remove custom --confirm

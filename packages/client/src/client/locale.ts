@@ -349,6 +349,26 @@ export const zh = {
   'connections.hosts.removeTitle': '移除 {name}？',
   'connections.hosts.revokeTitle': '撤销 {name} 的授权？',
   'connections.hosts.stopTitle': '停止 {name}？',
+  'connections.remote.title': '连接',
+  'connections.remote.ownerChanged': '{name} 的旧授权操作尚未确认。请先核对结果，再更改此环境。',
+  'connections.remote.readPrevious': '核对之前的操作结果',
+  'connections.remote.storageUnavailable':
+    '连接操作记录缺失或无法读取。更改已停用；请恢复本应用记录，或在此环境所在电脑上管理。',
+  'connections.remote.lockUnavailable':
+    '更改连接需要支持 Web Locks 的安全页面。请在此环境所在电脑上打开，或使用其命令行管理连接。',
+  'connections.remote.unknown':
+    '{name} 的操作结果未知。请先读取此环境的状态，不要重复提交。已加载内容会保留。',
+  'connections.remote.readback': '读取操作结果',
+  'connections.remote.signOut': '退出登录',
+  'connections.remote.signOutTitle': '在 {name} 上退出登录？',
+  'connections.remote.signOutScope':
+    '停止此环境的账号发现和官方连接服务。已授权设备和独立路由保留。',
+  'connections.remote.disconnectHint':
+    '此操作可能断开你与 {name} 的连接。可明确选择并验证其他路由，或确认断开。已加载内容保留，可通过已信任的路由恢复。',
+  'connections.remote.revokeSelfHint':
+    '重新连接需要重新添加 {name} 并为此浏览器授权。切换线路不能恢复访问；已加载内容会保留。',
+  'connections.remote.handover': '执行前的连接方式',
+  'connections.remote.disconnect': '确认断开当前连接',
   'connections.hosts.removeHint': '仅从此浏览器移除连接。电脑上的数据和设备授权保留。',
   'connections.hosts.targetHint':
     '操作目标：{name}。可能断开当前管理连接；其他线路和电脑数据保留。',
@@ -5966,6 +5986,27 @@ export const en = {
   'connections.hosts.removeTitle': 'Remove {name}?',
   'connections.hosts.revokeTitle': 'Revoke {name}?',
   'connections.hosts.stopTitle': 'Stop {name}?',
+  'connections.remote.title': 'Connections',
+  'connections.remote.ownerChanged':
+    'A previous grant has an unconfirmed operation on {name}. Check its result before changing this environment.',
+  'connections.remote.readPrevious': 'Check previous operation result',
+  'connections.remote.storageUnavailable':
+    'Connection operation history is incomplete or cannot be read. Changes are blocked; restore this app’s history, or manage the environment on its computer.',
+  'connections.remote.lockUnavailable':
+    'Connection changes need a secure page with Web Locks. Open this environment on its computer, or manage its connections with its CLI.',
+  'connections.remote.unknown':
+    'The result on {name} is unknown. Read this environment’s state before trying again. Loaded content is kept.',
+  'connections.remote.readback': 'Read operation result',
+  'connections.remote.signOut': 'Sign out',
+  'connections.remote.signOutTitle': 'Sign out on {name}?',
+  'connections.remote.signOutScope':
+    'Stops account discovery and the official connection service on this environment. Device grants and independent routes are kept.',
+  'connections.remote.disconnectHint':
+    'This may disconnect you from {name}. Choose and verify another route, or confirm disconnection. Loaded content stays available; reconnect through a trusted route.',
+  'connections.remote.revokeSelfHint':
+    'To reconnect, add {name} and authorize this browser again. Changing routes cannot restore access. Loaded content stays available.',
+  'connections.remote.handover': 'Connection before applying',
+  'connections.remote.disconnect': 'Confirm disconnection',
   'connections.hosts.removeHint':
     'Remove this browser connection only. Computer data and device authorizations stay in place.',
   'connections.hosts.targetHint':
