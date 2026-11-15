@@ -137,6 +137,35 @@ describe('bridge typert service', () => {
     expect(approve).not.toHaveBeenCalled();
   });
 
+  it('declares and forwards explicit template deletion confirmation through the Gateway', () => {
+    const { service, methods } = setup();
+    const value = {
+      template: { name: 'night-shift' },
+      clearedBots: [],
+      inheritedBots: [],
+      globalDefault: null,
+    };
+    const deletion = vi
+      .spyOn(methods, 'approvalTemplateDelete')
+      .mockReturnValue({ ok: true, value });
+    const revision = 'a'.repeat(64);
+    expect(parameterNames(service.approvalTemplateDelete)).toEqual([
+      'name',
+      'confirmed',
+      'revision',
+    ]);
+    expect(service.approvalTemplateDelete('night-shift', true, revision)).toEqual(value);
+    expect(deletion).toHaveBeenLastCalledWith({ name: 'night-shift', confirmed: true, revision });
+    deletion.mockReturnValueOnce({
+      ok: false,
+      error: { code: 'confirmation-required', message: 'confirmation-required' },
+    });
+    expect(() => service.approvalTemplateDelete('night-shift', false, revision)).toThrow(
+      expect.objectContaining({ code: 'confirmation-required' }),
+    );
+    expect(deletion).toHaveBeenLastCalledWith({ name: 'night-shift', confirmed: false, revision });
+  });
+
   it('forwards optional policy revisions and preserves stale-policy refusals', async () => {
     const { service, methods } = setup();
     const set = vi.spyOn(methods, 'channelPolicySet').mockResolvedValue({ ok: true, value: null });

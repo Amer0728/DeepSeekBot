@@ -1673,6 +1673,7 @@ export class BotharnessBridgeService extends TypertRemoteService {
 
   approvalTemplateDelete(
     name: string,
+    confirmed: boolean,
     revision: string,
   ): {
     template: { name: string };
@@ -1680,7 +1681,7 @@ export class BotharnessBridgeService extends TypertRemoteService {
     inheritedBots: string[];
     globalDefault: string | null;
   } {
-    return unwrap(this.methods.approvalTemplateDelete({ name, confirmed: true, revision }));
+    return unwrap(this.methods.approvalTemplateDelete({ name, confirmed, revision }));
   }
 
   approvalTemplateGlobalSet(template: string | null): { template: string | null } {
