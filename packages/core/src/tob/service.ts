@@ -1,4 +1,5 @@
-import { OWNER_HUMAN_CONTEXT, type HumanContext } from '../humans/context.js';
+import { humanContext, type HumanContext } from '../humans/context.js';
+import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,8 +30,13 @@ export class TobError extends Error {
 }
 export function isTob(database: OperationalDatabaseModulePort, slug: string): boolean {
   return (
-    database.read((db) => db.prepare('SELECT 1 FROM tob_identity WHERE bot_slug = ?').get(slug)) !==
-    undefined
+    database.read((db) =>
+      db
+        .prepare(
+          'SELECT 1 FROM tob_identity t JOIN team_settings s ON s.owner_human_id = t.human_id WHERE t.bot_slug = ?',
+        )
+        .get(slug),
+    ) !== undefined
   );
 }
 export interface TobService {
@@ -51,6 +57,11 @@ export function createTobService(options: {
   settings?: () => TobSettingsProvider | undefined;
 }): TobService {
   const { database, registry, channels } = options;
+  const ownerId = () =>
+    z
+      .object({ owner_human_id: z.string() })
+      .parse(database.read((db) => db.prepare('SELECT owner_human_id FROM team_settings').get()))
+      .owner_human_id;
   const pending = new Map<string, Promise<TobHome>>();
   const prepare = async (human: HumanContext): Promise<TobHome> => {
     const slug = database.transaction((db) => {
@@ -85,7 +96,7 @@ export function createTobService(options: {
     if (options.ensureWorkspace) {
       const workspace = await options.ensureWorkspace(workspacePath);
       const current = registry.get(slug);
-      if (!current || current.ownerHumanId !== human.humanId)
+      if (!current || current.ownerHumanId !== human.humanId || human.humanId !== ownerId())
         throw new TobError('tob-identity-unavailable');
       if (!options.grants.list(slug).some((grant) => grant.workspaceId === workspace.id))
         await options.grants.create(slug, workspace.id);
@@ -112,7 +123,8 @@ export function createTobService(options: {
     return { scope: 'global', value: Number(value), revision: descriptor.revision };
   };
   return {
-    ensure(human = OWNER_HUMAN_CONTEXT) {
+    async ensure(human = humanContext(ownerId())) {
+      if (human.humanId !== ownerId()) throw new TobError('tob-unavailable');
       let current = pending.get(human.humanId);
       if (!current) {
         current = prepare(human).finally(() => {
@@ -123,10 +135,14 @@ export function createTobService(options: {
       return current;
     },
     isTob: (slug) => isTob(database, slug),
-    slug: (human = OWNER_HUMAN_CONTEXT) =>
+    slug: (human = humanContext(ownerId())) =>
       (
         database.read((db) =>
-          db.prepare('SELECT bot_slug FROM tob_identity WHERE human_id = ?').get(human.humanId),
+          db
+            .prepare(
+              'SELECT bot_slug FROM tob_identity t JOIN team_settings s ON s.owner_human_id = t.human_id WHERE t.human_id = ?',
+            )
+            .get(human.humanId),
         ) as { bot_slug: string } | undefined
       )?.bot_slug,
     readSetting,
