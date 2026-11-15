@@ -324,6 +324,20 @@ _避免使用_：takeover、consent dialog、per-action approval
 按 PersonaBot 与会话归因的、脱敏的 Computer 观察与动作持久记录；绝不包含输入的原文或截图。
 _避免使用_：logs、history、screenshot trail
 
+### Skills（技能）
+
+**Host Skill**：
+安装在 Host 用户级的 Skill，所有 Session、所有 PersonaBot 都可见。
+_避免使用_：全局 skill、system skill、built-in skill
+
+**Project Skill**：
+属于某个目录的 Skill。这个目录可以是 PersonaBot 的 Memory Repository，也可以是 Workspace Grant 覆盖的文件夹，由该目录的文件访问权限决定谁能看到它。PersonaBot 的 Skill 就是其 Memory Repository 下的 Project Skill，并不是另一种 Skill。
+_避免使用_：Bot Skill、workspace skill、私有 skill
+
+**Skill Invocation**：
+Human 在消息中对某个 Skill 的显式引用，像 mention 一样显示为 chip。它把该 Skill 的文本插入消息，但不指向任何对象：由哪个 PersonaBot 阅读并执行，取决于消息里的 mention 和正常路由，与 Skill 归属于谁无关。
+_避免使用_：skill command、slash command、skill call
+
 ### Browser
 
 **Bot Browser**：

@@ -273,6 +273,20 @@ _Avoid_: auto-compact, background summary, cache warming
 A Human-owned Bot-mode preference that reveals diagnostics surfaces (operational log views, verbose states) otherwise hidden by default. It gates Human visibility only — never agent capability: an agent with shell access can always reach the same underlying data, so Developer Mode must never be described or relied upon as a read boundary.
 _Avoid_: debug flag, admin mode, agent permission, read boundary
 
+### Skills
+
+**Host Skill**:
+A Skill installed at user level on the Host, visible to every Session and every PersonaBot.
+_Avoid_: global skill, system skill, built-in skill
+
+**Project Skill**:
+A Skill that belongs to one directory, either a PersonaBot's Memory Repository or a folder covered by a Workspace Grant. The directory's file access decides who can see it. A PersonaBot's Skills are the Project Skills of its Memory Repository; they are not a separate kind of Skill.
+_Avoid_: Bot Skill, workspace skill, private skill
+
+**Skill Invocation**:
+A Human's explicit reference to one Skill inside a message, shown as a chip like a mention. It inserts that Skill's text into the message and addresses no one: which PersonaBot reads and acts on it follows the message's mentions and normal routing, never the Skill's owner.
+_Avoid_: skill command, slash command, skill call
+
 ### Computer
 
 **Computer**:
