@@ -22,6 +22,7 @@ import {
   directoryFrom,
   loadAudienceDirectory,
   loadSpaces,
+  sameAudience,
   updateSpace,
   type AudienceDirectory,
   type SpaceAudience,
@@ -233,7 +234,13 @@ function SpaceDialog({
         run(() =>
           current === undefined
             ? createSpace(call, { name: name.trim(), audience })
-            : updateSpace(call, { spaceId: current.spaceId, name: name.trim(), audience }),
+            : updateSpace(call, {
+                spaceId: current.spaceId,
+                name: name.trim(),
+                ...(current.audience !== undefined && sameAudience(current.audience, audience)
+                  ? {}
+                  : { audience }),
+              }),
         )
       }
     >

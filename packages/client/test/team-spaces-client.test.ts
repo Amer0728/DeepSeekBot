@@ -7,6 +7,8 @@ import {
   loadAudienceDirectory,
   loadSpaces,
   parseSpace,
+  sameAudience,
+  updateSpace,
 } from '../src/client/team-spaces-bridge.js';
 import { audienceOptions, audienceSummary } from '../src/client/team-spaces-view.js';
 
@@ -115,5 +117,21 @@ describe('Team spaces client', () => {
       [],
     );
     expect(audienceOptions(t as never, { kind: 'everyone' }, stored, directory)).toEqual([]);
+  });
+
+  it('renames without resending an unchanged audience', async () => {
+    const call = vi.fn(async () => ({ ok: true as const, value: {} }));
+    await updateSpace(call, { spaceId: 's', name: 'Renamed' });
+    expect(call).toHaveBeenCalledWith('spaceUpdate', { spaceId: 's', name: 'Renamed' }, undefined);
+    expect(
+      sameAudience(
+        { kind: 'members', humanIds: ['a', 'b'] },
+        { kind: 'members', humanIds: ['b', 'a'] },
+      ),
+    ).toBe(true);
+    expect(
+      sameAudience({ kind: 'members', humanIds: ['a'] }, { kind: 'roles', roleIds: ['a'] }),
+    ).toBe(false);
+    expect(sameAudience({ kind: 'everyone' }, { kind: 'everyone' })).toBe(true);
   });
 });

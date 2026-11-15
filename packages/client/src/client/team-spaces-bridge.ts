@@ -78,13 +78,27 @@ export async function createSpace(
 
 export async function updateSpace(
   call: BridgeCall,
-  input: { spaceId: string; name: string; audience: SpaceAudience },
+  input: { spaceId: string; name: string; audience?: SpaceAudience },
 ): Promise<void> {
   await unwrap(call, 'spaceUpdate', {
     spaceId: input.spaceId,
     name: input.name,
-    audience: audiencePayload(input.audience),
+    ...(input.audience === undefined ? {} : { audience: audiencePayload(input.audience) }),
   });
+}
+
+function audienceIds(audience: SpaceAudience): readonly string[] {
+  if (audience.kind === 'roles') return audience.roleIds;
+  if (audience.kind === 'members') return audience.humanIds;
+  return [];
+}
+
+export function sameAudience(left: SpaceAudience, right: SpaceAudience): boolean {
+  const ids = new Set(audienceIds(left));
+  const other = new Set(audienceIds(right));
+  return (
+    left.kind === right.kind && ids.size === other.size && [...ids].every((id) => other.has(id))
+  );
 }
 
 export async function deleteSpace(call: BridgeCall, spaceId: string): Promise<void> {
