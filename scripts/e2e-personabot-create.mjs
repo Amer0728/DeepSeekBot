@@ -435,6 +435,73 @@ try {
     refusedDirectory.value.error.details?.permission !== 'workspaces.manageShared'
   )
     throw new Error('Audience directory CLI bypassed member permission checks');
+  const archiveResponse = await fetch(
+    `http://127.0.0.1:${port}/api/botharness/bot-zip?slug=${encodeURIComponent(slug)}`,
+    { headers: { cookie: cookie() }, signal: AbortSignal.timeout(30_000) },
+  );
+  if (!archiveResponse.ok) throw new Error('Member import fixture export failed');
+  const memberArchive = join(fixtureRoot, 'member-import.zip');
+  writeFileSync(memberArchive, Buffer.from(await archiveResponse.arrayBuffer()));
+  const memberUploadArgs = [
+    'bot-zip-upload',
+    '--upload-key',
+    'member-smoke-upload',
+    '--from-zip',
+    memberArchive,
+  ];
+  const deniedImport = verificationCli(current, 'memory-member', memberUploadArgs);
+  if (
+    deniedImport.status === 0 ||
+    deniedImport.value?.error?.code !== 'permission-required' ||
+    deniedImport.value.error.details?.permission !== 'bots.createPrivate'
+  )
+    throw new Error(
+      `Member import CLI refusal mismatch: exit=${deniedImport.status} code=${deniedImport.value?.error?.code} permission=${deniedImport.value?.error?.details?.permission}`,
+    );
+  const importer = await rpc(port, 'botharness', 'roleCreate', {
+    name: 'Private importer',
+    permissions: ['bots.createPrivate'],
+  });
+  await rpc(port, 'botharness', 'memberRolesSet', {
+    humanId: member.member.humanId,
+    roleIds: [importer.role.roleId],
+  });
+  const upload = verificationCli(current, 'memory-member', memberUploadArgs);
+  if (upload.status !== 0 || upload.value.offset !== upload.value.sizeBytes)
+    throw new Error('Granted member import CLI upload failed');
+  const memberImportArgs = [
+    'bot-zip-import',
+    '--upload-key',
+    'member-smoke-upload',
+    '--archive-sha256',
+    upload.value.sha256,
+    '--archive-size',
+    String(upload.value.sizeBytes),
+    '--operation-key',
+    'member-smoke-import',
+    '--name',
+    'Private imported Bot',
+  ];
+  const imported = verificationCli(current, 'memory-member', memberImportArgs);
+  const retriedImport = verificationCli(current, 'memory-member', memberImportArgs);
+  if (
+    imported.status !== 0 ||
+    imported.value?.bot?.ownerHumanId !== member.member.humanId ||
+    imported.value?.receipt?.status !== 'created' ||
+    retriedImport.status !== 0 ||
+    retriedImport.value?.receipt?.botSlug !== imported.value.receipt.botSlug
+  )
+    throw new Error('Granted member import CLI did not preserve its private Bot and receipt');
+  await rpc(port, 'botharness', 'memberRolesSet', {
+    humanId: member.member.humanId,
+    roleIds: ['member'],
+  });
+  const revokedImport = verificationCli(current, 'memory-member', memberImportArgs);
+  if (
+    revokedImport.status === 0 ||
+    revokedImport.value?.error?.details?.permission !== 'bots.createPrivate'
+  )
+    throw new Error('Member import CLI ignored permission revocation');
   for (const [step, enabled] of [false, true, false, true].entries()) {
     await rpc(port, 'botharness', 'teamModeSet', { enabled });
     stop(pid);
@@ -685,6 +752,7 @@ try {
       ownerNativeGrantsInBothModes: true,
       spaceAudienceDirectoryCliParity: true,
       memberTobAbsent: true,
+      memberPrivateImportCli: true,
       memoryStableAcrossTeamSwitchesAndRestarts: true,
       personaBotCreated: true,
       persistedAfterRestart: true,

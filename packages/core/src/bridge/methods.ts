@@ -7,6 +7,7 @@ import type { TeamChannels } from '../team/channels.js';
 import { guardHumanBridge } from '../team/bridge-access.js';
 import { botOwner, privateBotRegistry } from '../team/bot-access.js';
 import { privateBotCreations } from '../bots/creation.js';
+import { createHash } from 'node:crypto';
 import { createTeamBridge, type TeamBridgeMethods } from '../team/bridge.js';
 import type { TeamService } from '../team/service.js';
 import { OWNER_HUMAN_CONTEXT } from '../humans/context.js';
@@ -85,6 +86,7 @@ import {
 import { ZipArchiveError } from '../bots/zip-archive.js';
 import {
   BotCreationError,
+  validBotCreationKey,
   type BotCreationService,
   type BotCreationInput,
   type BotCreationReceipt,
@@ -1489,6 +1491,15 @@ function parseZipImport(payload: unknown): BotZipImportReference | undefined {
 }
 
 function zipFailure(error: unknown): BridgeResult<never> {
+  if (error instanceof TeamError)
+    return {
+      ok: false,
+      error: {
+        code: error.code,
+        message: error.code,
+        ...(error.details ? { details: error.details } : {}),
+      },
+    };
   return {
     ok: false,
     error: {
@@ -2095,11 +2106,42 @@ export function createBridgeMethodsForHumans(
 }
 
 export function createBridgeMethods(human: HumanContext, deps: BridgeMethodsDeps): BridgeMethods {
-  const scoped = {
-    ...deps,
-    ...(deps.registry ? { registry: privateBotRegistry(deps.registry, human) } : {}),
-    ...(deps.creations ? { creations: privateBotCreations(deps.creations, human) } : {}),
+  const isOwner = () => deps.team?.isOwner(human) ?? human.humanId === OWNER_HUMAN_CONTEXT.humanId;
+  const authorizeImport = () => {
+    if (isOwner()) return;
+    if (!deps.team)
+      throw new TeamError('permission-required', undefined, { permission: 'bots.createPrivate' });
+    deps.team.roles.require(human, 'bots.createPrivate');
   };
+  const registry = deps.registry
+    ? privateBotRegistry(deps.registry, human, authorizeImport)
+    : deps.registry;
+  const creations = deps.creations
+    ? privateBotCreations(deps.creations, human, isOwner, authorizeImport)
+    : undefined;
+  const imports = creations
+    ? (deps.imports?.withCreations(creations) ??
+      createBotImports(creations, deps.warn === undefined ? {} : { log: deps.warn }))
+    : undefined;
+  const scoped: BridgeMethodsDeps = {
+    ...deps,
+    registry,
+  };
+  delete scoped.creations;
+  delete scoped.imports;
+  delete scoped.zipImports;
+  if (creations) scoped.creations = creations;
+  if (imports) scoped.imports = imports;
+  if (deps.zipImports && imports)
+    scoped.zipImports = deps.zipImports.withContext(imports, registry, (key) => {
+      if (!validBotCreationKey(key)) throw new BotZipUploadError('invalid-upload');
+      return human.humanId === OWNER_HUMAN_CONTEXT.humanId && isOwner()
+        ? key
+        : 'member:' +
+            createHash('sha256')
+              .update(JSON.stringify([human.humanId, key]))
+              .digest('hex');
+    });
   return guardHumanBridge(human, deps, buildBridgeMethods(human, scoped, deps.registry), () =>
     buildBridgeMethods(human, deps),
   );

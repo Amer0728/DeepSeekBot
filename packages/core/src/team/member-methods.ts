@@ -7,6 +7,7 @@ export const MEMBER_BOT_IMPORT_METHODS = [
   'zipUploadPreview',
   'zipImport',
   'zipImportLookup',
+  'marketplaceInstallReview',
   'marketplaceInstall',
 ] as const;
 

@@ -103,6 +103,22 @@ export function guardHumanBridge(
             return refuse('member-suspended');
         }
         const input = object(payload);
+        if (
+          botCreationMethods.has(property) &&
+          (input['public'] === true ||
+            input['visibility'] === 'public' ||
+            object(input['visibility'])['kind'] === 'public')
+        ) {
+          if (!owner) {
+            try {
+              deps.team?.roles.require(human, 'bots.createPublic');
+            } catch (error) {
+              if (error instanceof TeamError) return refuse(error.code, error.details);
+              throw error;
+            }
+          }
+          return refuse('invalid-input');
+        }
         if (property === 'list' && input['administration'] === true) {
           if (!owner || human.caller === 'bot') return refuse('permission-required');
           const own = target.list(payload);
@@ -133,8 +149,6 @@ export function guardHumanBridge(
           if (refs.some((id) => typeof id === 'string' && !ownsBot(human, deps.registry.get(id))))
             return refuse('bot-not-found');
         }
-        if (!owner && MEMBER_BOT_IMPORT_METHODS.some((method) => method === property))
-          return refuse('permission-required');
         if (!owner && !MEMBER_METHODS.has(property)) return refuse('permission-required');
         if (property === 'assignmentAccessSet' && input['mode'] === 'danger-full-access') {
           if (!owner) return refuse('owner-only');

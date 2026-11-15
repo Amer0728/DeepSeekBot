@@ -1180,6 +1180,7 @@ export class TeamService {
         db.prepare('DELETE FROM human_roles WHERE human_id IN (?, ?)').run(human.humanId, humanId);
         db.prepare("INSERT INTO human_roles VALUES (?, 'admin')").run(human.humanId);
         db.prepare('UPDATE team_settings SET owner_human_id = ? WHERE singleton = 1').run(humanId);
+        db.prepare('DELETE FROM tob_identity WHERE human_id IN (?, ?)').run(human.humanId, humanId);
       },
       ['team'],
     );

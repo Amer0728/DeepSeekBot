@@ -101,6 +101,78 @@ function fixture(home = realpathSync(createTempRoot('m6-spaces-'))) {
 }
 
 describe('M6 spaces and current authority', () => {
+  it('relocates grant-only legacy subpaths without granting the account root or widening write access', () => {
+    const f = fixture();
+    const bot = f.createBot(alice, 'subpath-only');
+    const source = join(f.home, 'botharness/tob-workspaces', bot.slug);
+    const target = join(f.home, 'spaces/alice/files');
+    mkdirSync(join(source, 'reports'), { recursive: true });
+    mkdirSync(join(source, 'drafts'), { recursive: true });
+    writeFileSync(join(source, 'reports/kept.txt'), 'Report');
+    writeFileSync(join(source, 'drafts/private.txt'), 'Draft');
+    writeFileSync(join(target, 'unrelated.txt'), 'Private account file');
+    f.db.transaction((db) => {
+      db.prepare('DELETE FROM workspace_grants WHERE bot_slug = ?').run(bot.slug);
+      db.prepare(
+        "UPDATE persona_bots SET body = json_set(body, '$.workspaces', json('[]')) WHERE slug = ?",
+      ).run(bot.slug);
+      for (const [name, write] of [
+        ['reports', 0],
+        ['drafts', 1],
+      ] as const)
+        db.prepare(`INSERT INTO workspace_grants (id,bot_slug,workspace_id,workspace_path,workspace_title,created_at,orchestrator_write,write_revision)
+          VALUES (?,?,?,?,?,'before',?,?)`).run(
+          'legacy-' + name,
+          bot.slug,
+          'legacy-' + name,
+          join(source, name),
+          name,
+          write,
+          write,
+        );
+    });
+    relocateTobWorkspaces(f.db, f.home);
+    expect(f.core.registry.get(bot.slug)?.workspaces).toEqual([]);
+    expect(
+      f.core.grants
+        .list(bot.slug)
+        .filter((grant) => !grant.revokedAt)
+        .toSorted((a, b) => a.workspacePath.localeCompare(b.workspacePath)),
+    ).toEqual([
+      expect.objectContaining({ workspacePath: join(target, 'drafts'), orchestratorWrite: true }),
+      expect.objectContaining({ workspacePath: join(target, 'reports'), orchestratorWrite: false }),
+    ]);
+    for (const grant of f.core.grants.list(bot.slug).filter((grant) => !grant.revokedAt)) {
+      expect(grant.workspacePath).not.toBe(target);
+      expect(() => f.core.grants.validatePath?.(bot.slug, grant.workspacePath)).not.toThrow();
+    }
+    expect(readFileSync(join(target, 'reports/kept.txt'), 'utf8')).toBe('Report');
+    expect(readFileSync(join(target, 'drafts/private.txt'), 'utf8')).toBe('Draft');
+    expect(readFileSync(join(target, 'unrelated.txt'), 'utf8')).toBe('Private account file');
+    const grants = f.core.grants.list(bot.slug);
+    relocateTobWorkspaces(f.db, f.home);
+    expect(f.core.grants.list(bot.slug)).toEqual(grants);
+  });
+
+  it('refuses a legacy grant whose remapped path escapes the account files root', () => {
+    const f = fixture();
+    const bot = f.createBot(alice, 'unsafe-legacy');
+    const source = join(f.home, 'botharness/tob-workspaces', bot.slug);
+    mkdirSync(source, { recursive: true });
+    writeFileSync(join(source, 'kept.txt'), 'Kept');
+    f.db.transaction((db) =>
+      db
+        .prepare(`INSERT INTO workspace_grants
+      (id,bot_slug,workspace_id,workspace_path,workspace_title,created_at) VALUES ('unsafe',?,'unsafe',?,'unsafe','before')`)
+        .run(bot.slug, source + '/../escape'),
+    );
+    expect(() => relocateTobWorkspaces(f.db, f.home)).toThrow('grant-protected-path');
+    expect(readFileSync(join(source, 'kept.txt'), 'utf8')).toBe('Kept');
+    expect(
+      f.core.grants.list(bot.slug).find((grant) => grant.id === 'unsafe')?.revokedAt,
+    ).toBeUndefined();
+  });
+
   it.each([false, true])(
     'allows Owner-owned Bots to grant native and own account folders with Team enabled=%s',
     async (enabled) => {
@@ -1061,9 +1133,9 @@ describe('M6 Memory migration and offboarding', () => {
         expect(() => f.core.grants.validatePath?.('old-tob', join(migrated, name!))).toThrowError(
           expect.objectContaining({ code }),
         );
-      expect(f.core.registry.get('old-tob')?.workspaces).toEqual([
-        join(home, 'spaces/alice/files'),
-      ]);
+      expect(f.core.registry.get('old-tob')?.workspaces).toEqual(
+        generation === 150 ? [] : [join(home, 'spaces/alice/files')],
+      );
       expect(f.core.grants.list('old-tob')).toContainEqual(
         expect.objectContaining({ id: 'old-tob-grant', revokedAt: expect.any(String) }),
       );

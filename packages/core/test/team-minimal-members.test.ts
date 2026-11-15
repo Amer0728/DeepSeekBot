@@ -43,6 +43,62 @@ function fixture(dshHome = createTempRoot('m13-minimal-member-')) {
 }
 
 describe('M13 minimal members', () => {
+  it.each([false, true])(
+    'retires a demoted Owner Tob identity and allocates a fresh Tob after a transfer round trip, stale target=%s',
+    async (staleTarget) => {
+      const f = fixture();
+      const original = await f.core.tob.ensure(owner);
+      const memory = f.core.registry.memoryDirFor(original.botSlug)!;
+      writeFileSync(join(memory, 'kept.md'), 'Former Owner private Memory');
+      await f.core.team.setOwnerPassword(owner, 'owner-password-1');
+      const target = await f.core.team.createMember(owner, 'next-owner', 'Next');
+      const next = humanContext(target.member.humanId);
+      await f.core.team.changePassword(next, target.initialPassword, 'next-password-1', false);
+      await f.core.team.transferOwner(owner, next.humanId, 'owner-password-1');
+      expect(
+        f.db.read((db) =>
+          db.prepare('SELECT * FROM tob_identity WHERE human_id = ?').get(owner.humanId),
+        ),
+      ).toBeUndefined();
+      expect(f.core.tob.isTob(original.botSlug)).toBe(false);
+      expect(f.core.registry.get(original.botSlug)?.ownerHumanId).toBe(owner.humanId);
+      expect(readFileSync(join(memory, 'kept.md'), 'utf8')).toBe('Former Owner private Memory');
+      await f.core.team.transfer(next, owner.humanId, f.human.humanId);
+      const transferredMemory = f.core.registry.memoryDirFor(original.botSlug)!;
+      expect(readFileSync(join(transferredMemory, 'kept.md'), 'utf8')).toBe(
+        'Former Owner private Memory',
+      );
+      if (staleTarget)
+        f.db.transaction((db) =>
+          db
+            .prepare('INSERT INTO tob_identity (human_id,bot_slug) VALUES (?,?)')
+            .run(owner.humanId, original.botSlug),
+        );
+      const reset = await f.core.team.resetPassword(next, owner.humanId);
+      await f.core.team.changePassword(
+        owner,
+        reset.initialPassword,
+        'returned-owner-password-1',
+        false,
+      );
+      await f.core.team.transferOwner(next, owner.humanId, 'next-password-1');
+      const returned = await f.core.tob.ensure(owner);
+      expect(returned.botSlug).not.toBe(original.botSlug);
+      expect(f.core.tob.slug(owner)).toBe(returned.botSlug);
+      expect(f.core.tob.isTob(original.botSlug)).toBe(false);
+      expect(f.core.registry.get(original.botSlug)?.ownerHumanId).toBe(f.human.humanId);
+      expect(f.core.registry.get(returned.botSlug)?.ownerHumanId).toBe(owner.humanId);
+      expect(readFileSync(join(transferredMemory, 'kept.md'), 'utf8')).toBe(
+        'Former Owner private Memory',
+      );
+      expect(await f.methods(owner).tobHome({})).toMatchObject({
+        ok: true,
+        value: { botSlug: returned.botSlug },
+      });
+    },
+    30_000,
+  );
+
   it('grants exactly Human DMs and exposes the split catalog under normal M3 ceilings', () => {
     const f = fixture();
     expect(f.core.team.roles.permissions(f.human)).toEqual(['dm.humans']);
@@ -73,6 +129,7 @@ describe('M13 minimal members', () => {
     'zipUploadPreview',
     'zipImport',
     'zipImportLookup',
+    'marketplaceInstallReview',
     'marketplaceInstall',
   ] as const)(
     'refuses %s before input, filesystem or import work without private creation permission',
