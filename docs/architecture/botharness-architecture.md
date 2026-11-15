@@ -422,6 +422,8 @@ Slack 的 #1161 候选复用这条 application-defined Messaging 反馈链：che
 
 ### 绑定的应用接收默认流量（ADR-0142）
 
+Binding 的账号接收器和 Grant 的会话接收器分别持有进程内恢复状态。暂时的 `provider-unavailable` 从 250 ms 开始指数退避，上限 30 s，不耗尽重试次数；账号就绪会唤起仍等待它的会话。停用、解绑、撤销、Provider 替换和 Host 关闭取消所属计时器与 lease。永久拒绝进入需处理状态，显式重连沿用既有 Owner 与修订检查。Host 重启只从当前启用的 Binding/Grant 重建，不持久化计时器、不回放消息。状态通过现有 messaging snapshot 与变更通知投影到 Client 和 CLI，界面分别呈现应用连接、消息接收与 Bot 活动（#4242）。
+
 Application-defined IM DM commands (`/commands`, `/help`, `/status`, `/model`, `/effort`, `/stop`, `/new`, `/compact`) reuse this intake's Binding, sender admission, Source Event and deduplication. Only a whole text-only DM is a command; groups, attachments and unrecognized text retain their existing path. Claimed command Admissions are handled without model input or wake; `last_error` retains pending/unconfirmed command work for inspection rather than automatic replay. The Messaging owner serializes commands per PersonaBot across Bindings, rechecks current source authority and management pairing capabilities at execution, and passes a current-authority fence through asynchronous model validation and Session replacement. Model changes use the existing Orchestrator-only customization owner and preserve Assignment inheritance. Replies use the source-bound Outbox's intent, attempt, final-send fences and accepted/failed/unknown outcomes (ADR-0106/0129); a duplicate never executes or sends again. Weixin changes require an admitted paired-owner DM; other platforms require an approved management pairing with current approval capability, or refuse with Web guidance. `/new` and `deepseekbot bot-new-session` share the idle Orchestrator replacement runtime. `/compact`, the Bot DM composer's `/compact` and `deepseekbot bot-compact` share Idle Compaction's DSH `/compact` path: they refuse while the Bot has a running turn or pending Inbox Admission, and load a persisted Orchestrator Session without a model turn before compacting when necessary.
 
 接收以外部身份 Binding 为键，而不是保存的目标。启用的 Binding 把应用的默认流量（私聊和合格的群 @）接收进绑定 Bot 的 Inbox。会话的第一条被接收的消息，会与其 Source Event、Inbox Admission 在同一事务中提交一个隐式会话条目（`messaging_grants` 中 `origin: 'implicit'` 的行），使 Outbox fence、群策略、Channel Bridge 路由和撤销仍挂在同一个锚点上。Binding 的新会话模式（`auto` 或 `ask`）及其上限（每小时 20 个新条目、500 个活跃、200 个等待）决定新会话被接收还是等待处理。屏蔽按 Bot、应用指纹、会话类型和 ID 持久保存；静音只推进 `preferenceRevision`，不改动条目的 Outbox revision。一个 Bot 可以绑定同一平台的多个应用，每个应用仍只属于一个 Bot。Client 中，应用的会话列表管理这些条目并显示已有的 Channel Bridge 路由（新建同步正在围绕外部连接器重新设计），「外部连接器」列出这些路由并保留保存目标的 Service Grant，作为 Provider 无法列出或直接发往会话时的高级后备。
@@ -1698,3 +1700,30 @@ The Team usage and Role model policy runtime is described in [M10 Host and CLI l
 [M13 Host and CLI logic](team-mode-m13-runtime.md) supersedes M2's per-Human Tob and M3's default Member grants: only the current Host Owner has a Tob, Member grants exactly `dm.humans`, and Bot creation uses `bots.createPrivate` / `bots.createPublic`. Existing member Tobs retain their records, Memory and DMs as ordinary private Bots. Member `tobHome` succeeds with `{ available: false }`; onboarding allocates nothing and omits Bot/Channel identifiers. The migration preserves customized roles, maps legacy creation grants, and keeps no-Bot usage/offboarding paths valid. Integrated M6 startup relocation follows legacy Workspace registrations on the Bot and active Grants rather than the retired member Tob identity; canonical Memory ownership and account-space file containment survive upgrade and transfer. Grant-based Git/ZIP/Marketplace imports bind ownership, upload sessions and receipts to the caller and retain M6 account containment. Legacy Workspace Grant relocation preserves each relative subpath and write flag. Owner transfer retires the demoted Owner's Tob identity atomically, leaving the former Tob private and allowing a fresh Tob on later promotion. The separate Client/mobile surfaces retain their own acceptance checks.
 
 The [M5 approval logic](team-mode-m5-runtime.md) adds caller-scoped masking across Channel projections, Activity and push, Human decision attribution and unattended routing to the Bot owner. Member-owned Sessions refuse full access, suppressed asks and escalation. Team status and invitation responses identify the current isolation as `trial`; M12 owns enforcement qualification.
+
+## Tool effect declarations (E1)
+
+The public application-defined `ToolEffects` model describes `changes` (`none`, `reversible`,
+`irreversible`), `reach` (`local`, `memory`, `workspace`, `external`), `personalData`, and optional
+`authority: management` / `secrets`. Device authorization stays in the decision context. The first-party inventory
+lives in `packages/core/src/workspaces/tool-effects.ts`; lint checks tool factories and Browser /
+Computer catalogs for missing declarations. Mixed-purpose calls resolve effects from their input
+(original attachment read/edit, cloud inspection and draft inspection/drop, Browser tab listing).
+Undeclared Shell and third-party calls return `undefined`, preserving ADR-0205 rather than
+inventing an irreversible external declaration. Device actions declare their possible effects;
+this is not a claim to infer arbitrary programs or a same-OS security boundary.
+
+E1 preserves the existing admission policy. `requiresHumanToolApproval` delegates its covered
+name cases to a pure decision over declarations, while Channel Tool Approval uses `decideToolApproval(effects, context)`
+for explainable paths, rememberability and explicit rule scopes. Full Access, saved authorization,
+Reviewer and Human decisions retain their existing order. Grants,
+ownership, native file roots, device target fences and Secret execution checks remain in their
+existing owners. Legacy command-text recognition and unconverted tool-name entry points stay
+available. External-effect admission despite Full Access belongs to E2; Reviewer/template changes
+belong to E3 and are not enabled by these declarations.
+
+Performance: no dependency, I/O or model call is added to the decision helper. Declaration lookup
+is constant-time; input-sensitive resolution and legacy text checks remain local. Owner regressions
+assert zero Reviewer calls for deterministic Full Access hits and retained management prompting;
+existing saved-rule/device/Grant tests protect the execution fences. This is not an end-to-end
+latency measurement. Runtime and screenshot qualification are recorded separately in the PR.
