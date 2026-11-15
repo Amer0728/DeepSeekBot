@@ -857,6 +857,11 @@ const en = {
     unread: 'Other unread conversations',
   },
   activityRow: {
+    review: {
+      allowed: (template: string) => `auto-approved by ${template}`,
+      'ask-human': (template: string) => `${template} sent this to you`,
+      rejected: (template: string) => `auto-rejected by ${template}`,
+    },
     dm: (recipient: string) => `sent a direct message to ${recipient}`,
     actions: 'Activity details',
     actionsHint: 'Long-press for details.',
@@ -1627,6 +1632,7 @@ const en = {
   elsewhere: (state: string) => `${state} on another device`,
   cardLine: (subject: string, state: string) => `${subject} · ${state}`,
   cardLoadFailed: 'Could not read this request.',
+  cardContentUnavailable: 'Request details are unavailable.',
   noBot: 'This Bot is not on your computer anymore.',
   noChannel: 'This Channel is not on your computer anymore.',
   groupUnavailableTitle: 'Group no longer available',
@@ -3359,6 +3365,11 @@ const zh: typeof en = {
     unread: '其他未读会话',
   },
   activityRow: {
+    review: {
+      allowed: (template: string) => `按「${template}」自动批准`,
+      'ask-human': (template: string) => `「${template}」已转交你确认`,
+      rejected: (template: string) => `按「${template}」自动拒绝`,
+    },
     dm: (recipient: string) => `向 ${recipient} 发送了私聊消息`,
     actions: '活动详情',
     actionsHint: '长按查看详情。',
@@ -4084,6 +4095,7 @@ const zh: typeof en = {
   elsewhere: (state: string) => `${state}（在另一台设备上）`,
   cardLine: (subject: string, state: string) => `${subject} · ${state}`,
   cardLoadFailed: '读取这个请求失败。',
+  cardContentUnavailable: '请求详情不可用。',
   noBot: '你的电脑上已经没有这个 Bot。',
   noChannel: '你的电脑上已经没有这个频道。',
   groupUnavailableTitle: '群聊已不存在',

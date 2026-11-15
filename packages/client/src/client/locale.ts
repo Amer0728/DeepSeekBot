@@ -3150,6 +3150,7 @@ export const zh = {
   'identity.failed': '操作未完成，已保留输入。请刷新检查连接与已提交状态，再重试。',
   'identity.stale': '配置已在另一处更改。请关闭窗口、刷新后重新编辑。',
   'identity.state.available': '可用',
+  'im.checking': '检查中',
   'identity.state.paused': '已暂停',
   'identity.state.unavailable': '暂不可用',
   'identity.state.rebind-required': '需要重新绑定',
@@ -4422,6 +4423,7 @@ export const zh = {
     '选一个模板后，审批员会先按模板替你回答此 Bot 的工具审批，拿不准的才发卡片给你。',
   'autoApproval.hintOn': '{description} 审批员按这个模板替你回答，拿不准的仍发卡片给你。',
   'autoApproval.allowed': '按「{template}」自动批准',
+  'autoApproval.askHuman': '「{template}」已转交你确认',
   'autoApproval.rejected': '按「{template}」自动拒绝',
   'autoApproval.tool': '工具：{tool}',
   'autoApproval.paused.consecutive':
@@ -9086,6 +9088,7 @@ My relationship with you, established lore and topics to avoid: [fill in].
     'Operation did not complete; your input is retained. Refresh to inspect connection and committed state before retrying.',
   'identity.stale': 'Configuration changed elsewhere. Close this dialog, refresh, and edit again.',
   'identity.state.available': 'Available',
+  'im.checking': 'Checking',
   'identity.state.paused': 'Paused',
   'identity.state.unavailable': 'Unavailable',
   'identity.state.rebind-required': 'Rebind required',
@@ -10422,6 +10425,7 @@ My relationship with you, established lore and topics to avoid: [fill in].
   'autoApproval.hintOn':
     '{description} The Approval Reviewer answers by this template; calls it is unsure about still come to you as cards.',
   'autoApproval.allowed': 'auto-approved by {template}',
+  'autoApproval.askHuman': '{template} sent this to you',
   'autoApproval.rejected': 'auto-rejected by {template}',
   'autoApproval.tool': 'Tool: {tool}',
   'autoApproval.paused.consecutive':
