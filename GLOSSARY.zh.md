@@ -272,6 +272,20 @@ _避免使用_：auto-compact、后台摘要、cache warming
 Human 拥有的 Bot-mode 偏好，用于揭示默认隐藏的诊断表面（operational log 视图、verbose 状态）。它只控制 Human 的可见性——绝不是 agent 能力的门：有 shell 通道的 agent 总能触及同一份底层数据，因此绝不能把 Developer Mode 描述或依赖为读取边界。
 _避免使用_：debug flag、admin mode、agent permission、read boundary
 
+### Skills（技能）
+
+**Host Skill**：
+安装在 Host 用户级的 Skill，所有 Session、所有 PersonaBot 都可见。
+_避免使用_：全局 skill、system skill、built-in skill
+
+**Project Skill**：
+属于某个目录的 Skill。这个目录可以是 PersonaBot 的 Memory Repository，也可以是 Workspace Grant 覆盖的文件夹，由该目录的文件访问权限决定谁能看到它。PersonaBot 的 Skill 就是其 Memory Repository 下的 Project Skill，并不是另一种 Skill。
+_避免使用_：Bot Skill、workspace skill、私有 skill
+
+**Skill Invocation**：
+Human 在消息中对某个 Skill 的显式引用，像 mention 一样显示为 chip。它把该 Skill 的文本插入消息，但不指向任何对象：由哪个 PersonaBot 阅读并执行，取决于消息里的 mention 和正常路由，与 Skill 归属于谁无关。
+_避免使用_：skill command、slash command、skill call
+
 **Computer**：
 一个 profile 级共享的 Linux 桌面，由该 profile 的所有 PersonaBot 共用；它拥有一个持久卷，保存其文件、浏览器 profile（Cookie 与登录态）与 CLI 凭据。它的隔离边界是 profile，绝不是某个 PersonaBot。
 _避免使用_：machine、VM、sandbox、desktop、host
@@ -323,20 +337,6 @@ _避免使用_：takeover、consent dialog、per-action approval
 **Computer Audit**：
 按 PersonaBot 与会话归因的、脱敏的 Computer 观察与动作持久记录；绝不包含输入的原文或截图。
 _避免使用_：logs、history、screenshot trail
-
-### Skills（技能）
-
-**Host Skill**：
-安装在 Host 用户级的 Skill，所有 Session、所有 PersonaBot 都可见。
-_避免使用_：全局 skill、system skill、built-in skill
-
-**Project Skill**：
-属于某个目录的 Skill。这个目录可以是 PersonaBot 的 Memory Repository，也可以是 Workspace Grant 覆盖的文件夹，由该目录的文件访问权限决定谁能看到它。PersonaBot 的 Skill 就是其 Memory Repository 下的 Project Skill，并不是另一种 Skill。
-_避免使用_：Bot Skill、workspace skill、私有 skill
-
-**Skill Invocation**：
-Human 在消息中对某个 Skill 的显式引用，像 mention 一样显示为 chip。它把该 Skill 的文本插入消息，但不指向任何对象：由哪个 PersonaBot 阅读并执行，取决于消息里的 mention 和正常路由，与 Skill 归属于谁无关。
-_避免使用_：skill command、slash command、skill call
 
 ### Browser
 
