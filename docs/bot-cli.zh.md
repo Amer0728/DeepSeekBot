@@ -2050,3 +2050,21 @@ Web 手动检查请求最多等待 25 秒，关闭自检卡片会取消请求。
 公网阶段仅对 DNS、网络、超时及 HTTP 429/5xx 短暂失败重试：最多四次，间隔 1/3/6 秒，仍受同一个 20 秒总时限约束。证书或身份失败不重试。每次自检完成后，界面刷新一次账号电脑列表。
 
 工具效果声明（E1）保持既有工具命令与审批结果。Full Access、保存规则、Secrets、设备目标和 Workspace Grant 仍使用原检查；不新增 route 或 CLI 权限。
+
+### 三部分审批指导
+
+使用 `deepseekbot approval-template create my-draft --blank` 明确创建空白草稿，或使用 `deepseekbot approval-template create my-copy --from cautious` 创建独立副本。不会自动选取来源，副本不保留来源关联。仍支持 `--file`／`--text-stdin` Markdown 输入。
+
+三部分编辑使用 UTF-8 JSON 文件：
+
+```json
+{
+  "alwaysAsk": ["发送消息或花钱"],
+  "alwaysAllow": ["读取本地项目文件"],
+  "freeText": "不确定时问我。"
+}
+```
+
+运行 `deepseekbot approval-template edit my-draft --parts-file guidance.json`，再用 `deepseekbot approval-template show my-draft` 读回；`text` 包含带格式版本的内容。创建／编辑时添加 `--apply-to <bot-id>` 才会在保存后为该 Bot 选用模板。不加时不改变选择。应用仍通过现有 Bot 选择授权；应用失败时已保存的草稿保留，可单独选用。
+
+编辑共享原件影响 `usedBy` 中所有 Bot 的后续 Review，包括全局继承者。需要独立修改时先复制。总是询问优先于总是允许，补充说明不能取消前者。这些是可能被模型误解的自然语言指导，不是确定性 Tool Approval Rules；冲突、未覆盖或不确定均交给 Human。转换时旧 Markdown 完整保留为补充说明，已经开始的 Review 保留捕获的内容和版本。
