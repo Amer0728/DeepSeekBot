@@ -2135,7 +2135,7 @@ export function createBridgeMethods(human: HumanContext, deps: BridgeMethodsDeps
   if (deps.zipImports && imports)
     scoped.zipImports = deps.zipImports.withContext(imports, registry, (key) => {
       if (!validBotCreationKey(key)) throw new BotZipUploadError('invalid-upload');
-      return human.humanId === OWNER_HUMAN_CONTEXT.humanId && isOwner()
+      return human.humanId === OWNER_HUMAN_CONTEXT.humanId
         ? key
         : 'member:' +
             createHash('sha256')

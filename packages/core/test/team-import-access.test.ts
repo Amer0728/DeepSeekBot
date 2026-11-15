@@ -307,3 +307,28 @@ it('allows grant-based Marketplace review and installation with the same private
   expect(bob.value.bot.ownerHumanId).toBe('bob');
   expect(bob.value.bot.slug).not.toBe(created.value.bot.slug);
 });
+
+it('keeps the former Owner import receipts after an Owner transfer', async () => {
+  const f = fixture();
+  const { bytes, input } = archive();
+  const request = { ...input, operationKey: 'owner-import-key', displayName: 'Kept' };
+  const before = f.bridge(owner);
+  expect(before.zipUploadBegin(input)).toMatchObject({ ok: true });
+  expect(
+    before.zipUploadChunk({ ...input, offset: 0, dataBase64: bytes.toString('base64') }),
+  ).toMatchObject({ ok: true });
+  const created = await before.zipImport(request);
+  if (!created.ok) throw new Error(created.error.code);
+  await f.core.team.setOwnerPassword(owner, 'owner-password-1');
+  const target = await f.core.team.createMember(owner, 'next-owner', 'Next');
+  const next = humanContext(target.member.humanId);
+  await f.core.team.changePassword(next, target.initialPassword, 'next-password-1', false);
+  await f.core.team.transferOwner(owner, next.humanId, 'owner-password-1');
+  const importer = f.core.team.roles.create(next, 'Importer again', ['bots.createPrivate']).role;
+  f.core.team.roles.set(next, owner.humanId, [importer.roleId]);
+  const after = f.bridge(owner);
+  expect(after.zipImportLookup(request)).toMatchObject({
+    ok: true,
+    value: { receipt: { botSlug: created.value.bot.slug } },
+  });
+});
