@@ -118,7 +118,7 @@ export function AuditLogSection({
                 ? t('team.audit.entry', {
                     viewer: row.viewerName,
                     object: row.objectName,
-                    kind: t(`team.private.kind.${row.kind}`),
+                    kind: t(`team.audit.kind.${row.kind}`),
                   })
                 : t(`team.audit.action.${auditActionKey(row.action)}`, {
                     viewer: row.viewerName,
@@ -248,7 +248,7 @@ function PrivateContentDialog({
           <Note>{t('team.private.noMessages')}</Note>
         ) : (
           <ul {...stylex.props(styles.list)} data-private-view={step.view.viewId}>
-            {step.view.messages.map((message) => (
+            {[...step.view.messages].reverse().map((message) => (
               <li key={message.id} {...stylex.props(styles.message)}>
                 <span
                   {...stylex.props(styles.meta)}
