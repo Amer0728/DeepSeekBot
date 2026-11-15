@@ -286,6 +286,8 @@ _避免使用_：Bot Skill、workspace skill、私有 skill
 Human 在消息中对某个 Skill 的显式引用，像 mention 一样显示为 chip。它把该 Skill 的文本插入消息，但不指向任何对象：由哪个 PersonaBot 阅读并执行，取决于消息里的 mention 和正常路由，与 Skill 归属于谁无关。
 _避免使用_：skill command、slash command、skill call
 
+### Computer
+
 **Computer**：
 一个 profile 级共享的 Linux 桌面，由该 profile 的所有 PersonaBot 共用；它拥有一个持久卷，保存其文件、浏览器 profile（Cookie 与登录态）与 CLI 凭据。它的隔离边界是 profile，绝不是某个 PersonaBot。
 _避免使用_：machine、VM、sandbox、desktop、host
