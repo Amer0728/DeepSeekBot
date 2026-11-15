@@ -232,12 +232,27 @@ describe('Host members', { timeout: 60_000 }, () => {
       f.gateway.invoke({ namespace: 'botharness', method, args: {}, peer });
     const directory = z
       .object({
-        roles: z.array(z.object({ roleId: z.string(), name: z.string() }).strict()),
+        roles: z.array(
+          z
+            .object({
+              roleId: z.string(),
+              name: z.string(),
+              builtin: z.enum(['admin', 'member']).nullable(),
+            })
+            .strict(),
+        ),
         members: z.array(z.object({ humanId: z.string(), displayName: z.string() }).strict()),
       })
       .strict()
       .parse(await call('spaceAudienceDirectory'));
-    expect(directory.roles).toContainEqual({ roleId: role.roleId, name: 'Space manager' });
+    expect(directory.roles).toContainEqual({
+      roleId: role.roleId,
+      name: 'Space manager',
+      builtin: null,
+    });
+    expect(directory.roles.map((item) => item.builtin)).toEqual(
+      expect.arrayContaining(['admin', 'member']),
+    );
     expect(directory.members).toContainEqual({ humanId: f.human.humanId, displayName: 'Bob' });
     await expect(call('members')).rejects.toMatchObject({ code: 'permission-required' });
     await expect(call('roles')).rejects.toMatchObject({ code: 'permission-required' });

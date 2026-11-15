@@ -13,15 +13,17 @@ import type { BotHarnessTranslate } from './locale.js';
 import { useMountedResource } from './mounted-resource.js';
 import type { TeamMember } from './team-bridge.js';
 import type { TeamRole } from './team-roles-bridge.js';
-import { roleLabel } from './team-roles.js';
 import { teamErrorText } from './team-settings.js';
-import { audienceSummary } from './team-spaces-view.js';
+import { audienceSummary, roleName } from './team-spaces-view.js';
 import {
   audienceReady,
   createSpace,
   deleteSpace,
+  directoryFrom,
+  loadAudienceDirectory,
   loadSpaces,
   updateSpace,
+  type AudienceDirectory,
   type SpaceAudience,
   type TeamSpace,
 } from './team-spaces-bridge.js';
@@ -33,7 +35,7 @@ const styles = stylex.create({
 type Load =
   | { state: 'loading' }
   | { state: 'failed' }
-  | { state: 'ready'; spaces: readonly TeamSpace[] };
+  | { state: 'ready'; spaces: readonly TeamSpace[]; directory?: AudienceDirectory };
 
 export function SpacesSection({
   call,
@@ -53,16 +55,24 @@ export function SpacesSection({
   const [revision, setRevision] = useState(0);
   const mount = useMountedResource<HTMLDivElement>(() => {
     const controller = new AbortController();
-    loadSpaces(call, controller.signal)
-      .then((spaces) => {
-        if (!controller.signal.aborted) setLoad({ state: 'ready', spaces });
+    Promise.all([
+      loadSpaces(call, controller.signal),
+      canManageShared
+        ? loadAudienceDirectory(call, controller.signal).catch(() => undefined)
+        : undefined,
+    ])
+      .then(([spaces, directory]) => {
+        if (!controller.signal.aborted)
+          setLoad({ state: 'ready', spaces, ...(directory === undefined ? {} : { directory }) });
       })
       .catch(() => {
         if (!controller.signal.aborted) setLoad({ state: 'failed' });
       });
     return () => controller.abort();
-  }, [call, revision]);
+  }, [call, revision, canManageShared]);
   const spaces = load.state === 'ready' ? load.spaces : [];
+  const directory =
+    (load.state === 'ready' ? load.directory : undefined) ?? directoryFrom(roles, members);
   const own = spaces.find((item) => item.kind === 'account');
   const shared = spaces.filter((item) => item.kind === 'shared');
   return (
@@ -95,7 +105,7 @@ export function SpacesSection({
             <div role="listitem" key={item.spaceId} data-team-space={item.spaceId}>
               <SettingsRow
                 title={item.name}
-                description={audienceSummary(t, item.audience, roles, members)}
+                description={audienceSummary(t, item.audience, directory)}
                 control={
                   item.canManage ? (
                     <Button
@@ -117,8 +127,7 @@ export function SpacesSection({
           call={call}
           t={t}
           space={editing === 'new' ? undefined : editing}
-          roles={roles}
-          members={members}
+          directory={directory}
           onCancel={() => setEditing(undefined)}
           onSaved={() => {
             setEditing(undefined);
@@ -134,16 +143,14 @@ function SpaceDialog({
   call,
   t,
   space: current,
-  roles,
-  members,
+  directory,
   onCancel,
   onSaved,
 }: {
   call: BridgeCall;
   t: BotHarnessTranslate;
   space: TeamSpace | undefined;
-  roles: readonly TeamRole[];
-  members: readonly TeamMember[];
+  directory: AudienceDirectory;
   onCancel(): void;
   onSaved(): void;
 }): ReactElement {
@@ -200,11 +207,9 @@ function SpaceDialog({
         : [];
   const options =
     audience.kind === 'roles'
-      ? roles.map((role) => ({ id: role.roleId, label: roleLabel(t, role) }))
+      ? directory.roles.map((role) => ({ id: role.roleId, label: roleName(t, role) }))
       : audience.kind === 'members'
-        ? members
-            .filter((member) => member.status === 'active')
-            .map((member) => ({ id: member.humanId, label: member.displayName }))
+        ? directory.members.map((member) => ({ id: member.humanId, label: member.displayName }))
         : [];
   return (
     <FormDialog

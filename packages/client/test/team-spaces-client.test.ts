@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   audienceReady,
   createSpace,
+  directoryFrom,
+  loadAudienceDirectory,
   loadSpaces,
   parseSpace,
 } from '../src/client/team-spaces-bridge.js';
@@ -54,12 +56,51 @@ describe('Team spaces client', () => {
       audienceSummary(
         t as never,
         { kind: 'roles', roleIds: ['admin', 'gone'] },
-        [{ roleId: 'admin', name: 'admin', builtin: 'admin' } as never],
-        [],
+        { roles: [{ roleId: 'admin', name: 'admin', builtin: 'admin' }], members: [] },
       ),
     ).toBe('team.spaces.audienceList:{"names":"team.role.admin"}');
-    expect(audienceSummary(t as never, { kind: 'members', humanIds: ['h9'] }, [], [])).toBe(
-      'team.spaces.audienceSomePeople',
-    );
+    expect(
+      audienceSummary(
+        t as never,
+        { kind: 'members', humanIds: ['h9'] },
+        { roles: [], members: [] },
+      ),
+    ).toBe('team.spaces.audienceSomePeople');
+  });
+
+  it('loads only audience names for folder managers', async () => {
+    const call = vi.fn(async () => ({
+      ok: true as const,
+      value: {
+        roles: [
+          { roleId: 'r1', name: 'admin', builtin: 'admin', permissions: ['x'] },
+          { roleId: 'r2', name: 'Finance', builtin: null },
+          { name: 'No id' },
+        ],
+        members: [{ humanId: 'h1', displayName: 'Bob', username: 'bob' }, { humanId: 'h2' }],
+      },
+    }));
+    expect(await loadAudienceDirectory(call)).toEqual({
+      roles: [
+        { roleId: 'r1', name: 'admin', builtin: 'admin' },
+        { roleId: 'r2', name: 'Finance', builtin: null },
+      ],
+      members: [{ humanId: 'h1', displayName: 'Bob' }],
+    });
+    expect(call).toHaveBeenCalledWith('spaceAudienceDirectory', {}, undefined);
+  });
+
+  it('builds the directory from admin lists with active members only', () => {
+    const member = (humanId: string, status: string) =>
+      ({ humanId, displayName: humanId, status }) as never;
+    expect(
+      directoryFrom(
+        [{ roleId: 'r1', name: 'Finance', builtin: null } as never],
+        [member('h1', 'active'), member('h2', 'suspended')],
+      ),
+    ).toEqual({
+      roles: [{ roleId: 'r1', name: 'Finance', builtin: null }],
+      members: [{ humanId: 'h1', displayName: 'h1' }],
+    });
   });
 });

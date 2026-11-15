@@ -1,19 +1,16 @@
 import type { BotHarnessTranslate } from './locale.js';
-import type { TeamMember } from './team-bridge.js';
-import type { TeamRole } from './team-roles-bridge.js';
+import type { AudienceDirectory, AudienceRole, SpaceAudience } from './team-spaces-bridge.js';
 
-function roleName(t: BotHarnessTranslate, role: TeamRole): string {
+export function roleName(t: BotHarnessTranslate, role: AudienceRole): string {
   if (role.builtin === 'admin') return t('team.role.admin');
   if (role.builtin === 'member') return t('team.role.member');
   return role.name;
 }
-import type { SpaceAudience } from './team-spaces-bridge.js';
 
 export function audienceSummary(
   t: BotHarnessTranslate,
   audience: SpaceAudience | undefined,
-  roles: readonly TeamRole[],
-  members: readonly TeamMember[],
+  { roles, members }: AudienceDirectory,
 ): string {
   if (audience === undefined || audience.kind === 'everyone')
     return t('team.spaces.audienceEveryone');

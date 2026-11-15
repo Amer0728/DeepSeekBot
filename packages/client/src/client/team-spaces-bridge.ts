@@ -1,5 +1,13 @@
 import type { BridgeCall } from './bridge.js';
-import { list, record, strings, unwrap } from './team-bridge.js';
+import { list, record, strings, unwrap, type TeamMember } from './team-bridge.js';
+import type { TeamRole } from './team-roles-bridge.js';
+
+export type AudienceRole = Pick<TeamRole, 'roleId' | 'name' | 'builtin'>;
+export type AudienceMember = Pick<TeamMember, 'humanId' | 'displayName'>;
+export interface AudienceDirectory {
+  readonly roles: readonly AudienceRole[];
+  readonly members: readonly AudienceMember[];
+}
 
 export type SpaceAudience =
   | { readonly kind: 'everyone' }
@@ -87,4 +95,44 @@ export function audienceReady(audience: SpaceAudience): boolean {
   if (audience.kind === 'roles') return audience.roleIds.length > 0;
   if (audience.kind === 'members') return audience.humanIds.length > 0;
   return true;
+}
+
+function parseAudienceRole(value: unknown): AudienceRole | undefined {
+  const row = record(value);
+  const roleId = row?.['roleId'];
+  const name = row?.['name'];
+  const builtin = row?.['builtin'];
+  if (typeof roleId !== 'string' || typeof name !== 'string') return undefined;
+  return { roleId, name, builtin: builtin === 'admin' || builtin === 'member' ? builtin : null };
+}
+
+function parseAudienceMember(value: unknown): AudienceMember | undefined {
+  const row = record(value);
+  const humanId = row?.['humanId'];
+  const displayName = row?.['displayName'];
+  if (typeof humanId !== 'string' || typeof displayName !== 'string') return undefined;
+  return { humanId, displayName };
+}
+
+export async function loadAudienceDirectory(
+  call: BridgeCall,
+  signal?: AbortSignal,
+): Promise<AudienceDirectory> {
+  const row = record(await unwrap(call, 'spaceAudienceDirectory', {}, signal));
+  return {
+    roles: list(row?.['roles'], parseAudienceRole),
+    members: list(row?.['members'], parseAudienceMember),
+  };
+}
+
+export function directoryFrom(
+  roles: readonly TeamRole[],
+  members: readonly TeamMember[],
+): AudienceDirectory {
+  return {
+    roles: roles.map(({ roleId, name, builtin }) => ({ roleId, name, builtin })),
+    members: members
+      .filter((member) => member.status === 'active')
+      .map(({ humanId, displayName }) => ({ humanId, displayName })),
+  };
 }

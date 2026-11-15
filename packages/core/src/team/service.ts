@@ -156,10 +156,18 @@ export class TeamService {
     this.roles.require(human, 'workspaces.manageShared');
     return this.db.read((connection) => ({
       roles: z
-        .array(z.object({ roleId: z.string(), name: z.string() }).strict())
+        .array(
+          z
+            .object({
+              roleId: z.string(),
+              name: z.string(),
+              builtin: z.enum(['admin', 'member']).nullable(),
+            })
+            .strict(),
+        )
         .parse(
           connection
-            .prepare('SELECT role_id AS roleId, name FROM host_roles ORDER BY role_id')
+            .prepare('SELECT role_id AS roleId, name, builtin FROM host_roles ORDER BY role_id')
             .all(),
         ),
       members: z
@@ -167,7 +175,7 @@ export class TeamService {
         .parse(
           connection
             .prepare(
-              'SELECT human_id AS humanId, display_name AS displayName FROM humans ORDER BY human_id',
+              "SELECT human_id AS humanId, display_name AS displayName FROM humans WHERE status = 'active' ORDER BY human_id",
             )
             .all(),
         ),
