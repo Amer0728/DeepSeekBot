@@ -1,4 +1,9 @@
 export const MEMBER_GLOBAL_METHODS = [
+  'privateObjects',
+  'privateContentOpen',
+  'privateContentPage',
+  'auditLog',
+  'auditVerify',
   'spaces',
   'spaceAudienceDirectory',
   'spaceCreate',

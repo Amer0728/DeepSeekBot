@@ -997,7 +997,7 @@ describe('M6 Memory migration and offboarding', () => {
       writeFileSync(join(before.path, 'kept'), 'preserved');
       prior.close();
       const f = fixture(home);
-      expect(f.core.operationalDatabase.generation).toBe(151);
+      expect(f.core.operationalDatabase.generation).toBe(152);
       f.workspace(ownerNative, 'old-owner-native');
       expect(f.core.grants.requireActive('old-owner', 'old-owner-native').workspacePath).toBe(
         ownerNative,

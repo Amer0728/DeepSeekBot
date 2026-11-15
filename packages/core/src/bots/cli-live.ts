@@ -667,6 +667,8 @@ interface LiveValues
   offline?: boolean;
   home?: string;
   workspace?: string;
+  after?: string;
+  reason?: string;
   limit?: string;
   before?: string;
   enabled?: boolean;

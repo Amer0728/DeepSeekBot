@@ -63,6 +63,8 @@ import {
 } from './tob/cli-diagnostic-operations.js';
 import {
   createTobHostCliOperations,
+  authorizeTobHostCli,
+  authorizeTobBotTargets,
   spawnHostCli,
   TOB_HOST_CLI_CAPABILITY,
 } from './tob/cli-host-commands.js';
@@ -1171,6 +1173,7 @@ function initializeCore(
     database: operationalDatabase,
     ...(options.warn === undefined ? {} : { warn: options.warn }),
   });
+  team.privateAccess.bind({ registry, memory });
   startup.enter('usage', 'initialize');
   usage =
     operationalDatabase.mode === 'ready'
@@ -1746,6 +1749,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
               const memberTob = !core.team.isOwner(human);
               const memberOperations = memberTob
                 ? createMemberTobOperations({
+                    human,
                     bridge: invocationBridgeMethods(human),
                     registry: privateBotRegistry(core.registry, human),
                     creations: privateBotCreations(core.creations, human),
@@ -1788,6 +1792,13 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
                 signal: execution.signal,
                 authorize,
                 prepareOperation: async (command, args, signal) => {
+                  const checkTargets = () =>
+                    authorizeTobBotTargets(args, {
+                      registry: core.registry,
+                      channels: core.channels,
+                      human,
+                    });
+                  checkTargets();
                   if (memberOperations) return memberOperations(command, args, signal);
                   const prepared =
                     (await tobModelOperations(command, args)) ??
@@ -1799,7 +1810,16 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
                     (await tobChannelOperations(command, args)) ??
                     (await tobVoiceOperations(command, args)) ??
                     (await tobHostCliOperations(command, args, signal));
-                  if (!prepared || !['create', 'group-create'].includes(command)) return prepared;
+                  if (!prepared) return prepared;
+                  const scopedGuard = (guard: () => void) => () => {
+                    guard();
+                    checkTargets();
+                  };
+                  if (!['create', 'group-create'].includes(command))
+                    return {
+                      ...prepared,
+                      run: (guard, beforeEffect) => prepared.run(scopedGuard(guard), beforeEffect),
+                    };
                   return {
                     ...prepared,
                     run: async (guard, beforeEffect) => {
@@ -1810,7 +1830,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
                         actor.session.id,
                         started,
                       );
-                      return prepared.run(guard, beforeEffect);
+                      return prepared.run(scopedGuard(guard), beforeEffect);
                     },
                   };
                 },
@@ -3160,6 +3180,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
   });
   const tobModelOperations = createTobModelOperations({
     registry: core.registry,
+    human: () => core.team.ownerContext(),
     presets: core.modelPresets,
     catalog: modelCatalog,
     settings: () => ctx.get('settings') as unknown as TobNativeSettings | undefined,
@@ -3547,6 +3568,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
   });
   const tobBotProfileOperations = createTobBotProfileOperations({
     registry: core.registry,
+    human: () => core.team.ownerContext(),
     bridge: () => bridgeMethods,
     isProtectedBot: (slug) => core.tob.isTob(slug),
   });
@@ -3582,6 +3604,12 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     }, 'botharness: Tob Host CLI target');
   });
   const tobHostCliOperations = createTobHostCliOperations({
+    authorize: (argv) =>
+      authorizeTobHostCli(argv, {
+        registry: core.registry,
+        channels: core.channels,
+        human: core.team.ownerContext(),
+      }),
     run: spawnHostCli({ modulePath: cliModulePath, host: () => tobHostTarget?.() }),
   });
   const tobChannelOperations = createTobChannelOperations({

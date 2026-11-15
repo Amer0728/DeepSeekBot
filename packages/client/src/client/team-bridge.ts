@@ -77,6 +77,10 @@ export const TEAM_REFUSALS = [
   'grant-outside-audience',
   'role-in-use',
   'model-not-allowed',
+  'object-not-found',
+  'own-content',
+  'private-views-full',
+  'audit-integrity-failed',
 ] as const;
 export type TeamRefusal = (typeof TEAM_REFUSALS)[number];
 

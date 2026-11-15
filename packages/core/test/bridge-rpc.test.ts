@@ -466,17 +466,21 @@ describe('bridge typert service', () => {
   it('round-trips profile fingerprint and preserves stale profile refusal through the RPC facade', () => {
     const { service } = setup();
     service.create('Ada');
-    const fingerprint = service.get('ada').profileFingerprint;
+    const initial = service.get('ada');
+    if (!('profileFingerprint' in initial)) throw new Error('own-profile-redacted');
+    const fingerprint = initial.profileFingerprint;
     expect(fingerprint).toMatch(/^[a-f0-9]{64}$/u);
     service.update('ada', { displayName: 'Updated' }, fingerprint);
     expect(() => service.update('ada', { displayName: 'Stale' }, fingerprint)).toThrow(
       expect.objectContaining({ code: 'stale-profile' }),
     );
     expect(service.get('ada').bot.displayName).toBe('Updated');
-    expect(service.get('ada').profileFingerprint).not.toBe(fingerprint);
-    expect(service.update('ada', { description: 'Existing UI' }).bot.description).toBe(
-      'Existing UI',
-    );
+    const updated = service.get('ada');
+    if (!('profileFingerprint' in updated)) throw new Error('own-profile-redacted');
+    expect(updated.profileFingerprint).not.toBe(fingerprint);
+    const edited = service.update('ada', { description: 'Existing UI' });
+    if ('metadataOnly' in edited) throw new Error('own-profile-redacted');
+    expect(edited.bot.description).toBe('Existing UI');
   });
 
   it('exposes and forwards complete Assignment choices through preset creation and updates', async () => {
@@ -689,6 +693,11 @@ describe('bridge typert service', () => {
     const { service } = setup();
 
     expect(remoteMethods(service).map((marker) => marker.exportName ?? marker.method)).toEqual([
+      'privateObjects',
+      'privateContentOpen',
+      'privateContentPage',
+      'auditLog',
+      'auditVerify',
       'spaces',
       'spaceAudienceDirectory',
       'spaceCreate',

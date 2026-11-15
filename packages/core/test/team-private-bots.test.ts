@@ -363,6 +363,7 @@ describe('M2 private Bot boundaries', () => {
   it('rechecks Tob creation permission after preparation and for recovered receipts', async () => {
     const f = fixture();
     const ops = createMemberTobOperations({
+      human: bob,
       bridge: f.methods(bob),
       registry: privateBotRegistry(f.core.registry, bob),
       creations: privateBotCreations(f.core.creations, bob),
@@ -816,6 +817,7 @@ describe('M2 private Bot boundaries', () => {
       error: { code: 'bot-not-found' },
     });
     const ops = createMemberTobOperations({
+      human: bob,
       bridge: f.methods(bob),
       registry: privateBotRegistry(f.core.registry, bob),
       creations: privateBotCreations(f.core.creations, bob),

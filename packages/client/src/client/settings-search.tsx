@@ -122,6 +122,10 @@ export const SETTINGS_INDEX: Readonly<Record<string, readonly BotHarnessKey[]>> 
     'team.spaces.shared',
     'team.usage.title',
     'team.usage.period',
+    'team.audit.title',
+    'team.audit.integrity',
+    'team.private.title',
+    'team.private.open',
   ],
   devices: [
     'relationships.title',
@@ -201,6 +205,7 @@ export const SETTINGS_DESCRIPTIONS: Partial<Record<BotHarnessKey, BotHarnessKey>
   'connections.hosts.preference': 'connections.hosts.preferenceScope',
   'team.mode.title': 'team.mode.description',
   'team.spaces.yours': 'team.spaces.yoursHint',
+  'team.private.open': 'team.private.listBody',
   'team.insecureHttp.title': 'team.insecureHttp.description',
   'zoom.current': 'zoom.current.description',
   'zoom.default': 'zoom.default.description',

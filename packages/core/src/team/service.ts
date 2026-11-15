@@ -1,3 +1,4 @@
+import { TeamPrivateContent } from './private-content.js';
 import { accountSpaceFiles, prepareSpaceTransfer } from '../workspaces/space-lifecycle.js';
 import type { WorkspaceSpaces } from '../workspaces/spaces.js';
 import { TeamApprovals } from './approvals.js';
@@ -53,6 +54,7 @@ export type TeamMember = z.infer<typeof memberSchema>;
 export interface TeamModeView {
   isolation: 'trial' | 'enforced';
   enabled: boolean;
+  privateAccessNotice?: true;
   activeMembers: number;
   suspendedMembers?: number;
   ownerPasswordSet: boolean;
@@ -97,6 +99,7 @@ const grantSchema = z.object({
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 
 export class TeamService {
+  readonly privateAccess: TeamPrivateContent;
   readonly roles: TeamRoles;
   readonly approvals: TeamApprovals;
   readonly channelAccess: TeamChannels;
@@ -114,6 +117,7 @@ export class TeamService {
   private accessChanged(revoke = false): void {
     this.invalidate();
     if (!revoke) return;
+    this.privateAccess.closeViews();
     for (const listener of this.accessListeners) listener();
     this.pairing?.closeStreams?.();
     this.db.transaction(
@@ -250,6 +254,13 @@ export class TeamService {
     this.now = options.now ?? Date.now;
     this.log = options.log ?? (() => {});
     this.limiter = new SignInRateLimit(this.now);
+    this.privateAccess = new TeamPrivateContent(
+      db,
+      channels,
+      this.roles,
+      this.channelAccess,
+      this.now,
+    );
   }
 
   bindRuntime(runtime: {
@@ -362,6 +373,7 @@ export class TeamService {
     return {
       isolation: 'trial',
       enabled: settings.enabled,
+      ...(settings.enabled ? { privateAccessNotice: true as const } : {}),
       activeMembers: this.db.read((db) =>
         Number(
           db
@@ -952,6 +964,8 @@ export class TeamService {
   }
 
   async transfer(human: HumanContext, humanId: string, toHumanId: string): Promise<null> {
+    if (human.caller === 'bot')
+      throw new TeamError('permission-required', undefined, { permission: 'members.manage' });
     this.manageTarget(human, humanId);
     const target = this.member(toHumanId);
     if (!target) throw new TeamError('member-not-found');
@@ -980,6 +994,13 @@ export class TeamService {
     try {
       this.db.transaction(
         (db) => {
+          for (const bot of preview.bots)
+            this.privateAccess.recordBotAction(
+              human,
+              { ...bot, ownerHumanId: humanId },
+              'transfer',
+              db,
+            );
           spaceTransfer?.commit(db);
           db.prepare(`UPDATE persona_bots SET owner_human_id = ?, body = json_set(body, '$.ownerHumanId', ?)
           WHERE slug IN (SELECT value FROM json_each(?)) AND owner_human_id = ?`).run(
@@ -1012,6 +1033,7 @@ export class TeamService {
           'bot-ownership',
           'workspace-spaces',
           'workspace-grants',
+          'private-audit',
         ],
       );
     } catch (error) {
@@ -1021,7 +1043,11 @@ export class TeamService {
           this.disposePeers(),
           Promise.resolve().then(() => this.stopBots?.(preview.bots.map((bot) => bot.slug))),
         ]);
-      } else spaceTransfer?.rollback();
+      } else {
+        spaceTransfer?.rollback();
+        if (error instanceof OperationalDatabaseError && error.cause instanceof TeamError)
+          throw error.cause;
+      }
       throw error;
     }
     this.accessChanged(true);
@@ -1050,6 +1076,8 @@ export class TeamService {
     token: string,
     username: string,
   ): Promise<null> {
+    if (human.caller === 'bot')
+      throw new TeamError('permission-required', undefined, { permission: 'members.manage' });
     this.roles.requireManagementTarget(human, humanId);
     if (
       !this.member(humanId) &&
@@ -1060,6 +1088,12 @@ export class TeamService {
       throw new TeamError('purge-token-invalid');
     const member = this.purgeTarget(human, humanId);
     if (username !== member.username) throw new TeamError('purge-token-invalid');
+    for (const bot of this.ownedBots(humanId))
+      this.privateAccess.recordBotAction(
+        human,
+        { ...bot, ownerHumanId: humanId },
+        'memberPurgeConfirm',
+      );
     this.purge!.memberConfirm(human, humanId, token);
     await this.purge!.memberSettled(humanId);
     this.invalidate();

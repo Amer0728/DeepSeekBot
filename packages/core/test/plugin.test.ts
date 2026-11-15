@@ -786,6 +786,11 @@ describe('plugin entry', () => {
     expect(
       remoteMethods(bridge as object).map((marker) => marker.exportName ?? marker.method),
     ).toEqual([
+      'privateObjects',
+      'privateContentOpen',
+      'privateContentPage',
+      'auditLog',
+      'auditVerify',
       'spaces',
       'spaceAudienceDirectory',
       'spaceCreate',

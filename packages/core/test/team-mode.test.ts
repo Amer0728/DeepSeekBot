@@ -965,6 +965,8 @@ describe('member confidentiality', { timeout: 60_000 }, () => {
       memberPurgePreview: { humanId: f.human.humanId },
       memberPurgeConfirm: { humanId: f.human.humanId, token: 'invalid', username: 'bob' },
       memberPasswordChange: { current: 'member-password-1', next: 'member-password-2' },
+      privateContentOpen: { kind: 'bot', objectId: 'owner-secret-bot' },
+      privateContentPage: { viewId: 'missing', before: 'missing' },
       publicChannelJoin: { channelId: memberGroup.id },
       channelListChanges: { sinceSeq: start.seq, epoch: start.epoch },
       channelSearch: { text: 'text' },
@@ -1039,6 +1041,11 @@ describe('member confidentiality', { timeout: 60_000 }, () => {
         const code = error instanceof Error && 'code' in error ? error.code : undefined;
         if (
           [
+            'privateObjects',
+            'privateContentOpen',
+            'privateContentPage',
+            'auditLog',
+            'auditVerify',
             'roles',
             'roleCreate',
             'roleUpdate',
