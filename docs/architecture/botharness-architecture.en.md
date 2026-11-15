@@ -388,6 +388,14 @@ Native Session authorization remains Web-only; Workspace/Service authority is no
 [ADR-0175](../adr/0175-external-tool-rules-retain-current-creator-authority.md); real-platform feedback
 and the broader all-opaque IM confirmation remain separate gates.
 
+## Accepted target: Bot approval policy (not implemented)
+
+The Human-confirmed design of 2026-11-15 gives each Bot one choice: dynamically inherit the optional global template, select a specific shared template that replaces the global policy, or disable the Reviewer. It does not combine a shared template with Bot-local extra rows. Always ask, Always allow and free text are natural-language guidance, not deterministic permission guarantees. Deterministic authorization is resolved first; the Reviewer only allows this request once or asks the Human, without autonomous rejection or saved-rule creation. Full Access does not blanket-exempt the external-effect admission target in E2.
+
+Template creation sources and application are explicit. Deletion requires a second confirmation naming affected Bots and their resulting choices; specific references fall back to inheritance, and deleting the global default clears that selection. Each Review captures its template version at start, while later edits affect new Reviews. Missing policy or Reviewer failures go to the Human without silently changing selections. New Bots inherit; existing Bots retain their choices. Effective policy management preserves ADR-0249's separate management authorization and execution checks.
+
+The full target, implementation observations and #4203/E3 specification differences are in [Bot approval policy](https://github.com/BotHarness/BotHarness/blob/main/docs/architecture/bot-approval-policy.md) ([中文](https://github.com/BotHarness/BotHarness/blob/main/docs/architecture/bot-approval-policy.zh.md)) and [ADR-0342](../adr/0342-bot-approval-selects-one-template-and-keeps-deterministic-authorization-separate.md). This accepted design does not change runtime behavior, authorize feature implementation or a SQLite migration, or rewrite the GitHub specifications. Historical implementation records below are separate from this target.
+
 ## 5 · Orchestrator and Assignment control plane
 
 M6 adds application-owned account/shared roots, separate grantable `files/` and protected Bot Memory, current audience checks (including for the Owner's own Bots), and the bound `core.currentRoots(session, kind)` seam for M12. The persistence, migration, M9 lifecycle and wire contracts are in [M6 runtime boundaries](team-mode-m6-runtime.md).

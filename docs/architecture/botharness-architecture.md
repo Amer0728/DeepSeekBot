@@ -646,6 +646,14 @@ The application-defined `ConnectionsDialog` presents pairing and device manageme
 
 [ADR-0202](../adr/0202-phone-push-is-a-content-free-projection-of-the-activity-list.md)（[#1655](https://github.com/BotHarness/DeepSeekBot/issues/1655)）：应用定义的 Push delivery 模块（`packages/core/src/push/`）是 Activity 的投影，不另设通知权威。Activity 表或 PersonaBot 的审批、提问、私密输入计数变化时（以及每分钟一次的兜底扫描），模块读取 `action` 项与未读的 `replies` 项，对每台已登记的配对设备只发送一次新项，并经 Expo Push Service 投递；推送标题为频道名（`#名称`，私信为 PersonaBot 名称），正文为所需操作加上工具与主要参数、问题或消息的简短预览（折叠空白，最多 140 字符）；私密输入请求不含内容（[ADR-0213](../adr/0213-phone-push-shows-the-channel-and-a-short-preview.md)）。数据字段只含 Host 标识、Activity 项标识、PersonaBot 标识与读取请求所需的 Channel／消息标识，并携带未处理 Human 操作数作为角标。设备经设备网关的 `/botharness-device/push` 登记 Expo push token、切换各类通知、发送测试通知；撤销设备或 Expo 回报 `DeviceNotRegistered` 时删除 token。发送失败有界重试，结果写入不含内容的 `push` 开发者日志。App 保存每台配对的 Host，点按通知先切换到对应 Host，再打开该审批、提问或私信。
 
+## 已确认目标：Bot 级自动审批策略（尚未实施）
+
+2026-11-15 的设计访谈确认：Bot 在动态继承全局、选择特定模板、关闭 Reviewer 三态中选一，特定模板完整替换全局，不再叠加 Bot 额外行。模板包含自然语言 Always ask、Always allow 与 free text；确定性授权先处理，Reviewer 只批准当前调用或转 Human，不自主拒绝、不创建规则。Full Access 不一概豁免 E2 的外部效果审批目标。自然语言理解不是硬权限边界，卡片保存的规则仍归具体 Bot 并标注来源。
+
+共享模板的创建来源与应用动作均由用户显式选择；删除时二次确认并列出受影响 Bot，特定引用统一回退继承，删除全局默认时同时清空全局。Review 固定开始时的模板版本，后续编辑影响新 Review；模板缺失或 Reviewer 故障转 Human，不静默修改选择。新 Bot 默认继承，旧 Bot 保持原选择；生效中的策略管理仍受 ADR-0249 的独立管理授权及执行检查约束。
+
+完整确认内容、实现事实及与 #4203／E3 的差异见 [Bot 审批策略](https://github.com/BotHarness/BotHarness/blob/main/docs/architecture/bot-approval-policy.md)（[中文](https://github.com/BotHarness/BotHarness/blob/main/docs/architecture/bot-approval-policy.zh.md)）与 [ADR-0342](../adr/0342-bot-approval-selects-one-template-and-keeps-deterministic-authorization-separate.md)。此处是目标设计，不代表下文历史实现记录已经改变；不授权功能实施或 SQLite 迁移，也未改写现有 GitHub 规格。
+
 ## 5 · Orchestrator 与 Assignment control plane
 
 M6 adds application-owned account/shared roots, separate grantable `files/` and protected Bot Memory, current audience checks (including for the Owner's own Bots), and the bound `core.currentRoots(session, kind)` seam for M12. The persistence, migration, M9 lifecycle and wire contracts are in [M6 runtime boundaries](team-mode-m6-runtime.md).
