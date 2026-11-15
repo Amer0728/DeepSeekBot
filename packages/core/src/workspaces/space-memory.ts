@@ -8,6 +8,7 @@ import {
   relocationProofSchema,
   prepareMemoryCopy,
   retireMemoryCopy,
+  type MemoryCopyJournal,
 } from './space-memory-copy.js';
 import { canonicalPath } from './space-paths.js';
 
@@ -18,6 +19,24 @@ const moveSchema = z.object({
   target: z.string().nullable(),
   proof_json: z.string().nullable(),
 });
+function copyJournal(db: OperationalDatabaseModulePort, slug: string): MemoryCopyJournal {
+  return {
+    save: (proof) =>
+      db.transaction(
+        (connection) =>
+          connection
+            .prepare('UPDATE workspace_memory_moves SET proof_json = ? WHERE slug = ?')
+            .run(JSON.stringify(proof), slug),
+        ['workspace-spaces'],
+      ),
+    remove: () =>
+      db.transaction(
+        (connection) =>
+          connection.prepare('DELETE FROM workspace_memory_moves WHERE slug = ?').run(slug),
+        ['workspace-spaces'],
+      ),
+  };
+}
 
 export function accountMemoryPath(home: string, humanId: string, slug: string): string {
   for (const segment of [humanId, slug])
@@ -145,7 +164,12 @@ export function relocateSpaceMemories(db: OperationalDatabaseModulePort, home: s
       proofJson === null ? undefined : relocationProofSchema.parse(JSON.parse(proofJson));
     if (relocationProof) {
       if (relocationProof.copy)
-        relocationProof = prepareMemoryCopy(db, move.slug, source, target, relocationProof);
+        relocationProof = prepareMemoryCopy(
+          copyJournal(db, move.slug),
+          source,
+          target,
+          relocationProof,
+        );
       else {
         const current = memoryOwnership(existsSync(source) ? source : target);
         if (current.device !== relocationProof.device || current.inode !== relocationProof.inode)
@@ -160,7 +184,12 @@ export function relocateSpaceMemories(db: OperationalDatabaseModulePort, home: s
           } catch (error) {
             if (!(error instanceof Error) || !('code' in error) || error.code !== 'EXDEV')
               throw error;
-            relocationProof = prepareMemoryCopy(db, move.slug, source, target, relocationProof);
+            relocationProof = prepareMemoryCopy(
+              copyJournal(db, move.slug),
+              source,
+              target,
+              relocationProof,
+            );
           }
         }
       }
@@ -192,6 +221,7 @@ export function relocateSpaceMemories(db: OperationalDatabaseModulePort, home: s
       },
       ['workspace-spaces', 'bot-registry'],
     );
-    if (relocationProof?.copy) retireMemoryCopy(db, move.slug, source, relocationProof);
+    if (relocationProof?.copy)
+      retireMemoryCopy(copyJournal(db, move.slug), source, relocationProof);
   }
 }

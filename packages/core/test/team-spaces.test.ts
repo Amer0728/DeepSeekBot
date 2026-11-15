@@ -258,6 +258,37 @@ describe('M6 spaces and current authority', () => {
     });
   });
 
+  it.each([owner, alice])(
+    'refuses restricted shared content hard-linked into %j private Memory',
+    (human) => {
+      const f = fixture();
+      const everyone = f.core.spaces.create(owner, 'Memory container', { kind: 'everyone' });
+      const slug = 'memory-link-' + human.humanId;
+      expect(
+        f.core.registry.create({
+          slug,
+          displayName: slug,
+          ownerHumanId: human.humanId,
+          ...(human === owner ? { memoryLocation: join(f.home, everyone.spaceId, 'files') } : {}),
+        }).ok,
+      ).toBe(true);
+      const restricted = f.core.spaces.create(owner, 'Restricted content', {
+        kind: 'members',
+        humanIds: [bob.humanId],
+      });
+      const source = join(f.home, restricted.spaceId, 'files/secret');
+      writeFileSync(source, 'restricted shared content');
+      const linked = join(f.core.registry.memoryDirFor(slug)!, 'smuggled');
+      linkSync(source, linked);
+      expect(() => f.core.spaces.assertPath(slug, linked)).toThrowError(
+        expect.objectContaining({
+          code: 'grant-outside-audience',
+          details: { path: linked, spaceId: restricted.spaceId },
+        }),
+      );
+    },
+  );
+
   it('provisions one revocable read/write account Grant for a new member Bot, and never restores a revoked default', async () => {
     const f = fixture();
     const created = await f

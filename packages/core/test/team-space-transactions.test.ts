@@ -22,17 +22,23 @@ import {
 } from '../src/workspaces/space-lifecycle.js';
 import { WorkspaceSpaces } from '../src/workspaces/spaces.js';
 import { defaultSpaceMemoryPath } from '../src/workspaces/space-memory.js';
-import { OWNER_HUMAN_CONTEXT as owner } from '../src/humans/context.js';
+import { OWNER_HUMAN_CONTEXT as owner, humanContext } from '../src/humans/context.js';
 
 vi.mock('node:fs', async (original) => {
   const real = await original<typeof import('node:fs')>();
-  return { ...real, renameSync: vi.fn(real.renameSync), rmSync: vi.fn(real.rmSync) };
+  return {
+    ...real,
+    renameSync: vi.fn(real.renameSync),
+    rmSync: vi.fn(real.rmSync),
+    rmdirSync: vi.fn(real.rmdirSync),
+  };
 });
 const real = await vi.importActual<typeof import('node:fs')>('node:fs');
 const owners: OperationalDatabaseOwner[] = [];
 afterEach(() => {
   vi.mocked(fs.renameSync).mockImplementation(real.renameSync);
   vi.mocked(fs.rmSync).mockImplementation(real.rmSync);
+  vi.mocked(fs.rmdirSync).mockImplementation(real.rmdirSync);
   for (const db of owners.splice(0)) db.close();
 });
 function mount(
@@ -53,6 +59,7 @@ function fixture(
 ) {
   vi.mocked(fs.renameSync).mockImplementation(real.renameSync);
   vi.mocked(fs.rmSync).mockImplementation(real.rmSync);
+  vi.mocked(fs.rmdirSync).mockImplementation(real.rmdirSync);
   const home = createTempRoot('m6-space-transaction-');
   const database = mount(home, faultInjector);
   const db = attachOperationalModule(database, 'review');
@@ -109,8 +116,324 @@ function legacyMemory(f: ReturnType<typeof fixture>) {
   });
   return { source, target, history };
 }
+async function formerOwnerMemory(f: ReturnType<typeof fixture>) {
+  expect(
+    f.registry.create({
+      slug: 'former-owner',
+      displayName: 'Former Owner',
+      memoryLocation: createTempRoot('former-owner-external-'),
+    }).ok,
+  ).toBe(true);
+  const source = f.registry.memoryDirFor('former-owner')!;
+  fs.writeFileSync(join(source, 'uncommitted.txt'), 'retained uncommitted Memory');
+  const history = execFileSync('git', ['-C', source, 'rev-list', 'HEAD'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  }).trim();
+  await f.team.setOwnerPassword(owner, 'old-owner-password');
+  const member = await f.team.createMember(owner, 'nextowner', 'Next Owner');
+  const operator = humanContext(member.member.humanId);
+  await f.team.changePassword(operator, member.initialPassword, 'next-owner-password', false);
+  await f.team.transferOwner(owner, operator.humanId, 'old-owner-password');
+  expect(
+    f.registry.create({ slug: 'audit-owner', displayName: 'Audit', ownerHumanId: operator.humanId })
+      .ok,
+  ).toBe(true);
+  const target = accountMemoryPath(f.home, 'bob', 'former-owner');
+  fs.writeFileSync(join(f.home, 'spaces', owner.humanId, 'files/report'), 'account file');
+  vi.mocked(fs.renameSync).mockImplementation((from, to) => {
+    if (String(from) === source && String(to) === target)
+      throw Object.assign(new Error('cross-device'), { code: 'EXDEV' });
+    real.renameSync(from, to);
+  });
+  return { source, target, history, operator };
+}
 
 describe('M6 durable filesystem transactions', () => {
+  it.each(['move', 'erase'])(
+    'continues committed cleanup after the recipient chooses to %s Memory',
+    async (action) => {
+      let armed = false,
+        commits = 0;
+      const f = fixture(({ stage }) => {
+        if (armed && stage === 'after-commit-before-notify' && ++commits === 4)
+          throw new Error('ownership committed');
+      });
+      const memory = await formerOwnerMemory(f);
+      armed = true;
+      await expect(f.team.transfer(memory.operator, owner.humanId, 'bob')).rejects.toThrow();
+      f.database.close();
+      const reopened = mount(f.home),
+        db = attachOperationalModule(reopened, 'recipient-choice');
+      const team = new TeamService(
+        db,
+        createSqliteChannelStore({ database: db, rootDir: join(f.home, 'channels') }),
+        { spaces: () => spaces },
+      );
+      const spaces = new WorkspaceSpaces(db, f.home, team.roles);
+      if (action === 'move') await team.transfer(memory.operator, 'bob', 'alice');
+      else {
+        real.rmSync(memory.target, { recursive: true });
+        db.transaction((connection) => {
+          connection
+            .prepare("DELETE FROM persona_bot_memory_ownership WHERE slug='former-owner'")
+            .run();
+          connection.prepare("DELETE FROM persona_bots WHERE slug='former-owner'").run();
+        });
+      }
+      expect(() => spaces.assertPath('audit-owner', memory.source, true)).toThrow(
+        'grant-protected-path',
+      );
+      recoverSpaceTransfers(db);
+      expect(fs.existsSync(memory.source)).toBe(false);
+      if (action === 'move') {
+        const current = accountMemoryPath(f.home, 'alice', 'former-owner');
+        expect(fs.readFileSync(join(current, 'uncommitted.txt'), 'utf8')).toBe(
+          'retained uncommitted Memory',
+        );
+        expect(
+          execFileSync('git', ['-C', current, 'rev-list', 'HEAD'], {
+            encoding: 'utf8',
+            windowsHide: true,
+          }).trim(),
+        ).toBe(memory.history);
+      } else expect(fs.existsSync(memory.target)).toBe(false);
+      expect(
+        db.read((connection) => connection.prepare('SELECT * FROM workspace_file_transfers').all()),
+      ).toEqual([]);
+    },
+  );
+
+  it('rolls back a verified cross-filesystem Memory copy before ownership commits', async () => {
+    const f = fixture();
+    const memory = await formerOwnerMemory(f);
+    for (const recover of [false, true]) {
+      const transfer = prepareSpaceTransfer(f.db, f.home, owner.humanId, 'bob', ['former-owner']);
+      expect(fs.existsSync(memory.source)).toBe(true);
+      expect(fs.readFileSync(join(memory.target, 'uncommitted.txt'), 'utf8')).toBe(
+        'retained uncommitted Memory',
+      );
+      if (recover) recoverSpaceTransfers(f.db);
+      else transfer.rollback();
+      expect(fs.existsSync(memory.target)).toBe(false);
+      expect(fs.readFileSync(join(memory.source, 'uncommitted.txt'), 'utf8')).toBe(
+        'retained uncommitted Memory',
+      );
+      expect(fs.readFileSync(join(f.home, 'spaces', owner.humanId, 'files/report'), 'utf8')).toBe(
+        'account file',
+      );
+    }
+  });
+
+  it('resumes committed member transfer after partial cross-filesystem source retirement', async () => {
+    const f = fixture();
+    const memory = await formerOwnerMemory(f);
+    let interrupted = false;
+    vi.mocked(fs.rmSync).mockImplementation((path, options) => {
+      if (String(path) === memory.source && !interrupted) {
+        interrupted = true;
+        real.rmSync(join(memory.source, '.git'), { recursive: true });
+        throw new Error('partial transfer retirement');
+      }
+      real.rmSync(path, options);
+    });
+    await expect(f.team.transfer(memory.operator, owner.humanId, 'bob')).rejects.toThrow(
+      'partial transfer retirement',
+    );
+    expect(() => f.spaces.assertPath('audit-owner', memory.source, true)).toThrow(
+      'grant-protected-path',
+    );
+    f.database.close();
+    const reopened = mount(f.home);
+    const db = attachOperationalModule(reopened, 'partial-transfer');
+    recoverSpaceTransfers(db);
+    expect(fs.existsSync(memory.source)).toBe(false);
+    expect(fs.readFileSync(join(memory.target, 'uncommitted.txt'), 'utf8')).toBe(
+      'retained uncommitted Memory',
+    );
+    expect(
+      execFileSync('git', ['-C', memory.target, 'rev-list', 'HEAD'], {
+        encoding: 'utf8',
+        windowsHide: true,
+      }).trim(),
+    ).toBe(memory.history);
+    expect(
+      db.read((connection) => connection.prepare('SELECT * FROM workspace_file_transfers').all()),
+    ).toEqual([]);
+  });
+  it.each([0, 1, 2, 3, 4, 5, 6, 7, -4])(
+    'recovers former-Owner Memory transfer after EXDEV and commit interruption %s',
+    async (stop) => {
+      let armed = false,
+        commits = 0;
+      const f = fixture(({ stage }) => {
+        if (
+          armed &&
+          stop &&
+          stage === (stop < 0 ? 'before-commit' : 'after-commit-before-notify') &&
+          ++commits === Math.abs(stop)
+        )
+          throw new Error('transfer interrupted');
+      });
+      const memory = await formerOwnerMemory(f);
+      armed = true;
+      const transfer = f.team.transfer(memory.operator, owner.humanId, 'bob');
+      if (stop) await expect(transfer).rejects.toThrow();
+      else await expect(transfer).resolves.toBeNull();
+      f.database.close();
+      const reopened = mount(f.home);
+      const db = attachOperationalModule(reopened, 'transfer-recovery');
+      const team = new TeamService(
+        db,
+        createSqliteChannelStore({ database: db, rootDir: join(f.home, 'channels') }),
+        { spaces: () => spaces },
+      );
+      const spaces = new WorkspaceSpaces(db, f.home, team.roles);
+      const committed = stop === 0 || stop >= 4;
+      expect(
+        db.read(
+          (connection) =>
+            connection
+              .prepare("SELECT owner_human_id FROM persona_bots WHERE slug='former-owner'")
+              .get()?.owner_human_id,
+        ),
+      ).toBe(committed ? 'bob' : owner.humanId);
+      if (stop === 4 || stop === 5) {
+        expect(() => spaces.assertPath('audit-owner', memory.source, true)).toThrow(
+          'grant-protected-path',
+        );
+        expect(() => spaces.assertPath('audit-owner', memory.source)).toThrow(
+          'grant-protected-path',
+        );
+        fs.writeFileSync(join(memory.target, 'new-owner-write'), 'new owner content');
+      }
+      recoverSpaceTransfers(db);
+      if (!committed) {
+        expect(fs.readFileSync(join(memory.source, 'uncommitted.txt'), 'utf8')).toBe(
+          'retained uncommitted Memory',
+        );
+        expect(fs.existsSync(memory.target)).toBe(false);
+        await expect(team.transfer(memory.operator, owner.humanId, 'bob')).resolves.toBeNull();
+      }
+      expect(fs.existsSync(memory.source)).toBe(false);
+      expect(fs.readFileSync(join(memory.target, 'uncommitted.txt'), 'utf8')).toBe(
+        'retained uncommitted Memory',
+      );
+      if (stop === 4 || stop === 5)
+        expect(fs.readFileSync(join(memory.target, 'new-owner-write'), 'utf8')).toBe(
+          'new owner content',
+        );
+      expect(fs.readFileSync(join(f.home, 'spaces/bob/files/report'), 'utf8')).toBe('account file');
+      expect(
+        execFileSync('git', ['-C', memory.target, 'rev-list', 'HEAD'], {
+          encoding: 'utf8',
+          windowsHide: true,
+        }).trim(),
+      ).toBe(memory.history);
+      expect(
+        db.read(
+          (connection) =>
+            connection
+              .prepare("SELECT body FROM persona_bot_memory_ownership WHERE slug='former-owner'")
+              .get()?.body,
+        ),
+      ).toBe(JSON.stringify(memoryOwnership(memory.target)));
+      expect(
+        db.read((connection) => connection.prepare('SELECT * FROM workspace_file_transfers').all()),
+      ).toEqual([]);
+    },
+  );
+  it.each(['files', 'root'])(
+    'keeps a shared folder re-listable when a late write races %s removal',
+    (where) => {
+      const f = fixture();
+      const space = f.spaces.create(owner, 'Late write', { kind: 'everyone' });
+      expect(f.registry.create({ slug: 'delete-bot', displayName: 'Delete' }).ok).toBe(true);
+      const root = f.spaces.path(space.spaceId);
+      f.db.transaction((db) =>
+        db
+          .prepare(`INSERT INTO workspace_grants
+      (id,bot_slug,workspace_id,workspace_path,workspace_title,created_at,orchestrator_write,write_revision)
+      VALUES ('delete-grant','delete-bot',?,?,'Folder','2026-11-15',1,1)`)
+          .run(space.spaceId, join(root, 'files')),
+      );
+      const target = where === 'files' ? join(root, 'files') : root;
+      const late = join(target, 'late');
+      let injected = false;
+      vi.mocked(fs.rmdirSync).mockImplementation((path, options) => {
+        if (String(path) === target && !injected) {
+          injected = true;
+          expect(
+            f.db.read((db) =>
+              db.prepare('SELECT 1 FROM workspace_spaces WHERE space_id=?').get(space.spaceId),
+            ),
+          ).toBeUndefined();
+          expect(
+            f.db.read(
+              (db) =>
+                db.prepare("SELECT revoked_at FROM workspace_grants WHERE id='delete-grant'").get()
+                  ?.revoked_at,
+            ),
+          ).toEqual(expect.any(String));
+          fs.writeFileSync(late, 'late data');
+        }
+        real.rmdirSync(path, options);
+      });
+      expect(() => f.spaces.delete(owner, space.spaceId, true)).toThrow('space-not-empty');
+      expect(fs.readFileSync(late, 'utf8')).toBe('late data');
+      expect(f.spaces.list(owner)).toContainEqual(space);
+      expect(fs.existsSync(join(root, 'files'))).toBe(true);
+    },
+  );
+
+  it.each(['before-commit', 'after-commit-before-notify'] as const)(
+    'preserves the shared folder when deletion fails at %s',
+    (stage) => {
+      let armed = false;
+      const f = fixture((context) => {
+        if (armed && context.stage === stage) {
+          armed = false;
+          throw new Error('delete interrupted');
+        }
+      });
+      const space = f.spaces.create(owner, 'Delete transaction', { kind: 'everyone' });
+      const root = f.spaces.path(space.spaceId);
+      expect(f.registry.create({ slug: 'delete-transaction', displayName: 'Delete' }).ok).toBe(
+        true,
+      );
+      f.db.transaction((connection) =>
+        connection
+          .prepare(`INSERT INTO workspace_grants
+      (id,bot_slug,workspace_id,workspace_path,workspace_title,created_at,orchestrator_write,write_revision)
+      VALUES ('delete-transaction-grant','delete-transaction',?,?,'Folder','2026-11-15',1,1)`)
+          .run(space.spaceId, join(root, 'files')),
+      );
+      armed = true;
+      expect(() => f.spaces.delete(owner, space.spaceId, true)).toThrow();
+      expect(fs.existsSync(join(root, 'files'))).toBe(true);
+      f.database.close();
+      const reopened = mount(f.home);
+      const db = attachOperationalModule(reopened, 'delete-recovery');
+      recoverSpaceTransfers(db);
+      const team = new TeamService(
+        db,
+        createSqliteChannelStore({ database: db, rootDir: join(f.home, 'channels') }),
+      );
+      const spaces = new WorkspaceSpaces(db, f.home, team.roles);
+      expect(spaces.list(owner)).toContainEqual(space);
+      expect(
+        db.read(
+          (connection) =>
+            connection
+              .prepare(
+                "SELECT revoked_at FROM workspace_grants WHERE id='delete-transaction-grant'",
+              )
+              .get()?.revoked_at,
+        ),
+      ).toEqual(stage === 'before-commit' ? null : expect.any(String));
+    },
+  );
+
   it('moves and restores symlink entries without resolving their targets during rollback and recovery', () => {
     const f = fixture();
     const source = join(f.home, 'spaces/alice/files');

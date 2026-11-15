@@ -1026,6 +1026,7 @@ export class TeamService {
     }
     this.accessChanged(true);
     await this.stopBots?.(preview.bots.map((bot) => bot.slug));
+    spaceTransfer?.finish();
     return null;
   }
 

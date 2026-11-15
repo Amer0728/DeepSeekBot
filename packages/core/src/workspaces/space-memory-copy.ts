@@ -17,7 +17,6 @@ import {
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
-import type { OperationalDatabaseModulePort } from '../database/owner.js';
 import { memoryOwnership } from '../bots/deletion.js';
 import { canonicalPath, within } from './space-paths.js';
 
@@ -32,7 +31,11 @@ const copySchema = z.union([
   copyBase.extend({ phase: z.enum(['ready', 'retiring']), digest: z.string() }),
 ]);
 export const relocationProofSchema = memoryProofSchema.extend({ copy: copySchema.optional() });
-type RelocationProof = z.infer<typeof relocationProofSchema>;
+export type RelocationProof = z.infer<typeof relocationProofSchema>;
+export interface MemoryCopyJournal {
+  save(proof: RelocationProof): void;
+  remove(): void;
+}
 
 function sameIdentity(
   path: string,
@@ -68,15 +71,6 @@ function digestTree(root: string): string {
   visit(root, '');
   return hash.digest('hex');
 }
-function save(db: OperationalDatabaseModulePort, slug: string, proof: RelocationProof): void {
-  db.transaction(
-    (connection) =>
-      connection
-        .prepare('UPDATE workspace_memory_moves SET proof_json = ? WHERE slug = ?')
-        .run(JSON.stringify(proof), slug),
-    ['workspace-spaces'],
-  );
-}
 function validateStage(stage: string, source: string, target: string): void {
   if (
     dirname(stage) !== dirname(target) ||
@@ -89,8 +83,7 @@ function validateStage(stage: string, source: string, target: string): void {
 }
 
 export function prepareMemoryCopy(
-  db: OperationalDatabaseModulePort,
-  slug: string,
+  journal: MemoryCopyJournal,
   source: string,
   target: string,
   proof: RelocationProof,
@@ -110,7 +103,7 @@ export function prepareMemoryCopy(
     const stage = mkdtempSync(join(dirname(target), '.memory-copy-'));
     copy = { phase: 'copying', stage, identity: memoryOwnership(stage, true) };
     proof = { ...proof, copy };
-    save(db, slug, proof);
+    journal.save(proof);
     const digest = digestTree(source);
     cpSync(source, stage, {
       recursive: true,
@@ -125,7 +118,7 @@ export function prepareMemoryCopy(
       throw new Error('space-memory-copy-changed');
     copy = { phase: 'ready', stage, identity: memoryOwnership(stage), digest };
     proof = { ...proof, copy };
-    save(db, slug, proof);
+    journal.save(proof);
   }
   if (existsSync(target)) sameIdentity(target, copy.identity);
   else {
@@ -141,24 +134,44 @@ export function prepareMemoryCopy(
   return proof;
 }
 export function retireMemoryCopy(
-  db: OperationalDatabaseModulePort,
-  slug: string,
+  journal: MemoryCopyJournal,
   source: string,
   proof: RelocationProof,
 ): void {
   if (!proof.copy || proof.copy.phase === 'copying')
     throw new Error('space-memory-copy-incomplete');
   if (proof.copy.phase === 'ready') {
+    if (existsSync(source) && digestTree(source) !== proof.copy.digest)
+      throw new Error('space-memory-copy-changed');
     proof = { ...proof, copy: { ...proof.copy, phase: 'retiring' } };
-    save(db, slug, proof);
+    journal.save(proof);
   }
   if (existsSync(source)) {
     sameIdentity(source, proof, true);
     rmSync(source, { recursive: true });
   }
-  db.transaction(
-    (connection) =>
-      connection.prepare('DELETE FROM workspace_memory_moves WHERE slug = ?').run(slug),
-    ['workspace-spaces'],
-  );
+  journal.remove();
+}
+
+export function rollbackMemoryCopy(
+  journal: MemoryCopyJournal,
+  source: string,
+  target: string,
+  proof: RelocationProof,
+): void {
+  const copy = proof.copy;
+  if (!copy || copy.phase === 'retiring') throw new Error('space-memory-copy-not-rollbackable');
+  validateStage(copy.stage, source, target);
+  sameIdentity(source, proof);
+  if (copy.phase === 'ready' && digestTree(source) !== copy.digest)
+    throw new Error('space-memory-copy-changed');
+  for (const path of [target, copy.stage]) {
+    if (!existsSync(path)) continue;
+    sameIdentity(path, copy.identity, copy.phase === 'copying');
+    if (copy.phase === 'copying' && path === target) throw new Error('space-memory-target-exists');
+    if (copy.phase === 'ready' && digestTree(path) !== copy.digest)
+      throw new Error('space-memory-copy-changed');
+    rmSync(path, { recursive: true });
+  }
+  journal.remove();
 }
