@@ -174,7 +174,11 @@ export interface StreamHandlers {
 
 export interface HostClient {
   setRoutePreference?(route: string | undefined): Promise<void>;
-  updateRoutes?(routes: string[], encryption?: HostEncryption): void;
+  updateRoutes?(
+    routes: string[],
+    encryption?: HostEncryption,
+    saved?: { routePreference: string | undefined },
+  ): void;
   testRoute?(url: string): Promise<boolean>;
   getSnapshot(): HostSnapshot;
   subscribe(listener: () => void): () => void;
@@ -1595,7 +1599,7 @@ export function createHostClient(options: HostClientOptions): HostClient {
         changingPreference = false;
       }
     },
-    updateRoutes(next, encryption) {
+    updateRoutes(next, encryption, saved) {
       if (encryption) {
         const current = options.encryption;
         if (
@@ -1611,8 +1615,20 @@ export function createHostClient(options: HostClientOptions): HostClient {
       }
       const previous = routes;
       routes = preferredRoutes(next);
+      const preferenceChanged = saved !== undefined && saved.routePreference !== routePreference;
+      if (preferenceChanged) {
+        routePreference = saved.routePreference;
+        preferenceRevision++;
+        routeChangePending = running;
+        preferredSwitchAt = Date.now();
+      }
       publish();
-      if (
+      if (running && preferenceChanged) {
+        resumeRequested = true;
+        resumeLive();
+        clearTimeout(retryTimer);
+        wake?.();
+      } else if (
         running &&
         snapshot.connection.status !== 'connected' &&
         routes.some((candidate) => !previous.includes(candidate))
