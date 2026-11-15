@@ -62,9 +62,10 @@ const styles = stylex.create({
 
 function time(at: string): string {
   const date = new Date(at);
+  const language = typeof document === 'undefined' ? undefined : document.documentElement.lang;
   return Number.isNaN(date.getTime())
     ? at
-    : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    : date.toLocaleString(language || undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 export function AuditLogSection({
