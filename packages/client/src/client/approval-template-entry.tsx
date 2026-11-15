@@ -276,9 +276,16 @@ export function AutoApprovalLine({
           <span className="bh-bot-dm-action-name">{name}</span>
         </span>
         <span>
-          {t(record.outcome === 'allowed' ? 'autoApproval.allowed' : 'autoApproval.rejected', {
-            template,
-          })}
+          {t(
+            record.outcome === 'allowed'
+              ? 'autoApproval.allowed'
+              : record.outcome === 'ask-human'
+                ? 'autoApproval.askHuman'
+                : 'autoApproval.rejected',
+            {
+              template,
+            },
+          )}
         </span>
         <span className="bh-memory-commit-subject">{record.reason}</span>
         <span className="bh-memory-commit-files">{record.toolName}</span>
