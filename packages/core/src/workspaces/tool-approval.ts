@@ -880,7 +880,7 @@ export class ChannelToolApproval {
     template: { name: string; text: string },
     channelId: string,
     signal: AbortSignal | undefined,
-  ): Promise<'allowed-once' | 'rejected' | undefined> {
+  ): Promise<'allowed-once' | undefined> {
     const auto = this.#autoApproval;
     if (auto === undefined) return undefined;
     template = { ...template };

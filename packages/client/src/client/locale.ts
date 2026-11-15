@@ -4413,7 +4413,7 @@ export const zh = {
   'autoApproval.template.getWorkDone': '把活干完',
   'autoApproval.template.getWorkDoneHint': '让工作继续；只拦下破坏性或不可撤回的操作。',
   'autoApproval.library.title': '审批模板',
-  'autoApproval.library.description': '每个 Bot 在自己的设置里选用一个。',
+  'autoApproval.library.description': 'Bot 可继承全局默认，或选择一份共享模板。',
   'autoApproval.library.new': '新建模板',
   'autoApproval.library.newHint': '写清楚哪些放行、哪些拒绝、哪些问你。',
   'autoApproval.library.create': '新建',
@@ -10380,7 +10380,7 @@ My relationship with you, established lore and topics to avoid: [fill in].
   'autoApproval.template.getWorkDoneHint':
     'Lets the work continue; stops only destructive or irreversible calls.',
   'autoApproval.library.title': 'Approval Templates',
-  'autoApproval.library.description': 'Each Bot picks one in its own settings.',
+  'autoApproval.library.description': 'Bots can inherit the default or select a shared template.',
   'autoApproval.library.new': 'New template',
   'autoApproval.library.newHint': 'Say what to allow, what to refuse and what to ask you.',
   'autoApproval.library.create': 'New',

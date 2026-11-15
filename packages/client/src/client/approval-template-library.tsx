@@ -266,26 +266,28 @@ export function ApprovalTemplateLibrarySettings({
         title={t('autoApproval.library.title')}
         description={t('autoApproval.library.description')}
       >
-        <SettingsRow
-          title={t('autoApproval.globalDefault')}
-          control={
-            <Select
-              label={t('autoApproval.globalDefault')}
-              value={globalDefault ?? 'off'}
-              disabled={busy || templates === undefined}
-              options={[
-                { value: 'off', label: t('autoApproval.off') },
-                ...list.map((template) => ({
-                  value: template.name,
-                  label: templateTitle(t, template.name, template.title),
-                })),
-              ]}
-              onChange={(value) =>
-                run(() => setGlobalApprovalTemplate(call, value === 'off' ? null : value))
-              }
-            />
-          }
-        />
+        {templates === undefined ? null : (
+          <SettingsRow
+            title={t('autoApproval.globalDefault')}
+            control={
+              <Select
+                label={t('autoApproval.globalDefault')}
+                value={globalDefault ?? 'off'}
+                disabled={busy || templates === undefined}
+                options={[
+                  { value: 'off', label: t('autoApproval.off') },
+                  ...list.map((template) => ({
+                    value: template.name,
+                    label: templateTitle(t, template.name, template.title),
+                  })),
+                ]}
+                onChange={(value) =>
+                  run(() => setGlobalApprovalTemplate(call, value === 'off' ? null : value))
+                }
+              />
+            }
+          />
+        )}
         <SettingsRow
           title={t('autoApproval.library.new')}
           data={{ 'data-approval-template-new': '' }}
