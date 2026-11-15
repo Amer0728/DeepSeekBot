@@ -185,12 +185,17 @@ describe('Profile-wide reviewer model setting', () => {
     await vi.waitFor(() => expect(state.messages).toHaveLength(1));
     expect(state.messages[0]!.toolApprovalRequest?.toolName).toBe('todo_write');
     expect(state.streamed).toHaveLength(0);
+    expect(state.messages[0]?.toolApprovalRequest?.approvalReview).toMatchObject({
+      kind: 'review',
+      fallback: 'model-unavailable',
+      reason: 'Automatic review unavailable (model-unavailable).',
+    });
     expect(state.log).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: 'ask-human',
         fallback: 'model-unavailable',
         model: 'deepseek/no-such-model',
-        detail: 'Model deepseek/no-such-model is unavailable',
+        templateVersion: expect.stringMatching(/^[a-f0-9]{64}$/),
       }),
     );
     expect(

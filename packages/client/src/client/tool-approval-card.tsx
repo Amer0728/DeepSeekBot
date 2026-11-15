@@ -453,6 +453,9 @@ export function ToolApprovalCard({
               t={t}
             />
           )}
+          {request.approvalReview === undefined ? null : (
+            <div className="bh-note">{request.approvalReview.reason}</div>
+          )}
           {details}
         </>
       )}

@@ -3,7 +3,7 @@ import { OWNER_HUMAN_CONTEXT, type HumanContext } from '../humans/context.js';
 import type { Context } from '@deepseek-ai/cordis';
 import type { ToolApprovalActor } from './tool-approval-actor.js';
 export type { ToolApprovalActor } from './tool-approval-actor.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { ToolExecution } from '@deepseek-ai/dsh-tools';
@@ -35,7 +35,12 @@ export interface BotCreatePreview {
   avatarError?: string;
 }
 
+export type ToolApprovalReview =
+  | { kind: 'template-unavailable'; reason: string }
+  | { kind: 'review'; template: string; version: string; reason: string; fallback?: string };
+
 export interface ToolApprovalRequestCard {
+  approvalReview?: ToolApprovalReview;
   opaque?: boolean;
   decidedBy?: ApprovalDecider;
   sessionId: string;
@@ -77,6 +82,7 @@ export interface ToolAutoApproval {
   log(entry: {
     botSlug: string;
     template: string;
+    templateVersion?: string;
     toolName: string;
     outcome: ApprovalReview['outcome'];
     latencyMs: number;
@@ -116,18 +122,7 @@ type Pending = {
   timer: ReturnType<typeof setTimeout>;
 };
 
-export const AUTO_APPROVAL_CONSECUTIVE_REJECTIONS = 3;
-export const AUTO_APPROVAL_SESSION_REJECTIONS = 20;
 const STOPPED_REQUEST_MEMORY = 500;
-
-type Breaker = {
-  botSlug: string;
-  channelId: string;
-  template: string;
-  consecutive: number;
-  total: number;
-  paused: boolean;
-};
 
 export type AutoRejectionOverrideResult =
   | { ok: true; message: ChannelMessage }
@@ -196,8 +191,6 @@ export class ChannelToolApproval {
     | undefined;
   readonly #autoApproval: ToolAutoApproval | undefined;
   readonly #fullAccess: ((sessionId: string) => boolean) | undefined;
-  readonly #reviewRejections = new Map<string, string>();
-  readonly #breakers = new Map<string, Breaker>();
   readonly #overrides = new Set<string>();
   readonly #overridden = new Set<string>();
 
@@ -340,11 +333,29 @@ export class ChannelToolApproval {
       tracked.humanReviewed = true;
       return 'allowed-once';
     }
-    const template =
-      policyChange || tracked.requireExplicitApproval
-        ? undefined
-        : this.#autoApproval?.template(tracked.botSlug);
-    if (template !== undefined && this.#breakers.get(tracked.sessionId)?.paused !== true) {
+    let template: { name: string; text: string } | undefined;
+    try {
+      template =
+        policyChange || tracked.requireExplicitApproval
+          ? undefined
+          : this.#autoApproval?.template(tracked.botSlug);
+    } catch {
+      tracked.approvalReview = {
+        kind: 'template-unavailable',
+        reason: 'The selected approval template could not be read.',
+      };
+      try {
+        this.#autoApproval?.log({
+          botSlug: tracked.botSlug,
+          template: '',
+          toolName: tracked.toolName,
+          outcome: 'ask-human',
+          latencyMs: 0,
+          fallback: 'selected-template-unavailable',
+        });
+      } catch {}
+    }
+    if (template !== undefined) {
       const reviewed = await this.#review(tracked, template, channelId, request.signal);
       if (reviewed !== undefined) return reviewed;
       if (request.signal?.aborted) return 'cancelled';
@@ -361,6 +372,7 @@ export class ChannelToolApproval {
         role: tracked.role,
         cwd: tracked.cwd,
         input: tracked.input,
+        ...(tracked.approvalReview === undefined ? {} : { approvalReview: tracked.approvalReview }),
         externalDecision: tracked.externalDecision ?? 'operation',
         allowAlways: tracked.externalDecision !== 'each-use' || tracked.rememberable === true,
         ...(tracked.botCreatePreview === undefined
@@ -772,7 +784,6 @@ export class ChannelToolApproval {
       if (remember) tracked.remembered = true;
       if (outcome !== 'rejected') tracked.humanReviewed = true;
       this.#settle(messageId, outcome === 'rejected' ? 'rejected' : 'allowed-once');
-      if (outcome !== 'rejected') await this.#resume(tracked.sessionId);
       return true;
     } finally {
       pending.deciding = false;
@@ -782,14 +793,12 @@ export class ChannelToolApproval {
   close(): void {
     for (const id of this.#pending.keys()) this.#settle(id, 'cancelled');
     this.#tracked.clear();
-    this.#reviewRejections.clear();
-    this.#breakers.clear();
     this.#overrides.clear();
     this.#overridden.clear();
   }
 
-  autoApprovalPaused(sessionId: string): boolean {
-    return this.#breakers.get(sessionId)?.paused === true;
+  autoApprovalPaused(_sessionId: string): boolean {
+    return false;
   }
 
   async overrideRejection(
@@ -829,86 +838,7 @@ export class ChannelToolApproval {
     bounded(this.#overridden, 1024);
     this.#overrides.add(overrideKey(record));
     bounded(this.#overrides, 256);
-    await this.#resume(record.sessionId);
     return { ok: true, message: appended };
-  }
-
-  async #trip(
-    tracked: TrackedCall,
-    template: string,
-    channelId: string,
-    allowed: boolean,
-  ): Promise<void> {
-    const breaker = this.#breakers.get(tracked.sessionId) ?? {
-      botSlug: tracked.botSlug,
-      channelId,
-      template,
-      consecutive: 0,
-      total: 0,
-      paused: false,
-    };
-    breaker.channelId = channelId;
-    breaker.template = template;
-    if (allowed) {
-      breaker.consecutive = 0;
-    } else {
-      breaker.consecutive += 1;
-      breaker.total += 1;
-    }
-    this.#breakers.delete(tracked.sessionId);
-    this.#breakers.set(tracked.sessionId, breaker);
-    if (this.#breakers.size > 1024) this.#breakers.delete(this.#breakers.keys().next().value!);
-    const reason =
-      breaker.consecutive >= AUTO_APPROVAL_CONSECUTIVE_REJECTIONS
-        ? 'consecutive'
-        : breaker.total >= AUTO_APPROVAL_SESSION_REJECTIONS
-          ? 'session'
-          : undefined;
-    if (reason === undefined || breaker.paused) return;
-    breaker.paused = true;
-    await this.#pauseNotice(tracked.sessionId, breaker, 'paused', reason);
-  }
-
-  async #resume(sessionId: string): Promise<void> {
-    const breaker = this.#breakers.get(sessionId);
-    if (breaker?.paused !== true) return;
-    this.#breakers.delete(sessionId);
-    await this.#pauseNotice(sessionId, breaker, 'resumed');
-  }
-
-  async #pauseNotice(
-    sessionId: string,
-    breaker: Breaker,
-    state: 'paused' | 'resumed',
-    reason?: 'consecutive' | 'session',
-  ): Promise<void> {
-    const body =
-      state === 'resumed'
-        ? 'Auto approval resumed for this Session.'
-        : reason === 'consecutive'
-          ? 'Auto approval paused for this Session after ' +
-            AUTO_APPROVAL_CONSECUTIVE_REJECTIONS +
-            ' rejections in a row. Every request posts a card until you approve one.'
-          : 'Auto approval paused for this Session after ' +
-            AUTO_APPROVAL_SESSION_REJECTIONS +
-            ' rejections. Every request posts a card until you approve one.';
-    try {
-      await this.#channels.appendMessage(OWNER_HUMAN_CONTEXT, breaker.channelId, {
-        id: randomUUID(),
-        at: new Date().toISOString(),
-        author: { kind: 'system' },
-        body,
-        toolAutoApprovalPause: {
-          botSlug: breaker.botSlug,
-          sessionId,
-          template: breaker.template,
-          state,
-          ...(reason === undefined ? {} : { reason }),
-        },
-      });
-    } catch {
-      this.#attention?.warn('auto-approval-pause-notice-failed');
-    }
   }
 
   #changesPolicy(tracked: TrackedCall): boolean {
@@ -941,11 +871,8 @@ export class ChannelToolApproval {
     return this.#rules?.match({ ...tracked, explicitOnly: this.#explicitRuleRequired(tracked) });
   }
 
-  takeReviewRejection(sessionId: string, callId: string): string | undefined {
-    const key = callKey(sessionId, callId);
-    const reason = this.#reviewRejections.get(key);
-    this.#reviewRejections.delete(key);
-    return reason;
+  takeReviewRejection(_sessionId: string, _callId: string): string | undefined {
+    return undefined;
   }
 
   async #review(
@@ -956,6 +883,14 @@ export class ChannelToolApproval {
   ): Promise<'allowed-once' | 'rejected' | undefined> {
     const auto = this.#autoApproval;
     if (auto === undefined) return undefined;
+    template = { ...template };
+    const templateVersion = createHash('sha256').update(template.text).digest('hex');
+    tracked.approvalReview = {
+      kind: 'review',
+      template: template.name,
+      version: templateVersion,
+      reason: 'Automatic review unavailable.',
+    };
     const started = Date.now();
     let model: string | undefined;
     let reviewSession: string | undefined;
@@ -964,6 +899,7 @@ export class ChannelToolApproval {
         auto.log({
           botSlug: tracked.botSlug,
           template: template.name,
+          templateVersion,
           toolName: tracked.toolName,
           outcome,
           latencyMs: Date.now() - started,
@@ -973,14 +909,16 @@ export class ChannelToolApproval {
           ...(detail === undefined ? {} : { detail }),
         });
       } catch {
-        this.#attention?.warn('approval-review-log-failed');
+        try {
+          this.#attention?.warn('approval-review-log-failed');
+        } catch {}
       }
     };
     let review: ApprovalReviewResult;
     try {
       review = await auto.review({
         botSlug: tracked.botSlug,
-        template,
+        template: { ...template, version: templateVersion },
         call: {
           toolName: tracked.toolName,
           input: reviewerCallInput(tracked.toolName, tracked.input),
@@ -1002,10 +940,29 @@ export class ChannelToolApproval {
       const failure = error as
         | { code?: unknown; detail?: unknown; model?: unknown; sessionId?: unknown }
         | undefined;
-      const code = typeof failure?.code === 'string' ? failure.code : 'review-failed';
+      const code =
+        typeof failure?.code === 'string' &&
+        [
+          'no-model',
+          'model-unavailable',
+          'settings-invalid',
+          'llm-unavailable',
+          'timeout',
+          'model-error',
+          'unparseable',
+        ].includes(failure.code)
+          ? failure.code
+          : 'review-failed';
+      tracked.approvalReview = {
+        kind: 'review',
+        template: template.name,
+        version: templateVersion,
+        reason: 'Automatic review unavailable (' + code + ').',
+        fallback: code,
+      };
       if (typeof failure?.model === 'string') model = failure.model;
       if (typeof failure?.sessionId === 'string') reviewSession = failure.sessionId;
-      log('ask-human', code, typeof failure?.detail === 'string' ? failure.detail : undefined);
+      log('ask-human', code);
       return undefined;
     }
     model = review.model;
@@ -1014,11 +971,16 @@ export class ChannelToolApproval {
       log('ask-human', 'cancelled');
       return undefined;
     }
-    if (review.outcome === 'ask-human') {
-      log('ask-human');
+    if (review.outcome !== 'allow') {
+      tracked.approvalReview = {
+        kind: 'review',
+        template: template.name,
+        version: templateVersion,
+        reason: review.reason,
+      };
+      log('ask-human', undefined, review.reason);
       return undefined;
     }
-    const allowed = review.outcome === 'allow';
     const key = callKey(tracked.sessionId, tracked.callId);
     if (this.#tracked.get(key) !== tracked) {
       log(review.outcome, 'call-changed');
@@ -1028,11 +990,7 @@ export class ChannelToolApproval {
       id: randomUUID(),
       at: new Date().toISOString(),
       author: { kind: 'system' },
-      body:
-        (allowed ? 'Auto-approved by ' : 'Auto-rejected by ') +
-        template.name +
-        ': ' +
-        review.reason,
+      body: 'Auto-approved by ' + template.name + ': ' + review.reason,
       toolAutoApproval: {
         botSlug: tracked.botSlug,
         sessionId: tracked.sessionId,
@@ -1040,7 +998,8 @@ export class ChannelToolApproval {
         toolName: tracked.toolName,
         input: reviewerCallInput(tracked.toolName, tracked.input),
         template: template.name,
-        outcome: allowed ? 'allowed' : 'rejected',
+        templateVersion,
+        outcome: 'allowed',
         reason: review.reason,
       },
     };
@@ -1056,14 +1015,8 @@ export class ChannelToolApproval {
       return undefined;
     }
     log(review.outcome);
-    await this.#trip(tracked, template.name, channelId, allowed);
-    if (allowed) tracked.reviewerApproved = true;
-    if (!allowed) {
-      if (this.#reviewRejections.size >= 256)
-        this.#reviewRejections.delete(this.#reviewRejections.keys().next().value!);
-      this.#reviewRejections.set(key, review.reason);
-    }
-    return allowed ? 'allowed-once' : 'rejected';
+    tracked.reviewerApproved = true;
+    return 'allowed-once';
   }
 
   rule(botSlug: string, ruleId: string): ToolApprovalRule | undefined {

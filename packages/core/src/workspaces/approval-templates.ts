@@ -1,5 +1,12 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { atomicWriteFile } from '../fs/atomic-write.js';
+
+export const INHERIT_APPROVAL_TEMPLATE = '@global';
+export type ApprovalTemplateDefault =
+  | { kind: 'selected'; name: string }
+  | { kind: 'off' }
+  | { kind: 'invalid' };
 
 export interface ApprovalTemplate {
   name: string;
@@ -118,6 +125,8 @@ export type ApprovalTemplateWriteResult =
     };
 
 export interface ApprovalTemplateLibrary {
+  global(): ApprovalTemplateDefault;
+  setGlobal(name: string | null): void;
   list(): ApprovalTemplate[];
   get(name: string): ApprovalTemplate | undefined;
   create(name: string, text: string): ApprovalTemplateWriteResult;
@@ -182,6 +191,28 @@ export function createApprovalTemplateLibrary(dir?: string): ApprovalTemplateLib
     return undefined;
   };
   return {
+    global() {
+      if (dir === undefined) return { kind: 'off' };
+      let value: unknown;
+      try {
+        value = JSON.parse(readFileSync(join(dir, '.selection.json'), 'utf8'));
+      } catch (error) {
+        return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+          ? { kind: 'off' }
+          : { kind: 'invalid' };
+      }
+      if (typeof value !== 'object' || value === null || !('template' in value))
+        return { kind: 'invalid' };
+      if (value.template === null) return { kind: 'off' };
+      return typeof value.template === 'string' && isApprovalTemplateName(value.template)
+        ? { kind: 'selected', name: value.template }
+        : { kind: 'invalid' };
+    },
+    setGlobal(name) {
+      if (dir === undefined) throw new Error('Approval Template storage unavailable');
+      mkdirSync(dir, { recursive: true });
+      atomicWriteFile(join(dir, '.selection.json'), JSON.stringify({ template: name }) + '\n');
+    },
     list() {
       let names: string[] = [];
       if (dir !== undefined)
@@ -229,11 +260,11 @@ export function createApprovalTemplateLibrary(dir?: string): ApprovalTemplateLib
 }
 
 const POLICY_CHANGE_PATTERNS: readonly RegExp[] = [
-  /approval-template-set\b/iu,
+  /approval-template-(?:global-)?set\b/iu,
   /grant-request-approve\b|grantRequestApprove\b|grant-write-set\b/iu,
   /approval-reviewer[\s\S]*\b(set|edit|delete|rm|remove)\b/iu,
   /approval-reviewer\.json/iu,
-  /botApprovalTemplateSet|approvalReviewerModelSet|approvalTemplateUpdate|approvalTemplateDelete/u,
+  /approvalTemplateGlobalSet|botApprovalTemplateSet|approvalReviewerModelSet|approvalTemplateUpdate|approvalTemplateDelete/u,
   /botharness\.db|persona_bots|tool_approval_rules/iu,
 ];
 

@@ -2514,12 +2514,27 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     reviewLogs = undefined;
   }
   ctx.effect(() => () => reviewLogs?.close(), 'botharness: approval review logs');
-  const templateInUse = approvalTemplateInUse(core.registry);
+  const specificTemplateInUse = approvalTemplateInUse(core.registry);
+  const templateInUse = (name: string) => {
+    const global = approvalTemplates.global();
+    return (
+      specificTemplateInUse(name) ||
+      global.kind === 'invalid' ||
+      (global.kind === 'selected' && global.name === name)
+    );
+  };
   const autoApproval: ToolAutoApproval = {
     template: (slug) => {
-      const name = core.registry.get(slug)?.approvalTemplate;
-      const template = name === undefined ? undefined : approvalTemplates.get(name);
-      return template === undefined ? undefined : { name: template.name, text: template.text };
+      const selection = core.registry.get(slug)?.approvalTemplate;
+      if (selection === undefined) return undefined;
+      const global = selection === '@global' ? approvalTemplates.global() : undefined;
+      if (global?.kind === 'invalid') throw new Error('global-template-unreadable');
+      const name =
+        global === undefined ? selection : global.kind === 'selected' ? global.name : undefined;
+      if (name === undefined) return undefined;
+      const template = approvalTemplates.get(name);
+      if (template === undefined) throw new Error('selected-template-unavailable');
+      return { name: template.name, text: template.text };
     },
     templateInUse,
     excerptLimits: (slug) => {
@@ -2566,6 +2581,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     log: (entry) => {
       const detail =
         `approval-review bot=${entry.botSlug} template=${entry.template} tool=${entry.toolName}` +
+        (entry.templateVersion === undefined ? '' : ` templateVersion=${entry.templateVersion}`) +
         (entry.model === undefined ? '' : ` model=${entry.model}`) +
         (entry.reviewSession === undefined ? '' : ` reviewSession=${entry.reviewSession}`) +
         ` outcome=${entry.outcome} latencyMs=${entry.latencyMs}` +

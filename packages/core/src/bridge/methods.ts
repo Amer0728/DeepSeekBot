@@ -458,6 +458,7 @@ import type {
 } from '../runtime/bot-runtime.js';
 import type { AssignmentExecutionWait } from '../runtime/assignment-approval-capacity.js';
 import {
+  INHERIT_APPROVAL_TEMPLATE,
   createApprovalTemplateLibrary,
   type ApprovalTemplate,
   type ApprovalTemplateLibrary,
@@ -1062,6 +1063,9 @@ export interface BridgeMethods extends TeamBridgeMethods {
   approvalTemplates(payload?: unknown): BridgeResult<{
     templates: ApprovalTemplateEntry[];
     selected?: string | null;
+    globalDefault?: string | null;
+    effective?: string | null;
+    source?: 'global' | 'specific' | 'off';
   }>;
   approvalTemplateCreate(payload: unknown): BridgeResult<{ template: ApprovalTemplateEntry }>;
   approvalTemplateUpdate(payload: unknown): BridgeResult<{ template: ApprovalTemplateEntry }>;
@@ -1080,6 +1084,7 @@ export interface BridgeMethods extends TeamBridgeMethods {
   approvalTemplateDelete(
     payload: unknown,
   ): BridgeResult<{ template: { name: string }; clearedBots: string[] }>;
+  approvalTemplateGlobalSet(payload: unknown): BridgeResult<{ template: string | null }>;
   botApprovalTemplateSet(payload: unknown): BridgeResult<{ bot: PersonaBotDetail }>;
   voiceProviders: VoiceBridgeMethods['voiceProviders'];
   voiceProviderAdd: VoiceBridgeMethods['voiceProviderAdd'];
@@ -2286,10 +2291,21 @@ function buildBridgeMethods(
       .list()
       .filter((record) => record.approvalTemplate === name)
       .map((record) => record.slug);
-  const templateEntry = (template: ApprovalTemplate): ApprovalTemplateEntry => ({
-    ...template,
-    usedBy: templateUsers(template.name),
-  });
+  const templateEntry = (template: ApprovalTemplate): ApprovalTemplateEntry => {
+    const global = approvalTemplateLibrary.global();
+    return {
+      ...template,
+      usedBy: [
+        ...templateUsers(template.name),
+        ...(global.kind === 'selected' && global.name === template.name
+          ? deps.registry
+              .list()
+              .filter((record) => record.approvalTemplate === INHERIT_APPROVAL_TEMPLATE)
+              .map((record) => record.slug)
+          : []),
+      ],
+    };
+  };
   const reviewerModelView = async (
     route: ModelRoute | undefined,
   ): Promise<ApprovalReviewerModelView> => {
@@ -5118,14 +5134,32 @@ function buildBridgeMethods(
     },
     approvalTemplates(payload) {
       const templates = approvalTemplateLibrary.list().map(templateEntry);
-      if (asObject(payload)['slug'] === undefined) return { ok: true, value: { templates } };
+      const global = approvalTemplateLibrary.global();
+      if (global.kind === 'invalid') return unavailable();
+      const globalDefault = global.kind === 'selected' ? global.name : null;
+      if (asObject(payload)['slug'] === undefined)
+        return { ok: true, value: { templates, globalDefault } };
       const slug = asSlug(payload);
       if (slug === undefined) return invalidInput('slug must be a Bot id');
       const record = deps.registry.get(slug);
       if (record === undefined) return unknownBot(slug);
       return {
         ok: true,
-        value: { templates, selected: record.approvalTemplate ?? null },
+        value: {
+          templates,
+          globalDefault,
+          selected: record.approvalTemplate ?? null,
+          effective:
+            record.approvalTemplate === INHERIT_APPROVAL_TEMPLATE
+              ? globalDefault
+              : (record.approvalTemplate ?? null),
+          source:
+            record.approvalTemplate === INHERIT_APPROVAL_TEMPLATE
+              ? 'global'
+              : record.approvalTemplate === undefined
+                ? 'off'
+                : 'specific',
+        },
       };
     },
     approvalTemplateCreate(payload) {
@@ -5322,12 +5356,29 @@ function buildBridgeMethods(
         },
       };
     },
+    approvalTemplateGlobalSet(payload) {
+      const template = asObject(payload)['template'];
+      if (template !== null && typeof template !== 'string')
+        return invalidInput('template name or null required');
+      if (typeof template === 'string' && approvalTemplateLibrary.get(template) === undefined)
+        return invalidInput('unknown Approval Template ' + template);
+      try {
+        approvalTemplateLibrary.setGlobal(template);
+      } catch {
+        return unavailable();
+      }
+      return { ok: true, value: { template } };
+    },
     botApprovalTemplateSet(payload) {
       const slug = asSlug(payload);
       const template = asObject(payload)['template'];
       if (slug === undefined || (template !== null && typeof template !== 'string'))
         return invalidInput('slug and template (a template name, or null for none) are required');
-      if (typeof template === 'string' && approvalTemplateLibrary.get(template) === undefined)
+      if (
+        typeof template === 'string' &&
+        template !== INHERIT_APPROVAL_TEMPLATE &&
+        approvalTemplateLibrary.get(template) === undefined
+      )
         return invalidInput('unknown Approval Template ' + template);
       const result = deps.registry.setApprovalTemplate(slug, template ?? undefined);
       if (!result.ok) return unknownBot(slug);

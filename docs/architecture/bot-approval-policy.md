@@ -4,6 +4,8 @@ Status: Human-confirmed target design, 2026-11-15. Runtime behavior is unchanged
 
 [ADR-0342](../adr/0342-bot-approval-selects-one-template-and-keeps-deterministic-authorization-separate.md) owns the durable choices and trade-offs. This document owns the integrated target behavior. GitHub issues own delivery status. Neither this interview nor these documents authorize implementation, live permission changes or a SQLite migration.
 
+Implementation slice #4211 adds global/Bot selection through the existing file owner, authenticated Host, online CLI and Client Select, plus two-outcome versioned Reviews. The remaining editor, rules-table and confirmed bulk-deletion workflows are subsequent slices.
+
 ## One effective template
 
 The Profile has an optional global default selected from its shared Approval Template library. Each Bot chooses exactly one mode:

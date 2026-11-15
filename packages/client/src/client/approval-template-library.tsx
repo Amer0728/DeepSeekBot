@@ -9,6 +9,7 @@ import {
   deleteApprovalTemplate,
   errorMessage,
   loadApprovalTemplates,
+  setGlobalApprovalTemplate,
   updateApprovalTemplate,
   type ApprovalTemplateView,
   type BridgeCall,
@@ -17,6 +18,7 @@ import { Callout } from './ds/callout.js';
 import { FieldStack, TextAreaField, TextField } from './ds/field.js';
 import { ConfirmDialog, DangerTextButton, FormDialog } from './ds/form-dialog.js';
 import { Note } from './ds/note.js';
+import { Select } from './ds/select.js';
 import { SettingsRow, SettingsSection } from './ds/settings-row.js';
 import { space } from './ds/tokens.stylex.js';
 import type { BotHarnessTranslate } from './locale.js';
@@ -65,6 +67,7 @@ export function ApprovalTemplateLibrarySettings({
   store: ClientStore;
   t: BotHarnessTranslate;
 }): ReactElement {
+  const [globalDefault, setGlobalDefault] = useState<string | null>(null);
   const [templates, setTemplates] = useState<ApprovalTemplateView[]>();
   const [loadError, setLoadError] = useState<string>();
   const [editor, setEditor] = useState<Editor>();
@@ -76,13 +79,17 @@ export function ApprovalTemplateLibrarySettings({
   const reload = async (): Promise<void> => {
     const next = await loadApprovalTemplates(call);
     setTemplates(next.templates);
+    setGlobalDefault(next.globalDefault ?? null);
     setLoadError(undefined);
   };
   const mount = useMountedResource<HTMLDivElement>(() => {
     let live = true;
     loadApprovalTemplates(call)
       .then((next) => {
-        if (live) setTemplates(next.templates);
+        if (live) {
+          setTemplates(next.templates);
+          setGlobalDefault(next.globalDefault ?? null);
+        }
       })
       .catch((cause: unknown) => {
         if (live) setLoadError(errorMessage(cause));
@@ -259,6 +266,26 @@ export function ApprovalTemplateLibrarySettings({
         title={t('autoApproval.library.title')}
         description={t('autoApproval.library.description')}
       >
+        <SettingsRow
+          title={t('autoApproval.globalDefault')}
+          control={
+            <Select
+              label={t('autoApproval.globalDefault')}
+              value={globalDefault ?? 'off'}
+              disabled={busy || templates === undefined}
+              options={[
+                { value: 'off', label: t('autoApproval.off') },
+                ...list.map((template) => ({
+                  value: template.name,
+                  label: templateTitle(t, template.name, template.title),
+                })),
+              ]}
+              onChange={(value) =>
+                run(() => setGlobalApprovalTemplate(call, value === 'off' ? null : value))
+              }
+            />
+          }
+        />
         <SettingsRow
           title={t('autoApproval.library.new')}
           data={{ 'data-approval-template-new': '' }}

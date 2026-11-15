@@ -1,5 +1,6 @@
 import { OWNER_HUMAN_CONTEXT } from '../humans/context.js';
-import { requiresHumanDecision } from './approval-templates.js';
+import { createApprovalTemplateLibrary, requiresHumanDecision } from './approval-templates.js';
+import { join } from 'node:path';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { setSandboxMode, type SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy';
 import { setApprovalPolicy, type ApprovalService } from '@deepseek-ai/dsh-user-approval';
@@ -419,9 +420,21 @@ export function requiresHumanToolApproval(
 }
 
 export function approvalTemplateInUse(
-  registry: Pick<BotHarnessCore['registry'], 'list'>,
+  registry: Pick<BotHarnessCore['registry'], 'list'> &
+    Partial<Pick<BotHarnessCore['registry'], 'rootDir'>>,
 ): (template: string) => boolean {
-  return (template) => registry.list().some((record) => record.approvalTemplate === template);
+  const library =
+    registry.rootDir === undefined
+      ? undefined
+      : createApprovalTemplateLibrary(join(registry.rootDir, '..', 'approval-templates'));
+  return (template) => {
+    const global = library?.global();
+    return (
+      global?.kind === 'invalid' ||
+      (global?.kind === 'selected' && global.name === template) ||
+      registry.list().some((record) => record.approvalTemplate === template)
+    );
+  };
 }
 
 function policyInput(args: unknown): string {
