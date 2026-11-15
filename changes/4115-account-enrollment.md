@@ -4,6 +4,8 @@ section: Added
 
 ## en
 
+- Keep approvals and question answers in remote chats bound to their owning conversation instead of the local Host's selected Channel ([#4115](https://github.com/BotHarness/DeepSeekBot/issues/4115)).
+
 - Keep account refresh cancellable, retain retry cooldowns at capacity, apply saved route changes to open Clients, preserve private enrollment files after write failures, and finish device resource cleanup after cancellation ([#4115](https://github.com/BotHarness/DeepSeekBot/issues/4115)).
 
 - Reannounce a verified official address after it changes or the account worker restarts, preserving the relationship, pinned identity, independent routes and Client grants. Rejected account offers now record a bounded validation category without response bodies or identity values ([#4115](https://github.com/BotHarness/DeepSeekBot/issues/4115)).
@@ -11,6 +13,8 @@ section: Added
 - Discover same-account computers in Environments through verified reciprocal relationships and independently saved Client grants. Complete bilateral account proof can also qualify an existing manually approved active relationship while preserving its ID, approval, grants and routes. Automatic connections preserve the current view, respect explicit disconnect, and retain exact-key enrollment cleanup across cancellation or restart; unqualified manual relationships and native mobile keep explicit enrollment ([#4115](https://github.com/BotHarness/DeepSeekBot/issues/4115)).
 
 ## zh
+
+- 远端聊天中的审批与问题回答使用所属会话的上下文，不再被本机选中频道错误拦截（[#4115](https://github.com/BotHarness/DeepSeekBot/issues/4115)）。
 
 - 账号刷新可取消，重试表满时仍保留限流；已保存的线路变化同步到打开的 Client，写入失败保留原私有登记文件，取消授权后完成设备资源清理（[#4115](https://github.com/BotHarness/DeepSeekBot/issues/4115)）。
 

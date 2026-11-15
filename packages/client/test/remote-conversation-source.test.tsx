@@ -305,6 +305,69 @@ async function mount(
     },
   };
 }
+it.each(['tool-approval', 'user-question'] as const)(
+  'submits a remote native %s through its owning conversation while local selection differs',
+  async (kind) => {
+    const method = kind === 'tool-approval' ? 'toolApprovalDecide' : 'userQuestionAnswer';
+    const view = await mount((host) => {
+      host.methods.set('toolApprovalStatus', () => ({ status: 'pending' }));
+      host.methods.set('userQuestionStatus', () => ({ status: 'pending' }));
+      host.methods.set(method, () => ({ accepted: true }));
+      host.channel('shared').append({
+        id: 'request',
+        author: { kind: 'bot', slug: 'ada' },
+        body: 'Remote request',
+        ...(kind === 'tool-approval'
+          ? {
+              toolApprovalRequest: {
+                sessionId: 'session',
+                callId: 'call',
+                role: 'orchestrator',
+                toolName: 'bash',
+                cwd: '/qa',
+                input: '{"command":"echo QA"}',
+              },
+            }
+          : {
+              userQuestionRequest: {
+                sessionId: 'session',
+                questions: [{ id: 'q', question: 'Choose', options: [{ label: 'Blue' }] }],
+              },
+            }),
+      });
+    });
+    try {
+      expect(store.getSnapshot().conversation.channel?.id).not.toBe('shared');
+      const label = kind === 'tool-approval' ? '允许这次' : 'Blue';
+      await act(async () => {
+        await vi.waitFor(() => {
+          const button = [...view.element.querySelectorAll<HTMLButtonElement>('button')].find(
+            (entry) => entry.textContent?.includes(label),
+          );
+          expect(button).toBeDefined();
+          expect(button!.disabled).toBe(false);
+          button!.click();
+        });
+      });
+      await act(async () => {
+        await vi.waitFor(() =>
+          expect(view.hosts.b.calls.filter((call) => call.method === method)).toHaveLength(1),
+        );
+      });
+      expect(view.hosts.b.calls.find((call) => call.method === method)?.args).toMatchObject({
+        channelId: 'shared',
+        messageId: 'request',
+      });
+      expect(view.hosts.c.calls.filter((call) => call.method === method)).toEqual([]);
+      expect(view.localCall.mock.calls).toEqual([]);
+      expect(view.element.textContent).not.toContain(zhTranslate('approval.channelChanged'));
+      expect(view.element.textContent).not.toContain(zhTranslate('question.channelChanged'));
+    } finally {
+      await view.close();
+    }
+  },
+);
+
 it('renders the native group header and self, other Human and Bot messages in their original alignment', async () => {
   const view = await mount((host, id) => {
     host.channel('shared').append({
