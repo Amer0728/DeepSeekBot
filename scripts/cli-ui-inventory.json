@@ -1075,7 +1075,7 @@
         "setting:packages/client/src/client/connection-hosts.tsx:{route.address}",
         "setting:packages/client/src/client/connection-hosts.tsx:{label}",
         "setting:packages/client/src/client/connection-hosts.tsx:\"Tobs Connect\"",
-        "storage:packages/client/src/client/remote-hosts.ts:setItem(executionKey)",
+        "storage:packages/client/src/client/remote-hosts.ts:removeItem(item.key)",
         "storage:packages/client/src/client/remote-hosts.ts:removeItem(executionKey)",
         "storage:packages/client/src/client/remote-hosts.ts:setItem(CONNECTION_OPERATIONS_INDEX)"
       ],
