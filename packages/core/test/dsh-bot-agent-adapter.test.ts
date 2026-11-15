@@ -4123,3 +4123,71 @@ describe('Assignment Directory Tools', () => {
     }
   });
 });
+
+describe('model-free Tob preparation cancellation', () => {
+  it.each(['create', 'resume'] as const)(
+    'cancels pending native %s and disposes its late handle before execution',
+    async (operation) => {
+      const agents = new FakeAgentHost();
+      let release: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const originalCreate = agents.create.bind(agents);
+      const originalResume = agents.resume.bind(agents);
+      const pending =
+        operation === 'create'
+          ? vi.spyOn(agents, 'create').mockImplementation(async (options) => {
+              const handle = await originalCreate(options);
+              await gate;
+              return handle;
+            })
+          : vi.spyOn(agents, 'resume').mockImplementation(async (options) => {
+              const handle = await originalResume(options);
+              await gate;
+              return handle;
+            });
+      const adapter = createDshBotAgentAdapter({
+        agents,
+        defaultModel: { currentSelection: () => ({ provider: 'test', model: 'test' }) },
+        orchestratorCwd: () => '/memory/ada',
+        ensureWorkspace: () => undefined,
+      });
+      const controller = new AbortController();
+      const complete = vi.fn();
+      let settled = false;
+      const running = adapter
+        .runOrchestrator({
+          ...reportRun,
+          resume: operation === 'resume',
+          tobCli: true,
+          tobCliTurn: {
+            command: { argv: ['approval-templates'], stdin: '' },
+            signal: controller.signal,
+            complete,
+          },
+        })
+        .then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          },
+        );
+      try {
+        await vi.waitFor(() => expect(pending).toHaveBeenCalledOnce());
+        controller.abort();
+        await vi.waitFor(() => expect(settled).toBe(true), { timeout: 500, interval: 5 });
+        expect(complete).not.toHaveBeenCalled();
+        release?.();
+        await vi.waitFor(() => expect(agents.disposed).toContain(reportRun.sessionId));
+        expect(agents.received.get(reportRun.sessionId) ?? []).toEqual([]);
+      } finally {
+        release?.();
+        await running;
+        await adapter.close();
+      }
+    },
+  );
+});
