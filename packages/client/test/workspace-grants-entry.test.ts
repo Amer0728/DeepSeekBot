@@ -43,6 +43,72 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
 }));
 
 describe('Workspace Grant sidebar', () => {
+  it('shows card rules in composer permissions and reads canonical state after revoke without changing templates', async () => {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const rule = {
+      id: 'saved-card',
+      botSlug: 'ada',
+      role: 'orchestrator',
+      scopeKey: '["grant","/qa"]',
+      kind: 'tool',
+      toolName: 'qa_marker',
+      input: '',
+      createdAt: '2026-11-16',
+    };
+    let revoked = false;
+    const listToolApprovalRules = vi.fn(async () => [
+      { ...rule, ...(revoked ? { revokedAt: '2026-11-16' } : {}) },
+    ]);
+    const revokeToolApprovalRule = vi.fn(async () => {
+      revoked = true;
+    });
+    const actions = {
+      listWorkspaceGrants: vi.fn(async () => []),
+      listWorkspaceOptions: vi.fn(async () => []),
+      memoryDirectory: vi.fn(async () => undefined),
+      assignmentAccess: vi.fn(async () => ({ mode: 'workspace-write' })),
+      listToolApprovalRules,
+      revokeToolApprovalRule,
+    } as unknown as BridgeActions;
+    try {
+      await act(async () =>
+        root.render(
+          createElement(WorkspaceGrantsEntry, {
+            scope: 'personabot',
+            botSlug: 'ada',
+            channelId: 'dm-ada',
+            actions,
+            t: zhTranslate,
+            composerOnly: true,
+          }),
+        ),
+      );
+      expect(listToolApprovalRules).toHaveBeenCalledExactlyOnceWith('ada');
+      expect(container.textContent).toContain(zhTranslate('approval.rulesTitle'));
+      expect(container.textContent).toContain(zhTranslate('approval.ruleFromCard'));
+      expect(container.textContent).toContain('/qa');
+      expect(container.textContent).toContain(zhTranslate('approval.orchestrator'));
+      const button = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="' + zhTranslate('approval.revokeRule') + ': qa_marker"]',
+      )!;
+      await act(async () => button.click());
+      expect(revokeToolApprovalRule).toHaveBeenCalledExactlyOnceWith('ada', 'saved-card');
+      expect(listToolApprovalRules).toHaveBeenCalledTimes(2);
+      expect(container.textContent).toContain(zhTranslate('approval.ruleInactive'));
+      expect(
+        container.querySelector<HTMLButtonElement>(
+          'button[aria-label="' + zhTranslate('approval.revokeRule') + ': qa_marker"]',
+        )?.disabled,
+      ).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it('reuses the Channel sidebar summary row and chevron while keeping native disclosure', async () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     const container = document.createElement('div');

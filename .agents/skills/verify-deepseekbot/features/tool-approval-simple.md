@@ -30,6 +30,12 @@ This Windows native-pwsh journey creates a synthetic Bot, uses real model calls,
 
 For a baseline capture, provide `--capture-report <private-json> --expect-legacy`. The private record identifies an existing task-owned instance, Bot and pending request. This mode reads and captures only; it does not decide or create a Bot. Never use a Human's real request as a disposable verification input.
 
+## Bot-specific saved card rules (#4245)
+
+Open Bot permissions from the composer or the folder/access entry. After saving Always allow on a real card, open **Always allow · this Bot**. Check **From approval card**, tool, execution role, current directory and full scope under View scope against `tool-approval-rules`. Revoke that row and verify canonical readback shows it disabled. Repeat through the online CLI, then Reload the open list. The next same call must return to review. A second Bot using the same template and a template copy must acquire no rule. Model allow-once must not add a rule.
+
+This list reads the existing canonical owner once during permissions refresh; it adds no polling, template lookup or Reviewer work to tool execution. The focused Client test guards one initial rules read and canonical readback after revocation. `auto-approval-breaker.test.ts` guards zero template/Reviewer calls on a saved-rule hit, restored review after revoke, and no new rule from model allow-once. Runtime before/after latency and screenshots remain separate evidence.
+
 ## Gotchas
 
 - DSH native pwsh uses `sandbox_permissions: danger-full-access`, not Codex's `require_escalated`. A harmless output marker explicitly requesting that mode can exercise the real ask without touching a sensitive file.

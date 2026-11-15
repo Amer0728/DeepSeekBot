@@ -1449,14 +1449,28 @@ export function WorkspaceGrantsEntry({
           />
         ) : null}
       </SettingsRows>
-      {composerOnly || rules.length === 0 ? null : (
+      {rules.length === 0 ? null : (
         <details className="bh-workspace-folder-secondary">
           <FolderSectionSummary>{t('approval.rulesTitle')}</FolderSectionSummary>
+          <details className="bh-workspace-folder-secondary">
+            <FolderSectionSummary>{t('approval.ruleDetails')}</FolderSectionSummary>
+            <div className="bh-note">{t('approval.rulesHint')}</div>
+          </details>
+          <Button
+            size="sm"
+            variant="toolbar"
+            disabled={busy !== undefined}
+            onClick={() => publishWorkspaceGrantChange(botSlug, actions)}
+          >
+            {t('autoApproval.reload')}
+          </Button>
           <div className="bh-workspace-folder-table">
             {rules.map((rule) => (
-              <div key={rule.id} className="bh-workspace-folder-row">
+              <div key={rule.id} className="bh-workspace-folder-row" data-tool-rule={rule.id}>
                 <div className="bh-workspace-folder-main">
                   <span className="bh-workspace-folder-toggle">
+                    <Tag>{t('approval.ruleFromCard')}</Tag>
+                    {' · '}
                     {rule.kind === 'tool'
                       ? t('approval.toolRule', { tool: rule.toolName })
                       : rule.kind === 'exact'
@@ -1474,7 +1488,7 @@ export function WorkspaceGrantsEntry({
                   <button
                     type="button"
                     className="bh-workspace-folder-remove"
-                    aria-label={t('approval.revokeRule')}
+                    aria-label={t('approval.revokeRule') + ': ' + rule.toolName}
                     disabled={busy !== undefined || rule.revokedAt !== undefined}
                     onClick={() =>
                       mutate(rule.id, () => actions.revokeToolApprovalRule(botSlug, rule.id))
@@ -1483,11 +1497,9 @@ export function WorkspaceGrantsEntry({
                     <IconCloseOutlineRegular />
                   </button>
                 </div>
+                <div className="bh-note">{t('approval.cwd', { path: approvalRulePath(rule) })}</div>
                 <details className="bh-workspace-folder-secondary">
                   <FolderSectionSummary>{t('approval.ruleDetails')}</FolderSectionSummary>
-                  <div className="bh-note">
-                    {t('approval.cwd', { path: approvalRulePath(rule) })}
-                  </div>
                   <div className="bh-note">{t('approval.ruleScope')}</div>
                   <pre className="bh-tool-approval-input">{rule.scopeKey}</pre>
                   {rule.externalCreator ? (

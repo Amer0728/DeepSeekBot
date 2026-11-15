@@ -4386,7 +4386,10 @@ export const zh = {
   'approval.confirmAll': '确认始终允许',
   'approval.cancel': '取消',
   'approval.ruleSaved': '已允许本次，并保存你的选择',
-  'approval.rulesTitle': '自动批准规则',
+  'approval.rulesTitle': '始终允许 · 此 Bot',
+  'approval.ruleFromCard': '来自审批卡',
+  'approval.rulesHint':
+    '已保存的确定性授权，命中时不调用审批员。模板文字仅指导审批员；撤销规则后重新审核。',
   'approval.ruleScope': '规则范围：执行角色、目录及 Grant ID／写入版本',
   'approval.ruleActive': '有效',
   'approval.ruleInactive': '已停用',
@@ -10370,7 +10373,10 @@ My relationship with you, established lore and topics to avoid: [fill in].
   'approval.confirmAll': 'Confirm always allow',
   'approval.cancel': 'Cancel',
   'approval.ruleSaved': 'Allowed this time and saved your choice',
-  'approval.rulesTitle': 'Automatic approval rules',
+  'approval.rulesTitle': 'Always allow · this Bot',
+  'approval.ruleFromCard': 'From approval card',
+  'approval.rulesHint':
+    'Saved deterministic authorizations skip the Reviewer. Template text guides the Reviewer. Revoke a rule to review future requests again.',
   'approval.ruleScope': 'Rule scope: execution role, directory and Grant IDs/write revisions',
   'approval.ruleActive': 'Active',
   'approval.ruleInactive': 'Disabled',
