@@ -365,6 +365,8 @@ export const zh = {
     '停止此环境的账号发现和官方连接服务。已授权设备和独立路由保留。',
   'connections.remote.disconnectHint':
     '此操作可能断开你与 {name} 的连接。可明确选择并验证其他路由，或确认断开。已加载内容保留，可通过已信任的路由恢复。',
+  'connections.remote.revokeSelfHint':
+    '重新连接需要重新添加 {name} 并为此浏览器授权。切换线路不能恢复访问；已加载内容会保留。',
   'connections.remote.handover': '执行前的连接方式',
   'connections.remote.disconnect': '确认断开当前连接',
   'connections.hosts.removeHint': '仅从此浏览器移除连接。电脑上的数据和设备授权保留。',
@@ -6001,6 +6003,8 @@ export const en = {
     'Stops account discovery and the official connection service on this environment. Device grants and independent routes are kept.',
   'connections.remote.disconnectHint':
     'This may disconnect you from {name}. Choose and verify another route, or confirm disconnection. Loaded content stays available; reconnect through a trusted route.',
+  'connections.remote.revokeSelfHint':
+    'To reconnect, add {name} and authorize this browser again. Changing routes cannot restore access. Loaded content stays available.',
   'connections.remote.handover': 'Connection before applying',
   'connections.remote.disconnect': 'Confirm disconnection',
   'connections.hosts.removeHint':

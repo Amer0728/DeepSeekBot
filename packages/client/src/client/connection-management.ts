@@ -34,6 +34,14 @@ function address(value: string): string {
   }
 }
 
+function savedRoute(remote: RemoteHost, value: string): string | undefined {
+  const origin = address(value);
+  return origin
+    ? (remote.host.routes.find((route) => route === value) ??
+        remote.host.routes.find((route) => address(route) === origin))
+    : undefined;
+}
+
 export function observedHost(remote: RemoteHost) {
   const { connection, routes } = remote.snapshot;
   return {
@@ -223,7 +231,7 @@ function operationPlan(
             remote.host.routes
               .filter(
                 (route) =>
-                  route !== remote.snapshot.connection.route &&
+                  address(route) !== address(remote.snapshot.connection.route) &&
                   !affectsRoute(operation, status, route),
               )
               .map(address)
@@ -240,6 +248,23 @@ function operationCompleted(status: ManagedHost, operation: ConnectionMutation):
   if (operation.kind === 'lan') return status.lanState === 'off';
   return status.privateRoutes.some(
     (entry) => entry.id === operation.routeId && entry.state === 'off',
+  );
+}
+
+function operationAcknowledged(raw: unknown, operation: ConnectionMutation): boolean {
+  const body = object(raw);
+  if (operation.action === 'revoke-device')
+    return (
+      body.revoked === true &&
+      Number.isInteger(body.closedStreams) &&
+      Number(body.closedStreams) >= 0 &&
+      object(body.device).id === operation.deviceId &&
+      typeof object(body.device).name === 'string'
+    );
+  if (operation.action === 'sign-out') return body.state === 'signed-out';
+  if (operation.kind === 'lan') return body.state === 'off';
+  return (
+    body.ok === true && object(body.status).state === 'off' && body.routeId === operation.routeId
   );
 }
 
@@ -313,6 +338,7 @@ export async function manageConnections(
           'connection-operation-limit',
           'connection-operation-owner-changed',
           'connection-operation-changed',
+          'connection-management-unconfirmed',
           'owner-required',
         ].includes(error.message)
       )
@@ -344,8 +370,11 @@ async function executeConnections(
     if (input.confirm !== true) throw new AppearanceError('connection-confirmation-required');
     if (typeof input.route !== 'string' || !client.setRoutePreference)
       throw new AppearanceError('connection-route-unknown');
+    const route = input.route === 'automatic' ? undefined : savedRoute(remote, input.route);
+    if (input.route !== 'automatic' && route === undefined)
+      throw new AppearanceError('connection-route-unknown');
     try {
-      await client.setRoutePreference(input.route === 'automatic' ? undefined : input.route);
+      await client.setRoutePreference(route);
     } catch {
       throw new AppearanceError('connection-preference-not-saved');
     }
@@ -353,10 +382,10 @@ async function executeConnections(
   }
   if (input.action === 'inspect-host') return inspect(client, remote, request.signal);
   if (input.action === 'test-route') {
-    const route = remote.snapshot.routes?.find((route) => route.url === input.route);
+    const route = typeof input.route === 'string' ? savedRoute(remote, input.route) : undefined;
     if (!route || !client.testRoute) throw new AppearanceError('connection-route-unknown');
-    const verified = await client.testRoute(route.url);
-    return { hostId: remote.host.hostId, route: address(route.url), verified };
+    const verified = await client.testRoute(route);
+    return { hostId: remote.host.hostId, route: address(route), verified };
   }
   if (input.action === 'forget-host') {
     if (input.confirm !== true) throw new AppearanceError('connection-confirmation-required');
@@ -370,7 +399,7 @@ async function executeConnections(
     input.action === 'read-previous-operation'
       ? sources.previousConnectionOperations(remote.host.hostId, client)
       : [];
-  const status = await inspect(client, remote, request.signal);
+  let status = await inspect(client, remote, request.signal);
   if (
     !Number.isFinite(request.expiresAt) ||
     request.signal.aborted ||
@@ -452,26 +481,29 @@ async function executeConnections(
   let handedOver: string | undefined;
   if (plan.disconnects) {
     if (typeof input.handover === 'string') {
+      const alternative = savedRoute(currentRemote, input.handover);
       if (
-        !plan.alternatives.includes(input.handover) ||
+        !alternative ||
+        !plan.alternatives.includes(address(input.handover)) ||
         !client.testRoute ||
         !client.setRoutePreference
       )
         throw new AppearanceError('connection-route-unknown');
-      if (!(await client.testRoute(input.handover)))
+      if (!(await client.testRoute(alternative)))
         throw new AppearanceError('connection-alternative-unavailable');
-      await client.setRoutePreference(input.handover);
-      await waitForRoute(client, input.handover, request.signal);
+      await client.setRoutePreference(alternative);
+      await waitForRoute(client, alternative, request.signal);
       const refreshed = await inspect(client, remote, request.signal);
+      status = refreshed;
       validateOperation(operation, refreshed);
       const active = client.getSnapshot().connection;
       if (
         active.status !== 'connected' ||
-        active.route !== input.handover ||
+        active.route !== alternative ||
         affectsRoute(operation, refreshed, active.route)
       )
         throw new AppearanceError('connection-handover-unconfirmed');
-      handedOver = input.handover;
+      handedOver = alternative;
     } else if (input.confirmDisconnect !== true) {
       throw new AppearanceError('connection-disconnect-confirmation-required');
     }
@@ -505,26 +537,46 @@ async function executeConnections(
     body = { action: 'sign-out', confirm: true };
   }
   const generation = crypto.randomUUID();
-  sources.setPendingConnection(remote.host.hostId, client, {
-    generation,
-    hostKey,
-    deviceId: remote.host.deviceId,
-    operation,
-  });
+  const dispatched = await sources.dispatchConnectionOperation(
+    remote.host.hostId,
+    client,
+    {
+      generation,
+      hostKey,
+      deviceId: remote.host.deviceId,
+      operation,
+    },
+    {
+      check() {
+        if (request.signal.aborted || Date.now() >= request.expiresAt)
+          throw new AppearanceError('connection-request-stale');
+        if (sources.client(remote.host.hostId) !== client)
+          throw new AppearanceError('connection-host-changed');
+        const dispatchSnapshot = client.getSnapshot();
+        const active = dispatchSnapshot.connection;
+        if (active.status !== 'connected') throw new AppearanceError('connection-host-offline');
+        if (handedOver !== undefined) {
+          if (
+            active.route !== handedOver ||
+            dispatchSnapshot.routePreference !== handedOver ||
+            affectsRoute(operation, status, active.route)
+          ) {
+            throw new AppearanceError('connection-handover-unconfirmed');
+          }
+        } else if (
+          input.confirmDisconnect !== true &&
+          ((operation.action === 'revoke-device' && operation.deviceId === remote.host.deviceId) ||
+            affectsRoute(operation, status, active.route))
+        ) {
+          throw new AppearanceError('connection-disconnect-confirmation-required');
+        }
+      },
+      send: () => client.api(path, { body, signal: request.signal }),
+    },
+  );
   let result;
   try {
-    if (handedOver !== undefined) {
-      const active = client.getSnapshot().connection;
-      if (
-        active.status !== 'connected' ||
-        active.route !== handedOver ||
-        client.getSnapshot().routePreference !== handedOver
-      ) {
-        sources.setPendingConnection(remote.host.hostId, client, undefined, generation);
-        throw new AppearanceError('connection-handover-unconfirmed');
-      }
-    }
-    result = await client.api(path, { body, signal: request.signal });
+    result = await dispatched.response;
   } catch {
     throw new AppearanceError('connection-management-unconfirmed');
   }
@@ -540,7 +592,8 @@ async function executeConnections(
       sources.setPendingConnection(remote.host.hostId, client, undefined, generation);
     throw new AppearanceError('connection-management-refused');
   }
-  if (object(result.body).ok === false) throw new AppearanceError('connection-management-refused');
+  if (!operationAcknowledged(result.body, operation))
+    throw new AppearanceError('connection-management-unconfirmed');
   sources.setPendingConnection(remote.host.hostId, client, undefined, generation);
   return { hostId: remote.host.hostId, action: input.action, accepted: true };
 }

@@ -122,6 +122,60 @@ it('applies another tab saved routes and preference to the existing Client witho
 });
 
 describe('remote hosts', () => {
+  it.each(['legacy-missing', 'legacy-corrupt', 'inline-corrupt'] as const)(
+    'refuses a %s indexed record for current and previous grants without discarding it',
+    async (failure) => {
+      for (const previous of [false, true]) {
+        const host: SavedHost = {
+          hostId: 'history-host',
+          hostName: 'History',
+          deviceId: previous ? 'new-device' : 'old-device',
+          credential: 'private',
+          routes: ['https://history.example.ts.net'],
+          encryption: {
+            protocol: 'connect-noise-xk-v1',
+            hostKey: '11'.repeat(32),
+            deviceKey: '22'.repeat(32),
+          },
+        };
+        const key = `botharness.remoteHosts.operation.v1:${JSON.stringify([host.hostId, host.encryption!.hostKey, 'old-device'])}`;
+        const storage = memoryStorage({
+          [REMOTE_HOSTS_STORAGE_KEY]: JSON.stringify([host]),
+          'botharness.remoteHosts.operations.v1': JSON.stringify([
+            {
+              hostId: host.hostId,
+              key,
+              ...(failure === 'inline-corrupt' ? { record: { generation: 'invalid' } } : {}),
+            },
+          ]),
+          ...(failure === 'legacy-corrupt' ? { [key]: 'invalid JSON' } : {}),
+        });
+        const before = [...storage.values];
+        const sources = createRemoteHosts({
+          storage,
+          carrier: fakeCarrier().carrier,
+          connectionOperationLock: async (_name, run) => run(),
+        });
+        const client = sources.client(host.hostId)!;
+        const api = vi.spyOn(client, 'api');
+        expect(sources.getSnapshot().hosts[0]?.host).toMatchObject({
+          hostId: host.hostId,
+          credential: host.credential,
+          connectionOperationUnavailable: true,
+        });
+        await expect(
+          manageConnections(
+            sources,
+            { action: 'stop-route', hostId: host.hostId, kind: 'lan', confirm: true },
+            { expiresAt: Date.now() + 30000, signal: new AbortController().signal },
+          ),
+        ).rejects.toThrow('connection-operation-storage-unavailable');
+        expect(api).not.toHaveBeenCalled();
+        expect([...storage.values]).toEqual(before);
+        sources.close();
+      }
+    },
+  );
   it.each(['cancel', 'new-forget'] as const)(
     'preserves Human intent when manual pairing waits for storage and receives %s',
     async (mode) => {
@@ -770,12 +824,21 @@ describe('Host Feed lifecycle', () => {
         storage,
         connectionOperationLock: lock,
       });
-      seed.setPendingConnection(host.hostId, seed.client(host.hostId)!, {
-        generation: crypto.randomUUID(),
-        hostKey: 'previous-test-pin',
-        deviceId: 'device-1',
-        operation: { action: 'stop-route', kind: 'lan' },
-      });
+      const key = `botharness.remoteHosts.operation.v1:${JSON.stringify([host.hostId, 'previous-test-pin', 'device-1'])}`;
+      storage.setItem(
+        'botharness.remoteHosts.operations.v1',
+        JSON.stringify([{ hostId: host.hostId, key }]),
+      );
+      storage.setItem(
+        key,
+        JSON.stringify({
+          generation: crypto.randomUUID(),
+          hostKey: 'previous-test-pin',
+          deviceId: 'device-1',
+          operation: { action: 'stop-route', kind: 'lan' },
+        }),
+      );
+      seed.close();
       if (previousGrant)
         storage.setItem(
           REMOTE_HOSTS_STORAGE_KEY,
@@ -807,7 +870,7 @@ describe('Host Feed lifecycle', () => {
           JSON.parse(storage.getItem('botharness.remoteHosts.operations.v1')!),
         );
         assert(index[0]);
-        const key = index[0].key;
+        expect(index[0].key).toBe(key);
         const record = storage.getItem(key)!;
         storage.removeItem(key);
         const client = sources.client(host.hostId)!;

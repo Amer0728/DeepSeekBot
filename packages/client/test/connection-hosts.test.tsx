@@ -171,6 +171,24 @@ it('allows confirmed local removal while retaining an uncertain Host operation f
   expect(api.mock.calls.every(([path]) => path === '/api/botharness/devices')).toBe(true);
 });
 
+it('explains that revoking this browser requires new authorization instead of another route', async () => {
+  api.mockResolvedValue({
+    status: 200,
+    body: {
+      host: { id: 'target', name: 'Studio' },
+      devices: [{ id: 'browser', name: 'This browser' }],
+      lan: { state: 'listening' },
+    },
+  });
+  await open();
+  await click(t('connections.hosts.revoke'));
+  expect(host.textContent).toContain('重新添加 Studio 并为此浏览器授权');
+  expect(host.textContent).not.toContain(
+    t('connections.remote.disconnectHint', { name: 'Studio' }),
+  );
+  expect(api.mock.calls.every(([path]) => path === '/api/botharness/devices')).toBe(true);
+});
+
 it('warns about the selected Host and connection loss before stopping only its selected route', async () => {
   await open();
   const row = [...host.querySelectorAll('button')].find(

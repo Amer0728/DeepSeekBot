@@ -365,7 +365,9 @@ function HostDetailsSession({
             confirm.action === 'forget-host'
               ? 'connections.hosts.removeHint'
               : plan?.disconnects
-                ? 'connections.remote.disconnectHint'
+                ? confirm.action === 'revoke-device'
+                  ? 'connections.remote.revokeSelfHint'
+                  : 'connections.remote.disconnectHint'
                 : 'connections.hosts.targetHint',
             { name },
           )}

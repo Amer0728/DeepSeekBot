@@ -124,6 +124,12 @@ export interface RemoteHosts {
     run: () => Promise<T>,
     signal?: AbortSignal,
   ): Promise<T>;
+  dispatchConnectionOperation<T>(
+    hostId: string,
+    client: HostClient,
+    pending: PendingConnection,
+    dispatch: { check(): void; send(): Promise<T> },
+  ): Promise<{ response: Promise<T> }>;
   previousConnectionOperations(hostId: string, client: HostClient): PendingConnection[];
   setPendingConnection(
     hostId: string,
@@ -179,7 +185,7 @@ export function conversationKey(target: RemoteConversationTarget): string {
   ]);
 }
 
-function readHosts(storage: HostStorage | undefined): SavedHost[] {
+function readHosts(storage: HostStorage | undefined, strict = false): SavedHost[] {
   try {
     const value = JSON.parse(
       readStorage(storage, REMOTE_HOSTS_STORAGE_KEY, 'botharness.computers.v1') ?? '[]',
@@ -195,6 +201,7 @@ function readHosts(storage: HostStorage | undefined): SavedHost[] {
         })
       : [];
   } catch {
+    if (strict) throw new Error('connection-operation-storage-unavailable');
     return [];
   }
 }
@@ -218,20 +225,92 @@ function operationKey(host: SavedHost): string {
 }
 
 const CONNECTION_OPERATIONS_INDEX = 'botharness.remoteHosts.operations.v1';
+const executionIndexSchema = connectionOperationIndexSchema.element
+  .extend({ record: pendingConnectionSchema.nullable().optional() })
+  .array()
+  .max(32);
 
 function operationIndex(storage: HostStorage | undefined) {
   if (!storage) throw new Error('storage-unavailable');
   const raw = storage.getItem(CONNECTION_OPERATIONS_INDEX);
-  return raw === null ? [] : connectionOperationIndexSchema.parse(JSON.parse(raw));
+  const value: unknown = raw === null ? [] : JSON.parse(raw);
+  let entries: unknown = value;
+  if (!Array.isArray(value)) {
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      !('version' in value) ||
+      value.version !== 2 ||
+      !('entries' in value)
+    )
+      throw new Error('connection-operation-storage-unavailable');
+    entries = value.entries;
+  }
+  const index = executionIndexSchema.parse(entries);
+  const keys = new Set<string>();
+  const prefix = 'botharness.remoteHosts.operation.v1:';
+  for (const item of index) {
+    if (!item.key.startsWith(prefix)) throw new Error('connection-operation-storage-unavailable');
+    const identity: unknown = JSON.parse(item.key.slice(prefix.length));
+    if (
+      !Array.isArray(identity) ||
+      identity.length !== 3 ||
+      !identity.every((part) => typeof part === 'string' && part.length > 0) ||
+      identity[0] !== item.hostId ||
+      item.key !== prefix + JSON.stringify(identity) ||
+      keys.has(item.key)
+    )
+      throw new Error('connection-operation-storage-unavailable');
+    keys.add(item.key);
+    if (
+      item.record &&
+      item.key !==
+        `botharness.remoteHosts.operation.v1:${JSON.stringify([item.hostId, item.record.hostKey, item.record.deviceId])}`
+    )
+      throw new Error('connection-operation-storage-unavailable');
+  }
+  return index;
+}
+
+function writeOperationIndex(storage: HostStorage, index: ReturnType<typeof operationIndex>): void {
+  storage.setItem(
+    CONNECTION_OPERATIONS_INDEX,
+    JSON.stringify(index.length ? { version: 2, entries: index } : []),
+  );
+}
+
+function pruneCompletedOperations(storage: HostStorage, index: ReturnType<typeof operationIndex>) {
+  return index.filter((item) => {
+    if (item.record !== null) return true;
+    try {
+      storage.removeItem(item.key);
+      return storage.getItem(item.key) !== null;
+    } catch {
+      return true;
+    }
+  });
 }
 
 function oldConnectionOwner(storage: HostStorage | undefined, host: SavedHost): boolean {
   const previous = operationIndex(storage).filter(
-    (entry) => entry.hostId === host.hostId && entry.key !== operationKey(host),
+    (entry) =>
+      entry.record !== null && entry.hostId === host.hostId && entry.key !== operationKey(host),
   );
-  if (previous.some((entry) => storage?.getItem(entry.key) == null))
-    throw new Error('connection-operation-storage-unavailable');
+  for (const entry of previous) indexedPending(storage, entry);
   return previous.length > 0;
+}
+
+function indexedPending(
+  storage: HostStorage | undefined,
+  entry: {
+    key: string;
+    record?: PendingConnection | null | undefined;
+  },
+): PendingConnection | undefined {
+  if (entry.record !== undefined) return entry.record ?? undefined;
+  const raw = storage?.getItem(entry.key);
+  if (raw == null) throw new Error('connection-operation-storage-unavailable');
+  return pendingConnectionSchema.parse(JSON.parse(raw));
 }
 
 function readPendingConnection(
@@ -239,9 +318,9 @@ function readPendingConnection(
   host: SavedHost,
 ): PendingConnection | undefined {
   if (!storage) throw new Error('storage-unavailable');
+  const indexed = operationIndex(storage).find((entry) => entry.key === operationKey(host));
+  if (indexed) return indexedPending(storage, indexed);
   const value = storage.getItem(operationKey(host));
-  if (value === null && operationIndex(storage).some((entry) => entry.key === operationKey(host)))
-    throw new Error('connection-operation-storage-unavailable');
   return value === null ? undefined : pendingConnectionSchema.parse(JSON.parse(value));
 }
 
@@ -700,6 +779,13 @@ export function createRemoteHosts(options: {
     for (const host of saved) if (!clients.has(host.hostId)) attach(host);
     publish();
   };
+  const persistentOwner = (hostId: string, client: HostClient) => {
+    const entry = clients.get(hostId);
+    const current = readHosts(storage, true).find((host) => host.hostId === hostId);
+    if (!entry || entry.client !== client || !current || !sameCredential(current, entry.host))
+      throw new Error('connection-host-changed');
+    return { entry, current };
+  };
   const storageChanged = (event: StorageEvent) => {
     if (
       event.storageArea !== storage ||
@@ -709,6 +795,78 @@ export function createRemoteHosts(options: {
     refreshCredentials();
   };
 
+  const setPendingConnection = (
+    hostId: string,
+    client: HostClient,
+    pending: PendingConnection | undefined,
+    expectedGeneration?: string,
+    previousDeviceId?: string,
+    notify = true,
+  ): void => {
+    requireOwner();
+    const entry = clients.get(hostId);
+    if (!entry || entry.client !== client) throw new Error('connection-host-changed');
+    if (!storage) throw new Error('storage-unavailable');
+    if (previousDeviceId !== undefined && pending !== undefined)
+      throw new Error('connection-operation-owner-changed');
+    const owner =
+      previousDeviceId === undefined ? entry.host : { ...entry.host, deviceId: previousDeviceId };
+    const current = readPendingConnection(storage, owner);
+    if (
+      expectedGeneration !== undefined
+        ? current?.generation !== expectedGeneration
+        : current !== undefined
+    )
+      throw new Error('connection-operation-changed');
+    const executionKey = operationKey(owner);
+    let index = pruneCompletedOperations(storage, operationIndex(storage));
+    if (pending) {
+      if (pending.deviceId !== owner.deviceId || pending.hostKey !== owner.encryption?.hostKey)
+        throw new Error('connection-operation-owner-changed');
+      if (!index.some((item) => item.key === executionKey)) {
+        if (index.length >= 32) throw new Error('connection-operation-limit');
+      }
+      index = [
+        ...index.filter((item) => item.key !== executionKey),
+        { hostId, key: executionKey, record: pending },
+      ];
+    } else {
+      index = index.filter((item) => item.key !== executionKey);
+      if (storage.getItem(executionKey) !== null)
+        index.push({ hostId, key: executionKey, record: null });
+    }
+    const currentPending =
+      previousDeviceId === undefined ? pending : readPendingConnection(storage, entry.host);
+    const {
+      pendingConnection: _previous,
+      connectionOwnerChanged: _previousOwner,
+      connectionOperationUnavailable: _executionUnavailable,
+      ...rest
+    } = entry.host;
+    const nextHost = {
+      ...rest,
+      ...(currentPending ? { pendingConnection: currentPending } : {}),
+      ...(index.some(
+        (item) =>
+          item.record !== null && item.hostId === hostId && item.key !== operationKey(entry.host),
+      )
+        ? { connectionOwnerChanged: true }
+        : {}),
+    };
+    writeOperationIndex(storage, index);
+    entry.host = nextHost;
+    if (notify) publish();
+    if (!pending && index.some((item) => item.key === executionKey && item.record === null)) {
+      try {
+        storage.removeItem(executionKey);
+        if (storage.getItem(executionKey) === null)
+          writeOperationIndex(
+            storage,
+            index.filter((item) => item.key !== executionKey),
+          );
+      } catch {}
+    }
+  };
   return {
     async withConnectionOperation(hostId, client, run, signal) {
       requireOwner();
@@ -719,19 +877,24 @@ export function createRemoteHosts(options: {
         entered = true;
         if (clients.get(hostId) !== entry || entry.client !== client)
           throw new Error('connection-host-changed');
-        const pending = readPendingConnection(storage, entry.host);
-        const {
-          pendingConnection: _old,
-          connectionOwnerChanged: _previousOwner,
-          connectionOperationUnavailable: _executionUnavailable,
-          ...rest
-        } = entry.host;
-        entry.host = {
-          ...rest,
-          ...(pending ? { pendingConnection: pending } : {}),
-          ...(oldConnectionOwner(storage, entry.host) ? { connectionOwnerChanged: true } : {}),
-        };
-        publish();
+        if (!storage) throw new Error('storage-unavailable');
+        await withRemoteHostCredentialWrite({
+          storage,
+          run: () => {
+            signal?.throwIfAborted();
+            const { current } = persistentOwner(hostId, client);
+            const index = operationIndex(storage);
+            const pruned = pruneCompletedOperations(storage, index);
+            if (pruned.length !== index.length) writeOperationIndex(storage, pruned);
+            const pending = readPendingConnection(storage, current);
+            entry.host = {
+              ...current,
+              ...(pending ? { pendingConnection: pending } : {}),
+              ...(oldConnectionOwner(storage, current) ? { connectionOwnerChanged: true } : {}),
+            };
+            publish();
+          },
+        });
         return run();
       };
       const name = CONNECTION_OPERATIONS_INDEX;
@@ -745,68 +908,49 @@ export function createRemoteHosts(options: {
         throw error;
       }
     },
+    async dispatchConnectionOperation(hostId, client, pending, dispatch) {
+      requireOwner();
+      if (!storage) throw new Error('storage-unavailable');
+      return withRemoteHostCredentialWrite({
+        storage,
+        run: () => {
+          const { entry, current } = persistentOwner(hostId, client);
+          entry.host = readExecutionHost(storage, current);
+          if (entry.host.connectionOperationUnavailable)
+            throw new Error('connection-operation-storage-unavailable');
+          if (entry.host.pendingConnection || entry.host.connectionOwnerChanged)
+            throw new Error('connection-management-unconfirmed');
+          if (
+            pending.deviceId !== current.deviceId ||
+            pending.hostKey !== current.encryption?.hostKey
+          )
+            throw new Error('connection-operation-owner-changed');
+          dispatch.check();
+          setPendingConnection(hostId, client, pending, undefined, undefined, false);
+          const response = dispatch.send();
+          void response.catch(() => {});
+          publish();
+          return { response };
+        },
+      });
+    },
     previousConnectionOperations(hostId, client) {
       requireOwner();
       const entry = clients.get(hostId);
       if (!entry || entry.client !== client) throw new Error('connection-host-changed');
       const records: PendingConnection[] = [];
       for (const item of operationIndex(storage)) {
-        if (item.hostId !== hostId || item.key === operationKey(entry.host)) continue;
-        const raw = storage?.getItem(item.key);
-        if (raw == null) throw new Error('connection-operation-storage-unavailable');
-        const record = pendingConnectionSchema.parse(JSON.parse(raw));
+        if (item.record === null || item.hostId !== hostId || item.key === operationKey(entry.host))
+          continue;
+        const record = indexedPending(storage, item);
+        if (!record) throw new Error('connection-operation-storage-unavailable');
         if (record.hostKey !== entry.host.encryption?.hostKey)
           throw new Error('connection-operation-owner-changed');
         records.push(record);
       }
       return records;
     },
-    setPendingConnection(hostId, client, pending, expectedGeneration, previousDeviceId) {
-      requireOwner();
-      const entry = clients.get(hostId);
-      if (!entry || entry.client !== client) throw new Error('connection-host-changed');
-      if (!storage) throw new Error('storage-unavailable');
-      if (previousDeviceId !== undefined && pending !== undefined)
-        throw new Error('connection-operation-owner-changed');
-      const owner =
-        previousDeviceId === undefined ? entry.host : { ...entry.host, deviceId: previousDeviceId };
-      const current = readPendingConnection(storage, owner);
-      if (
-        expectedGeneration !== undefined
-          ? current?.generation !== expectedGeneration
-          : current !== undefined
-      )
-        throw new Error('connection-operation-changed');
-      const executionKey = operationKey(owner);
-      const index = operationIndex(storage);
-      if (pending) {
-        if (!index.some((item) => item.key === executionKey)) {
-          if (index.length >= 32) throw new Error('connection-operation-limit');
-          index.push({ hostId, key: executionKey });
-        }
-        storage.setItem(CONNECTION_OPERATIONS_INDEX, JSON.stringify(index));
-        storage.setItem(executionKey, JSON.stringify(pending));
-      } else {
-        storage.removeItem(executionKey);
-        storage.setItem(
-          CONNECTION_OPERATIONS_INDEX,
-          JSON.stringify(index.filter((item) => item.key !== executionKey)),
-        );
-      }
-      const currentPending = readPendingConnection(storage, entry.host);
-      const {
-        pendingConnection: _previous,
-        connectionOwnerChanged: _previousOwner,
-        connectionOperationUnavailable: _executionUnavailable,
-        ...rest
-      } = entry.host;
-      entry.host = {
-        ...rest,
-        ...(currentPending ? { pendingConnection: currentPending } : {}),
-        ...(oldConnectionOwner(storage, entry.host) ? { connectionOwnerChanged: true } : {}),
-      };
-      publish();
-    },
+    setPendingConnection,
     async retireRelationship(relationshipId) {
       requireOwner();
       for (const entry of [...clients.values()]) {
