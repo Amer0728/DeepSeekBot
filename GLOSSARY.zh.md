@@ -225,11 +225,11 @@ Web Human 或当前获授权的外部审核人显式保存且可撤销的规则�
 _避免使用_：Workspace Grant、Provider Service Grant、sandbox preset、推断的命令相似性
 
 **Approval Template**：
-Profile 级、由 Human 用 Markdown 写成的审批规范，说明哪些工具审批可以允许、拒绝或交给 Human。每个 PersonaBot 选用一份或不选；选用、取消或修改正在使用的模板，需要 Human 决定，或在独立管理范围中显式保存的 Tool Approval Rule（ADR-0249）。
+由 Human 编写、供 Approval Reviewer 使用的共享自然语言审批策略，包含 Always ask、Always allow 与 free text。PersonaBot 通过继承全局或选择特定模板，至多使用一份有效模板，也可关闭 Reviewer（[ADR-0342](docs/adr/0342-bot-approval-selects-one-template-and-keeps-deterministic-authorization-separate.md)）。
 _避免使用_：approval mode、auto mode、Tool Approval Rule
 
 **Approval Reviewer**：
-在 Approval Review Session 里按 PersonaBot 的 Approval Template 判断一条待审批请求的模型；上下文不含工具结果；结论是允许、拒绝并附理由，或交给 Human。它出错时一律退回 Human 审批卡。
+在 Approval Review Session 中按 PersonaBot 的有效 Approval Template 判断一条待审批请求的模型，上下文不含工具结果，结果为仅放行本次或交给 Human。它的理解可能出错；发生故障时退回 Human 审批卡。
 _避免使用_：classifier、guardian、auto-approver
 
 **Approval Review Session**：
