@@ -1322,7 +1322,14 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       };
       listBridgeTools(run.externalMessaging?.connected() ?? false);
       if (borrowed) borrowedDisposers.push(() => listBridgeTools(false));
-      this.#orchestratorBridgeTools.set(run.sessionId, listBridgeTools);
+      const disposeBridgeListing = agentCtx.effect(() => {
+        this.#orchestratorBridgeTools.set(run.sessionId, listBridgeTools);
+        return () => {
+          if (this.#orchestratorBridgeTools.get(run.sessionId) === listBridgeTools)
+            this.#orchestratorBridgeTools.delete(run.sessionId);
+        };
+      }, 'botharness: Orchestrator bridge tools lifetime');
+      if (borrowed) borrowedDisposers.push(disposeBridgeListing);
     };
     const live = this.#agents.get?.(SessionId(run.sessionId));
     if (live !== undefined) {
