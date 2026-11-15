@@ -286,7 +286,7 @@ export function createPersonaBotDeletions(options: {
   const pathFor = (slug: string): string => {
     const record = options.registry.getHistorical(slug);
     if (record === undefined) throw new Error('PersonaBot does not exist');
-    return record.memoryDir ?? join(options.registry.rootDir, slug, 'memory');
+    return record.memoryDir ?? options.registry.defaultMemoryDirFor(slug);
   };
   const check = (
     slug: string,
@@ -299,7 +299,7 @@ export function createPersonaBotDeletions(options: {
         'Exclusive managed ownership of this Memory repository is unproven; retain Memory',
       );
     const actual = memoryOwnership(path, partial);
-    const managedDefault = join(canonicalCandidate(options.registry.rootDir), slug, 'memory');
+    const managedDefault = canonicalCandidate(options.registry.defaultMemoryDirFor(slug));
     if (actual.path !== managedDefault) {
       for (const protectedPath of options.protectedPaths ?? [options.registry.rootDir]) {
         if (overlap(actual.path, canonicalCandidate(protectedPath)))

@@ -189,6 +189,9 @@ export const LIVE_OPTIONS = {
   'new-home': { type: 'string' },
 
   'connection-id': { type: 'string' },
+  'confirm-disconnect': { type: 'boolean' },
+  handover: { type: 'string' },
+  'connection-route-id': { type: 'string' },
   fingerprint: { type: 'string' },
   'link-file': { type: 'string' },
   'account-file': { type: 'string' },
@@ -633,6 +636,10 @@ interface LiveValues
   'link-file'?: string;
   'account-file'?: string;
   'connection-id'?: string;
+  'confirm-disconnect'?: boolean;
+  handover?: string;
+  'connection-route-id'?: string;
+  'expected-route-revision'?: string;
   fingerprint?: string;
   'remote-host-id'?: string;
   'host-id'?: string;
@@ -841,6 +848,13 @@ export async function connectLiveHost(values: LiveValues, io: BotCreateCliIo, si
       failure.details = { permission: scrub(details['permission']) };
     if (failure.code === 'model-not-allowed' && typeof details['route'] === 'string')
       failure.details = { route: scrub(details['route']) };
+    const { path, spaceId } = details;
+    if (typeof path === 'string' || typeof spaceId === 'string')
+      failure.details = {
+        ...failure.details,
+        ...(typeof path === 'string' ? { path: scrub(path) } : {}),
+        ...(typeof spaceId === 'string' ? { spaceId: scrub(spaceId) } : {}),
+      };
     return failure;
   };
   const rpc = async <T>(method: string, args: Record<string, unknown>): Promise<T> => {
@@ -1049,6 +1063,16 @@ export async function runLiveCli(
         ...(values['link-file'] === undefined ? {} : { 'link-file': values['link-file'] }),
         ...(values.fingerprint === undefined ? {} : { fingerprint: values.fingerprint }),
         ...(values.confirm === undefined ? {} : { confirm: values.confirm }),
+        ...(values['confirm-disconnect'] === undefined
+          ? {}
+          : { 'confirm-disconnect': values['confirm-disconnect'] }),
+        ...(values.handover === undefined ? {} : { handover: values.handover }),
+        ...(values['connection-route-id'] === undefined
+          ? {}
+          : { 'connection-route-id': values['connection-route-id'] }),
+        ...(values['expected-route-revision'] === undefined
+          ? {}
+          : { 'expected-route-revision': values['expected-route-revision'] }),
       },
       io,
       () => connectLiveHost(values, io, AbortSignal.timeout(timeoutMs(values.timeout))),

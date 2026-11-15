@@ -19,6 +19,7 @@ import type { BotHarnessTranslate } from './locale.js';
 import { OverviewUsageView } from './overview-usage-view.js';
 import { OverviewMemoryView } from './overview-memory-view.js';
 import { RemoteHostModels } from './remote-host-models.js';
+import { HostDetails } from './connection-hosts.js';
 import { remoteHosts, THIS_HOST } from './remote-hosts.js';
 import {
   settingsTargetIdentity,
@@ -158,6 +159,11 @@ function EnvironmentSettings({
             icon: <ChannelSidebarIcon name="gauge" />,
           },
           { id: 'storage', label: t('storage.title'), icon: <ChannelSidebarIcon name="files" /> },
+          {
+            id: 'connections',
+            label: t('connections.remote.title'),
+            icon: <ChannelSidebarIcon name="plug" />,
+          },
         ]),
   ];
   return (
@@ -264,7 +270,9 @@ function EnvironmentSettings({
           }
         />
       ) : null}
-      {section === 'appearance' ? (
+      {section === 'connections' && remote ? (
+        <HostDetails key={hostId} remote={remote} t={t} />
+      ) : section === 'appearance' ? (
         appearanceHostId === undefined ? (
           <Note>{t('environment.settings.loadingIdentity')}</Note>
         ) : (

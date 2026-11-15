@@ -5,6 +5,7 @@ import type {
   AdminDeletion,
 } from '../team/bot-administration.js';
 import type { PrivateKind } from '../team/private-contract.js';
+import type { SpaceAudience } from '../workspaces/spaces.js';
 import type { ApprovalCard } from '../team/approval-contract.js';
 import type { ChannelVisibility, ChannelPolicy } from '../team/channel-contract.js';
 import { TeamError, type TeamService } from '../team/service.js';
@@ -412,6 +413,21 @@ export class BotharnessBridgeService extends TypertRemoteService {
     this.invocationMethods = methods;
   }
 
+  spaceAudienceDirectory() {
+    return unwrapAsync(this.methods.spaceAudienceDirectory({}));
+  }
+  spaces() {
+    return unwrapAsync(this.methods.spaces({}));
+  }
+  spaceCreate(name: string, audience: SpaceAudience) {
+    return unwrapAsync(this.methods.spaceCreate({ name, audience }));
+  }
+  spaceUpdate(spaceId: string, name?: string, audience?: SpaceAudience) {
+    return unwrapAsync(this.methods.spaceUpdate({ spaceId, name, audience }));
+  }
+  spaceDelete(spaceId: string, confirm: boolean) {
+    return unwrapAsync(this.methods.spaceDelete({ spaceId, confirm }));
+  }
   modelsAllowed() {
     return unwrapAsync(this.methods.modelsAllowed({}));
   }
@@ -2471,7 +2487,7 @@ export class BotharnessBridgeService extends TypertRemoteService {
     workspaceId: string,
     acknowledgeReadWrite: boolean,
   ) {
-    this.requirePrivateOwner('Workspace authorization requires the authenticated Owner');
+    this.invocationHuman();
     return unwrapAsync(
       this.methods.grantRequestApprove({
         slug,
@@ -3135,6 +3151,11 @@ markRemoteMethods(BotharnessBridgeService.prototype, [
   'privateContentPage',
   'auditLog',
   'auditVerify',
+  'spaces',
+  'spaceAudienceDirectory',
+  'spaceCreate',
+  'spaceUpdate',
+  'spaceDelete',
   'teamMode',
   'modelsAllowed',
   'usageByMember',

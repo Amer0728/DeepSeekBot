@@ -3535,8 +3535,66 @@ const MEMBER_USAGE_MIGRATION: SchemaMigration = {
   },
 };
 
+const HOST_RELATIONSHIP_ACCOUNT_MIGRATION: SchemaMigration = {
+  generation: 150,
+  module: 'host-relationships',
+  description: 'Retain verified same-account relationship provenance',
+  migrate(database) {
+    database.exec(`
+      ALTER TABLE host_relationships ADD COLUMN account_origin TEXT;
+      CREATE TABLE relationship_client_enrollments (
+        relationship_id TEXT NOT NULL REFERENCES host_relationships(relationship_id),
+        public_key TEXT NOT NULL,
+        direction TEXT NOT NULL CHECK (direction IN ('incoming', 'outgoing')),
+        state TEXT NOT NULL CHECK (state IN ('unconfirmed', 'committed', 'cleanup-pending', 'cleaned', 'cancelled')),
+        expires_at INTEGER NOT NULL,
+        account_generation TEXT,
+        cleanup_attempts INTEGER NOT NULL DEFAULT 0,
+        retry_at INTEGER,
+        PRIMARY KEY (relationship_id, public_key, direction)
+      );
+      CREATE INDEX relationship_enrollment_cleanup ON relationship_client_enrollments(direction, state, retry_at);
+    `);
+  },
+};
+
+const WORKSPACE_SPACES_MIGRATION: SchemaMigration = {
+  generation: 151,
+  module: 'workspace-spaces',
+  description:
+    'Account and audience-contained shared Workspace roots and resumable Memory relocation',
+  migrate(database) {
+    database.exec(`
+      CREATE TABLE workspace_spaces (
+        space_id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind IN ('account', 'shared')),
+        name TEXT NOT NULL COLLATE NOCASE,
+        owner_human_id TEXT UNIQUE,
+        audience_json TEXT,
+        CHECK ((kind = 'account' AND owner_human_id IS NOT NULL AND audience_json IS NULL)
+          OR (kind = 'shared' AND owner_human_id IS NULL AND json_valid(audience_json)))
+      );
+      CREATE UNIQUE INDEX workspace_shared_names ON workspace_spaces(name) WHERE kind = 'shared';
+      INSERT INTO workspace_spaces
+        SELECT 'spaces/' || human_id, 'account', display_name, human_id, NULL FROM humans;
+      CREATE TABLE workspace_file_transfers (human_id TEXT PRIMARY KEY, moves_json TEXT NOT NULL);
+      CREATE TABLE workspace_memory_moves (
+        slug TEXT PRIMARY KEY,
+        source TEXT,
+        target TEXT,
+        proof_json TEXT
+      );
+      INSERT INTO workspace_memory_moves(slug)
+        SELECT b.slug FROM persona_bots b
+        WHERE b.owner_human_id <> (SELECT owner_human_id FROM team_settings WHERE singleton = 1)
+          AND NOT EXISTS (SELECT 1 FROM persona_bot_deletions d WHERE d.slug = b.slug
+          AND (json_extract(d.body, '$.memory') = 'erased' OR json_extract(d.body, '$.eraseMemory') = 1));
+    `);
+  },
+};
+
 const PRIVATE_CONTENT_AUDIT_MIGRATION: SchemaMigration = {
-  generation: MEMBER_USAGE_MIGRATION.generation + 1,
+  generation: WORKSPACE_SPACES_MIGRATION.generation + 1,
   module: 'team',
   description: 'Hash-chained private-content access audit and durable tail anchor',
   migrate(database) {
@@ -3705,5 +3763,7 @@ export const BOT_HARNESS_SCHEMA_PLAN = defineSchemaPlan([
   HOST_RELATIONSHIP_REVOCATION_MIGRATION,
   TEAM_MODELS_MIGRATION,
   MEMBER_USAGE_MIGRATION,
+  HOST_RELATIONSHIP_ACCOUNT_MIGRATION,
+  WORKSPACE_SPACES_MIGRATION,
   PRIVATE_CONTENT_AUDIT_MIGRATION,
 ]);

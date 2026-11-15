@@ -189,6 +189,7 @@ describe('plugin entry', () => {
         .prepare("INSERT INTO member_credentials VALUES ('bob', 'bob', '{}', '[]', 0)")
         .run();
     });
+    core.team.spaces.ensureAccount('bob');
     expect(
       core.registry.create({
         slug: 'bob-private',
@@ -790,6 +791,11 @@ describe('plugin entry', () => {
       'privateContentPage',
       'auditLog',
       'auditVerify',
+      'spaces',
+      'spaceAudienceDirectory',
+      'spaceCreate',
+      'spaceUpdate',
+      'spaceDelete',
       'teamMode',
       'modelsAllowed',
       'usageByMember',

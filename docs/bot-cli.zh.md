@@ -37,6 +37,24 @@ Client 线路偏好检查或文件替换失败时，Host 线路可能已经更�
 | `relationships enroll <关系ID> --device-name <名称> --out <新私密文件绝对路径>`                      | 为具名 CLI Client 登记并私密保存独立凭据；标准输出仅含 Host 和设备标识。 |
 | `relationships disconnect <关系ID> --confirm`                                                        | 撤销派生访问，保留独立手机授权及远端数据；对方未确认时保留待撤销状态。   |
 
+同账号发现复用环境面板的 Host owner：
+
+| 命令                                                                                    | 用途                                                            |
+| --------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `relationships account-discover`                                                        | 启动有界的已验证发现，不等待所有 Host，后续可分别读取成功结果。 |
+| `relationships account-status`                                                          | 读取当前账号代际及允许自动登记 Client 的有效关系。              |
+| `relationships account-enroll <关系ID> --device-name <名称> --out <新私密文件绝对路径>` | 仅通过当前服务端已验证的账号来源，为 CLI Client 签发独立授权。  |
+| `relationships enrollments`                                                             | 检查未确认、已确认及准确公钥待清理事实、截止时间与重试次数。    |
+| `relationships enrollment-status <关系ID> <Client公钥>`                                 | 不确定响应后，读取准确的 Client intent。                        |
+| `relationships commit-enrollment <关系ID> <Client公钥>`                                 | 幂等确认同一 intent 已私密保存，不生成另一个密钥。              |
+| `relationships cancel-enrollment <关系ID> <Client公钥> --confirm`                       | 取消准确 intent 并重试有限的待清理工作，保留其他 Client。       |
+
+`account-discover` 不把列表中的 Host 当成授权：双方独立核对账号注册、Host 身份、Noise 公钥和新鲜的已签名 transcript，保留原 pin 与主动断开抑制。完整证明也可为已有手动批准的 active 关系附加账号资格，保留其 ID、审批与授权；不会绕过待处理的手动审批。尚无该验证资格的手动关系仍需「在此 Client 使用」。退出账号停止发现及新自动登记，保留独立可用的授权与线路；准确公钥的减权清理仍可在退出后进行。Bot 协作独立授权。
+
+每次新关系登记先保存来源端 unconfirmed intent；CLI 私密保存独立密钥后再确认，标准输出在 Host/设备 ID 之外报告 `enrollment: committed` 或 `pending`。待确认文件保留 `relationshipEnrollment.publicKey`，以便准确读回并重试。保留该文件，用同一 key 重试确认，不另建文件生成新 key。丢确认响应及 Host 重启后，确认仍幂等。未确认的十分钟截止后拒绝 commit，来源端保留待清理；已取消结果移除本次写入的私密文件。清理只撤销该关系及公钥对应的派生授权，也覆盖配对回复丢失的设备，并拒绝迟到 offer/redemption。跨重启最多自动重试八次，耗尽后仍可通过 `enrollments` 检查并显式重试。1,024 条生命周期记录满额安全拒绝，不淘汰未解决事实或仍有效的取消 tombstone。
+
+受支持的 in-harness 桌面/Web Client 自动登记已验证账号关系，不切换环境范围、当前会话或 Settings Target。同源标签页用每 Host 的 Web Lock 复用一份 Client 授权；独立浏览器 context 使用各自的私密存储和授权。自动登记需要 Web Locks，缺失时在生成 key 前拒绝；既有 HTTP LAN 手动登记及线路更新，与所有凭据数组写入统一使用短 IndexedDB 原生事务，不另存凭据或租约，并保留其他 Host 及更新的设备代际。原生手机仍需逐 Host 明确登记；运行完整 owner Web Client 的手机浏览器属于 Web Client，UA 不是授权信号。原生手机不继承仍需单独真机验证。
+
 用现有 `--host` / `--token-file` 选定准确的本机所有者。在另一台本机 Host 上执行 `enroll`，为其 CLI Client 独立登记；`device-probe --device-file <私密文件绝对路径>` 读取该 Client 的真实远端 Feed。手机不能通过设备网关调用关系登记。发起结果不确定时先读取 `relationships list`，不要盲目重发。
 
 断开立即拒绝本机关系访问并撤销派生授权；对方离线时，`peerRevocationPending: true` 跨重启保留。仅针对准确关系的幂等撤销自动重试，最多八次、间隔上限一分钟，不重放普通变更。`list` 返回 `revocationAttempts`、`revocationRetryAt` 和 `automaticEnrollmentSuppressed`。达到上限后仍可检查待撤销记录；对已断开关系运行 `relationships sync <关系ID>` 可手动重试并重新开始有限自动重试。确认只作用于准确关系 ID 及固定公钥，迟到确认不能撤销新代关系；独立设备授权和远端数据保留。
@@ -1004,11 +1022,28 @@ deepseekbot connection-host <host-id> test-route <origin> --client-id <id>
 deepseekbot connection-host <host-id> remove --client-id <id> --confirm
 deepseekbot connection-host <host-id> revoke-device <device-id> --client-id <id> --confirm
 deepseekbot connection-host <host-id> stop-route lan --client-id <id> --confirm
-deepseekbot connection-host <host-id> stop-route private-tunnel --client-id <id> --confirm
+deepseekbot connection-host <host-id> plan-stop-route private-tunnel --connection-route-id quick --client-id <id>
+deepseekbot connection-host <host-id> stop-route private-tunnel --connection-route-id quick --expected-route-revision <revision> --client-id <id> --confirm
+deepseekbot connection-host <host-id> plan-stop-route lan --client-id <id>
+deepseekbot connection-host <host-id> stop-route lan --handover <trusted-origin> --client-id <id> --confirm
+deepseekbot connection-host <host-id> stop-route lan --confirm-disconnect --client-id <id> --confirm
+deepseekbot connection-host <host-id> plan-revoke-device <device-id> --client-id <id>
+deepseekbot connection-host <host-id> plan-sign-out --client-id <id>
+deepseekbot connection-host <host-id> sign-out --client-id <id> --confirm
+deepseekbot connection-host <host-id> read-operation --client-id <id>
+deepseekbot connection-host <host-id> read-previous-operation --client-id <id>
 deepseekbot connection-host <host-id> select-route <origin-or-automatic> --client-id <id> --confirm
 ```
 
+`plan-*` 先读取具名 Host，报告操作是否可能断开当前 Client。`--handover <trusted-origin>` 验证已有替代路由，明确保存此 Client 的手动路由偏好，等待实际连接切换并回读同一 Host 后才提交操作。没有可用替代路由时，用 `--confirm-disconnect` 明确接受断开，仍须保留 `--confirm`。停止私有路由须指定 `quick` 或 `custom`，其他路由保留。退出登录通过目标 Host 的账号所有者执行；关系断开和单设备撤销保持独立效果。
+
+停止私有线路前，先执行 `plan-stop-route`，将计划返回的配置代次原样传给 `--expected-route-revision`。配置变化或 Host 重启后须重新计划，不能用新读取的代次替换此前确认值。Host 在停止前原子拒绝配置不匹配；代次不匹配、缺失或没有代次的旧记录不能解除私有停止操作的未知结果。
+
+发送前，未知结果保护会原子写入所选 Client 已有 HostStorage 所有者下的带版本执行索引，重新加载后仍保留，不自动重放。共享 Web Lock 覆盖准备、一次写入和确认；缺少 Web Locks 时拒绝危险写入。`read-operation` 在同一锁内重新读取保护记录，通过同一已认证 Host 所有者回读，只在观察到完成后清除匹配代次；原值未变或无法读取仍视为未知。设备授权被撤销并重新登记后，用 `read-previous-operation` 通过同一固定 Host 的新授权明确读取旧操作结果；仅在确认完成后解除写入保护，Host 公钥变化时拒绝回读。旧设备授权的未确认事实独立保留，不继承或重发到新授权；最多保留 32 条未解决记录，达到上限后拒绝新增写入。通过已信任路由恢复连接后再回读。离线时保留已加载的频道和消息，不停止其他所有者的 Tailscale 映射或无关 Host 进程。
+
 `select-route` 先在所选浏览器的现有 Host 记录中保存选择，再等待进行中的请求结束后切换。手动地址必须已获准；失败不会自动换路。传入 `automatic` 恢复既有自动策略，不扩大通道资格。`connection-hosts` 分别报告保存的选择、切换是否待完成和实际当前线路。只影响这个 Client/Host；手机连接详情通过同一 HostClient 行为及手机自己的保存所有者执行。
+
+新执行记录与 SavedHost 凭据分开。旧页面不能安全处理新索引格式，会拒绝更改；请重新加载目标浏览器页面，再管理连接或回读结果。回退代码前，先用当前版本处理未解决记录。不能通过删除未知记录恢复旧页面的写入。旧格式引用的操作仍可读取。
 
 通过现有 Client 控制通道执行，与连接对话框复用同一管理适配器。列表只返回 Host 标识、名称及实际线路观察，不返回设备凭据或私钥。`inspect` 使用该浏览器对目标 Host 的配对授权读取设备与可停止线路。`remove` 仅删除此浏览器的本地连接，保留 Host 数据和设备授权；`revoke-device` 在目标 Host 撤销指定设备；`stop-route` 只关闭指定目标的局域网监听或私有 Tunnel。停止当前线路或撤销当前设备可能令响应中断，未收到确认不能视为成功，需重新检查。未知 Host、线路、设备、过期请求和未确认写入均拒绝。账号分组不改变连接的登录/退出来源或授予管理权限。
 
@@ -1884,12 +1919,15 @@ Bot 已有存活的 Orchestrator Agent 后，`bot-tools` 也会列出其注册�
 
 使用 `device-offer --route-id quick|custom --out <新的绝对路径私有文件>` 创建单条连接的邀请，用于恢复连接或旧版手机；省略 `--route-id` 则邀请包含所有已连通的私有地址。
 
+`private-route stop` 可选传入 `list` 返回的 `--expected-route-revision`，将停止绑定到该配置；省略时，明确的本地 owner 命令保留无条件行为。代次变化时在写入前拒绝。
+
 `private-route list` 读取 Host 的公开 `privateRoutes` 状态。一台 Host 支持 `quick` 和一个 `custom` 连接（Named Tunnel 或自有 HTTPS 入口）：
 
 ```bash
 deepseekbot private-route add quick --confirm
 deepseekbot private-route add custom --origin https://bot.example.com --confirm
 deepseekbot private-route stop quick --confirm
+deepseekbot private-route stop quick --expected-route-revision <list返回的代次> --confirm
 deepseekbot private-route start quick --confirm
 deepseekbot private-route replace custom --hostname bot.example.com --token-stdin --confirm
 deepseekbot private-route remove custom --confirm

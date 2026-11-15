@@ -116,6 +116,7 @@ describe("generated developer reference", () => {
       { name: "tools/execute", direction: "consumes", operation: "on" },
       { name: "tools/execute", direction: "consumes", operation: "on" },
       { name: "tools/execute", direction: "consumes", operation: "on" },
+      { name: "tools/execute", direction: "consumes", operation: "on" },
       { name: "tools/post-execute", direction: "consumes", operation: "on" },
       { name: "tools/pre-execute", direction: "consumes", operation: "on" },
       { name: "tools/result", direction: "consumes", operation: "on" },

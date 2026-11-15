@@ -589,7 +589,7 @@
       "description": "A browser's own Remote Host pairings, selected Host tab, legacy-key migration and the icon and colour it shows for each Host (#2500).",
       "scope": "Client transport / transient state",
       "surfaces": [
-        "storage:packages/client/src/client/remote-hosts.ts:removeItem(REMOTE_HOSTS_STORAGE_KEY)",
+        "storage:packages/client/src/client/remote-hosts.ts:removeItem('botharness.computers.v1')",
         "storage:packages/client/src/client/remote-notifications.ts:removeItem(REMOTE_NOTIFICATION_KEY)",
         "storage:packages/client/src/client/remote-hosts.ts:setItem(REMOTE_HOSTS_STORAGE_KEY)",
         "storage:packages/client/src/client/remote-hosts.ts:setItem(HOST_TAB_STORAGE_KEY)",
@@ -597,7 +597,7 @@
         "storage:packages/client/src/client/remote-hosts.ts:removeItem(oldKey)",
         "storage:packages/client/src/client/remote-hosts.ts:setItem(key)"
       ],
-      "exemption": "Per-browser connections, legacy-key migration, the tab filter and the automatic last-creation Host hint belong to that browser profile, not to any Host (spec #2178, ADR-0243: Host looks are device-local), so no Host CLI can read or set them. The creation hint is not an independent setting; CLI create, group-create and roster commands already select their exact Host explicitly. Permanent pairing removal also deletes its browser notification choice as automatic cleanup, not a separate setting. Browser notifications and Host looks use separately inventoried Client relay commands. The Remote Host's side is its existing device gateway: pair, unary calls, stream ticket and revoke.",
+      "exemption": "Per-browser connections, local Forget automatic-enrollment choices, legacy-key migration, the tab filter and the automatic last-creation Host hint belong to that browser profile, not to any Host (spec #2178, ADR-0243: Host looks are device-local), so no Host CLI can read or set them. The creation hint is not an independent setting; CLI create, group-create and roster commands already select their exact Host explicitly. Permanent pairing removal also deletes its browser notification choice as automatic cleanup, not a separate setting. Browser notifications and Host looks use separately inventoried Client relay commands. The Remote Host's side is its existing device gateway and relationships CLI: pair, unary calls, stream ticket, revoke, enrollment status, commit and exact-key cancellation.",
       "configurable": false
     },
     {
@@ -1066,14 +1066,18 @@
     },
     {
       "id": "remote-connection-management",
-      "description": "One selected browser Client observes routes and uses its target Host authorization; local removal is separate from Host revocation and route stop.",
+      "description": "One selected Client observes routes and uses its exact Host owner for device revocation, individual route stop and account sign-out; Web-Locked execution guards and owner readback prevent unknown writes being replayed.",
       "scope": "Client",
       "surfaces": [
         "setting:packages/client/src/client/connection-hosts.tsx:{device.name}",
         "setting:packages/client/src/client/connection-hosts.tsx:{t('connections.hosts.preference')}",
         "setting:packages/client/src/client/connection-hosts.tsx:{host.name}",
         "setting:packages/client/src/client/connection-hosts.tsx:{route.address}",
-        "setting:packages/client/src/client/connection-hosts.tsx:{t(kind === 'lan' ? 'connections.lan' : 'privateTunnel.title')}"
+        "setting:packages/client/src/client/connection-hosts.tsx:{label}",
+        "setting:packages/client/src/client/connection-hosts.tsx:\"Tobs Connect\"",
+        "storage:packages/client/src/client/remote-hosts.ts:removeItem(item.key)",
+        "storage:packages/client/src/client/remote-hosts.ts:removeItem(executionKey)",
+        "storage:packages/client/src/client/remote-hosts.ts:setItem(CONNECTION_OPERATIONS_INDEX)"
       ],
       "commands": ["connection-hosts", "connection-host", "connect-account-hosts"]
     },
@@ -1098,6 +1102,9 @@
         "setting:packages/client/src/client/team-roles.tsx:{roleLabel(t, role)}",
         "setting:packages/client/src/client/team-roles.tsx:{t('team.roles.title')}",
         "setting:packages/client/src/client/team-settings.tsx:{t('team.devices.mine')}",
+        "setting:packages/client/src/client/team-spaces.tsx:{item.name}",
+        "setting:packages/client/src/client/team-spaces.tsx:{t('team.spaces.shared')}",
+        "setting:packages/client/src/client/team-spaces.tsx:{t('team.spaces.yours')}",
         "setting:packages/client/src/client/team-usage-section.tsx:{member.displayName}",
         "setting:packages/client/src/client/team-usage-section.tsx:{t('team.usage.period')}",
         "setting:packages/client/src/client/team-audit.tsx:{object.name}",

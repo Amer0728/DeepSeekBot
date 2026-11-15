@@ -222,6 +222,52 @@ Object.defineProperty(NativeSession.prototype, '@deepseek-ai/dsh-typert-protocol
 });
 
 describe('Host members', { timeout: 60_000 }, () => {
+  it('exposes only audience names through the Gateway to manageShared without member or role management', async () => {
+    const f = await enabledFixture();
+    const role = f.team.roles.create(owner, 'Space manager', ['workspaces.manageShared']).role;
+    f.team.roles.set(owner, f.human.humanId, [role.roleId]);
+    await f.team.changePassword(f.human, f.initialPassword, 'bob-password-2', false);
+    const login = await f.team.signIn('bob', 'bob-password-2', 'ip');
+    const call = (method: string, peer = login.peer) =>
+      f.gateway.invoke({ namespace: 'botharness', method, args: {}, peer });
+    const directory = z
+      .object({
+        roles: z.array(
+          z
+            .object({
+              roleId: z.string(),
+              name: z.string(),
+              builtin: z.enum(['admin', 'member']).nullable(),
+            })
+            .strict(),
+        ),
+        members: z.array(z.object({ humanId: z.string(), displayName: z.string() }).strict()),
+      })
+      .strict()
+      .parse(await call('spaceAudienceDirectory'));
+    expect(directory.roles).toContainEqual({
+      roleId: role.roleId,
+      name: 'Space manager',
+      builtin: null,
+    });
+    expect(directory.roles.map((item) => item.builtin)).toEqual(
+      expect.arrayContaining(['admin', 'member']),
+    );
+    expect(directory.members).toContainEqual({ humanId: f.human.humanId, displayName: 'Bob' });
+    await expect(call('members')).rejects.toMatchObject({ code: 'permission-required' });
+    await expect(call('roles')).rejects.toMatchObject({ code: 'permission-required' });
+    expect(
+      await call('spaceAudienceDirectory', new Peer(f.ctx, { principal: { kind: 'owner' } })),
+    ).toEqual(directory);
+    const deniedRole = f.team.roles.create(owner, 'No spaces', []).role;
+    f.team.roles.set(owner, f.human.humanId, [deniedRole.roleId]);
+    const next = await f.team.signIn('bob', 'bob-password-2', 'ip');
+    await expect(call('spaceAudienceDirectory', next.peer)).rejects.toMatchObject({
+      code: 'permission-required',
+      details: { permission: 'workspaces.manageShared' },
+    });
+  });
+
   it('recovers a committed member only as Owner and revokes every previous grant', async () => {
     const f = await enabledFixture();
     const login = await f.team.signIn('bob', f.initialPassword, 'ip');
@@ -628,12 +674,16 @@ describe('member confidentiality', { timeout: 60_000 }, () => {
   it('keeps the shared member-method contract dependency-free and its denials explicit', () => {
     const source = readFileSync(new URL('../src/team/member-methods.ts', import.meta.url), 'utf8');
     expect(source).not.toMatch(/\bimport\b/u);
-    expect([...MEMBER_METHODS]).toEqual([
-      ...MEMBER_GLOBAL_METHODS,
-      ...MEMBER_CHANNEL_METHODS,
-      ...MEMBER_APPROVAL_METHODS,
-      ...MEMBER_BOT_METHODS,
-    ]);
+    expect(MEMBER_METHODS).toEqual(
+      new Set([
+        ...MEMBER_GLOBAL_METHODS,
+        ...MEMBER_CHANNEL_METHODS,
+        ...MEMBER_APPROVAL_METHODS,
+        ...MEMBER_BOT_METHODS,
+      ]),
+    );
+    expect(MEMBER_CHANNEL_METHODS).toContain('grantRequestApprove');
+    expect(MEMBER_BOT_METHODS).toContain('grantRequestApprove');
     expect(MEMBER_METHODS.has('composerIdentity')).toBe(true);
     for (const method of ['dataReset']) expect(MEMBER_METHODS.has(method)).toBe(false);
     for (const method of ['teamModeSet', 'members', 'roles', 'create', 'createLookup'])
@@ -1020,6 +1070,11 @@ describe('member confidentiality', { timeout: 60_000 }, () => {
           ].includes(method)
         )
           expect(['permission-required', 'device-not-found']).toContain(code);
+        else if (method === 'spaceAudienceDirectory')
+          expect(error).toMatchObject({
+            code: 'permission-required',
+            details: { permission: 'workspaces.manageShared' },
+          });
         else if (method === 'usageByMember')
           expect(error).toMatchObject({
             code: 'permission-required',

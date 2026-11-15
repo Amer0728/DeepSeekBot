@@ -5,7 +5,7 @@ import { defineSchemaPlan } from '../src/database/schema.js';
 import { PrivateAudit } from '../src/team/audit.js';
 import { createTempRoot, trackTestOwner } from './helpers.js';
 
-it.each([147, 149])(
+it.each([147, 149, 151])(
   'upgrades main generation%i with existing ownership, then retains the audit chain across restart',
   (generation) => {
     const home = createTempRoot('team-audit-upgrade-');
