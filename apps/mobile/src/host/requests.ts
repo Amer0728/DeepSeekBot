@@ -16,6 +16,7 @@ import type {
   TimelineMessage,
   TimelinePage,
   ToolApprovalOutcome,
+  ToolApprovalRequestCard,
   ToolApprovalStatus,
   UserQuestionStatus,
 } from './wire';
@@ -30,6 +31,7 @@ export interface RequestRef {
 }
 
 export interface ApprovalRequest extends RequestRef {
+  effects?: ToolApprovalRequestCard['effects'];
   toolName: string;
   role: 'orchestrator' | 'assignment';
   cwd: string;
@@ -43,7 +45,7 @@ export interface ApprovalRequest extends RequestRef {
 
 export type ApprovalContent = Pick<
   ApprovalRequest,
-  'toolName' | 'role' | 'cwd' | 'input' | 'allowAlways'
+  'toolName' | 'role' | 'cwd' | 'input' | 'allowAlways' | 'effects'
 >;
 
 export function approvalContent(value: unknown): ApprovalContent | undefined {
@@ -55,8 +57,42 @@ export function approvalContent(value: unknown): ApprovalContent | undefined {
   if (!('cwd' in value) || typeof value.cwd !== 'string') return undefined;
   if (!('input' in value) || typeof value.input !== 'string') return undefined;
   if ('allowAlways' in value && typeof value.allowAlways !== 'boolean') return undefined;
+  const effect = 'effects' in value ? value.effects : undefined;
+  let effects: ToolApprovalRequestCard['effects'];
+  if (
+    typeof effect === 'object' &&
+    effect !== null &&
+    !Array.isArray(effect) &&
+    'changes' in effect &&
+    (effect.changes === 'none' ||
+      effect.changes === 'reversible' ||
+      effect.changes === 'irreversible') &&
+    'reach' in effect &&
+    (effect.reach === 'local' ||
+      effect.reach === 'memory' ||
+      effect.reach === 'workspace' ||
+      effect.reach === 'external') &&
+    'personalData' in effect &&
+    typeof effect.personalData === 'boolean' &&
+    (!('authority' in effect) ||
+      effect.authority === undefined ||
+      effect.authority === 'management') &&
+    (!('secrets' in effect) || effect.secrets === undefined || typeof effect.secrets === 'boolean')
+  )
+    effects = {
+      changes: effect.changes,
+      reach: effect.reach,
+      personalData: effect.personalData,
+      ...('authority' in effect && effect.authority === 'management'
+        ? { authority: 'management' }
+        : {}),
+      ...('secrets' in effect && typeof effect.secrets === 'boolean'
+        ? { secrets: effect.secrets }
+        : {}),
+    };
   return {
     toolName: value.toolName,
+    ...(effects === undefined ? {} : { effects }),
     role: value.role,
     cwd: value.cwd,
     input: value.input,
@@ -131,6 +167,7 @@ export async function loadApproval(client: HostClient, ref: RequestRef): Promise
   return {
     ...ref,
     toolName: card.toolName,
+    ...(card.effects === undefined ? {} : { effects: card.effects }),
     role: card.role,
     cwd: card.cwd,
     input: card.input,

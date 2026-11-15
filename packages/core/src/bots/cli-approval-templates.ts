@@ -3,20 +3,12 @@ import {
   parseApprovalTemplateGuidance,
 } from '../workspaces/approval-template-guidance.js';
 import { readApprovalTemplateFile } from '../workspaces/approval-templates.js';
+export { APPROVAL_TEMPLATE_OPTIONS } from './cli-option-spec.js';
 
 import type { BotCreateCliIo } from './bot-create-cli.js';
 import { CliLiveError } from './cli-live-error.js';
 
 type Rpc = (method: string, payload: Record<string, unknown>) => Promise<unknown>;
-
-export const APPROVAL_TEMPLATE_OPTIONS = {
-  from: { type: 'string' },
-  'delete-revision': { type: 'string' },
-  blank: { type: 'boolean' },
-  'parts-file': { type: 'string' },
-  'apply-to': { type: 'string' },
-  'text-stdin': { type: 'boolean' },
-} as const;
 
 export interface ApprovalTemplateValues {
   bot?: string;

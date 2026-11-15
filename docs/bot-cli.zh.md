@@ -2073,3 +2073,21 @@ Web 手动检查请求最多等待 25 秒，关闭自检卡片会取消请求。
 运行 `deepseekbot approval-template edit my-draft --parts-file guidance.json`，再用 `deepseekbot approval-template show my-draft` 读回；`text` 包含带格式版本的内容。创建／编辑时添加 `--apply-to <bot-id>` 才会在保存后为该 Bot 选用模板。不加时不改变选择。应用仍通过现有 Bot 选择授权；应用失败时已保存的草稿保留，可单独选用。
 
 编辑共享原件影响 `usedBy` 中所有 Bot 的后续 Review，包括全局继承者。需要独立修改时先复制。总是询问优先于总是允许，补充说明不能取消前者。这些是可能被模型误解的自然语言指导，不是确定性 Tool Approval Rules；冲突、未覆盖或不确定均交给 Human。转换时旧 Markdown 完整保留为补充说明，已经开始的 Review 保留捕获的内容和版本。
+
+可信声明的不可撤销外部工具调用在 Full Access 下仍进入统一审批。`bot-tool` 无需模型，沿用同一 Host 准入；有效确定性授权先于 Reviewer。在线 `channel-messages` 的审批消息包含 `toolApprovalRequest.effects` 与中英文 `effectLabels.en` / `effectLabels.zh`。工具输入或结果声称用户已批准不会构成授权。管理操作仍需 ADR-0249 的专用显式授权。
+
+### 命令效果与调用方授权
+
+CLI 与 Tob broker 共用应用定义的命令效果声明；lint 从真实命令注册数组与入口分发检查声明遗漏，不依赖搜索索引。声明不是授权：直接在线命令仍由认证 Host owner 校验；broker 仍保留 Human DM 来源、目标所有权、准确 argv 和 stdin 哈希、确认标志、revision、取消与执行前撤销检查。未知命令保留未声明来源，broker 仍按需审批，CLI 仍返回原有拒绝。混合用途命令保留保守声明及原有审批门槛；未迁移的 Shell 文本识别继续生效。
+
+效果解析复用 CLI 的严格参数解析；`channels send` 与成员设备撤销不会沿用同名读取命令的 broker 直通。`bots` 别名按实际动作解析。任意工具调用及通用 `settings-set` 的 stdin 不在审批提案中公开，故效果保持不透明；stdin 哈希只用于操作身份，不能当成授权或可信效果。
+
+## 无模型的 Tob CLI 请求
+
+已认证的 Host Owner 可将 `{"argv":["approval-templates"],"stdin":""}` 保存为本机私有 JSON 文件，用 `deepseekbot tob-cli start --args-stdin < request.json` 启动；用 `tob-cli status <request-id>` 读取状态和结果，或 `tob-cli cancel <request-id>` 请求取消。
+
+Host 通过 ChannelStore 写入真实 Human DM，再由既有 Source Event/Admission 接纳，在同一存活的 Tob 根 Orchestrator 中，通过 DSH 原生工具执行器调用 `deepseekbot_cli` 和既有 broker；不请求模型。调用方不能指定 actor、Source Event、Session、cwd 或权限覆盖。写入仍显示真实审批卡，可使用既有 `tool-approval-status`、`tool-approval-decide` 或 Tob DM 中的审批操作。
+
+启动返回 `{id,channelId,messageId,state,cancelRequested}`。结束状态为 `completed`（含 `result:{exitCode,stdout,stderr}`），或带错误码的 `failed` / `cancelled`。`completed` 仅表示调用已结束，仍须检查 exitCode 和 JSON stdout 中的命令拒绝。取消须等待结束，不能撤销已提交的效果。模型回合、直接工具或另一请求正在运行时返回 `bot-busy`；权限不可用返回 `tob-authority-required`，运行时关闭返回 `runtime-closed`，请求不存在或过期返回 `cli-request-unavailable`。
+
+最多保留十六条结束结果，结束十分钟后过期，Host 重启即失效；执行期限十分钟。输入最多 256 个 argv、总计 64 KiB，stdin 一 MiB；合并输出一 MiB。stdin 不写入 DM。不要共享私有输入文件。结果不确定时先读取命令 owner 的规范状态，不自动重放历史消息。此路径不增加审批存储或数据库迁移。见 [ADR-0345](adr/0345-model-free-tob-cli-uses-the-accepted-human-dm-turn.md)。

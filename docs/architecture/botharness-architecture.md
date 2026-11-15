@@ -1735,3 +1735,15 @@ existing saved-rule/device/Grant tests protect the execution fences. This is not
 latency measurement. Runtime and screenshot qualification are recorded separately in the PR.
 
 E3 的 Human 审批卡在允许这次、始终允许或拒绝后保留完整请求，操作区显示禁用的已选结果，详情的手动开合状态不变。Reviewer 的显式 `ask-human` 紧凑结果先写入同一 ChannelStore，再生成 Human 请求；历史拒绝记录不改变两结果 Reviewer 契约。移动端从既有消息投影已验证的只读内容，历史卡不逐卡查询 Host；缓存内容不能授权，缺失或已清除的内容如实显示不可用。当前契约见[审批策略](bot-approval-policy.zh.md)。
+
+### CLI effect declaration ownership
+
+The application-defined CLI declaration table in `bots/cli-effects.ts` supplies effects to direct command dispatch and Channel Tool Approval for typed and exact-argv Tob operations. Each declaration separately retains the broker's existing read admission; effect metadata does not confer caller authority. The broker continues to own Human DM provenance, target authorization, exact operation identity and live revocation fences. Unknown commands and arbitrary Shell text retain the existing protected path. The dispatch inventory check follows real command-family arrays and entry branches rather than help or search text.
+
+CLI flag declarations live in the data-only `bots/cli-option-spec.ts` module. `cli-options.ts` owns strict parsing for both dispatch and effect resolution without importing runtime handlers; the existing command-family modules re-export their option groups. Effect-contract type consumers therefore do not acquire the Host credential and child-process implementation graph.
+
+### Model-free Tob CLI admission
+
+The authenticated Owner `tob-cli start/status/cancel` interface uses the existing Human DM Source Event/Admission and serialized BotRuntime Orchestrator owner. Its explicit execution variant invokes the application-defined `deepseekbot_cli` through DSH-native Tools.execute in the real live Agent scope, without model followup. The per-invocation broker shares the Shell path’s capture factory and ChannelToolApproval; metadata grants no authority. A bounded transient request/result view supplies cancellation and readback without a second approval store or durable command lifecycle. See [ADR-0345](../adr/0345-model-free-tob-cli-uses-the-accepted-human-dm-turn.md).
+
+已认证 Owner 的 `tob-cli start/status/cancel` 复用真实 Human DM、规范 Source Event/Admission 及 BotRuntime 的串行 Orchestrator owner；执行变体在实际存活的 Agent scope 中通过 DSH 原生 Tools.execute 调用应用定义的 `deepseekbot_cli`，不触发模型。每次调用的 broker 复用 Shell 的权限捕获、真实审批及实时执行 fence；短期有界结果只用于取消和读取，不建立第二审批权威或持久命令生命周期。

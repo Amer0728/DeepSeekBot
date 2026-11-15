@@ -236,6 +236,8 @@ deepseekbot folder-browse [<folder-path>] [--offset <n>]
 deepseekbot grant-create <bot-id> --workspace <workspace-id>
 ```
 
+Trusted irreversible external tool calls enter common approval even with Full Access. `bot-tool` uses the same Host admission without a model; a valid saved authorization is checked before any Reviewer call. Read `toolApprovalRequest.effects` and bilingual `effectLabels.en` / `effectLabels.zh` on approval messages from online `channel-messages`. These labels describe trusted declarations, not claims in tool input or output. Management operations still require their dedicated explicit authorization (ADR-0249).
+
 `tool-approval-status` returns `status` and, while the card is still `pending`, its `expiresAt`, the time the Web card counts down to. `--outcome allowed-always-kind` is the `secret_cli` card's "Always allow this kind": it allows this call and saves a rule for the same program, account and environment variable names, which `tool-approval-rules` lists with kind `secret-cli`; any other card refuses it.
 
 `user-question-answer` accepts the same offered selections as the Web card. A durable timed
@@ -2132,3 +2134,23 @@ For three-part editing, write a UTF-8 JSON file:
 Run `deepseekbot approval-template edit my-draft --parts-file guidance.json`. Read it back with `deepseekbot approval-template show my-draft`; `text` contains the versioned representation. Add `--apply-to <bot-id>` to create/edit to save and then select it for that Bot. Without that flag, saving changes no selection. Applying uses the existing Bot selection authorization; if applying fails, the saved draft remains and can be selected separately.
 
 Editing a shared original affects future Reviews for every Bot in its `usedBy` list, including global inheritors. Copy first to work independently. Always ask has priority over Always allow, then free text supplements both. These are fallible natural-language instructions, never deterministic Tool Approval Rules. Conflicts, missing coverage or uncertainty ask the Human. Legacy Markdown remains intact as free text when converted; already-started Reviews retain their captured content/version.
+
+### Command effects and caller authority
+
+The CLI and Tob broker share application-defined command effect declarations. Lint checks actual command registration arrays and entry dispatch branches, independently of the search index. A declaration is not authorization: direct online commands retain authenticated Host owner checks; the broker retains Human DM origin, target ownership, exact argv and stdin hash, confirmation flags, revisions, cancellation and live execution fences. Unknown commands remain undeclared, retain broker approval, and receive the existing CLI refusal. Mixed-purpose commands keep conservative declarations and their existing approval gates; unmigrated Shell text protection remains active.
+
+Effect resolution uses the CLI's strict argument parser. `channels send` and member-device revocation cannot inherit the same family's broker read admission. `bots` aliases resolve by their dispatched action. Arbitrary tool calls and generic `settings-set` remain opaque when their stdin is unavailable in the proposal; a stdin hash binds operation identity and supplies neither authority nor trusted effects.
+
+## Model-free Tob CLI requests
+
+The authenticated Host Owner can run a typed Tob CLI command without a model. Put `{"argv":["approval-templates"],"stdin":""}` in a private JSON file, then run:
+
+```sh
+deepseekbot tob-cli start --args-stdin < request.json
+deepseekbot tob-cli status <request-id>
+deepseekbot tob-cli cancel <request-id>
+```
+
+Start returns `{id,channelId,messageId,state,cancelRequested}`. The Host records a genuine Human DM and accepts it through the existing Source Event/Admission owner. Its live Tob Orchestrator executes the scoped `deepseekbot_cli` Tool and broker without a model request. No actor, Source Event, Session, cwd or permission override is accepted. Writes keep the existing real approval card; use `tool-approval-status` and `tool-approval-decide`, or decide in the Tob DM. Status becomes `completed` with `result:{exitCode,stdout,stderr}`, or `failed` / `cancelled` with a code. A completed invocation can contain a command refusal: inspect exitCode and JSON stdout. Cancellation is a request until settlement; it does not undo an effect already committed.
+
+Only one live CLI request is allowed; `bot-busy` refuses overlap with another request, a model turn or a direct tool. The Host refuses unavailable authority (`tob-authority-required`), a closed runtime (`runtime-closed`), and missing/expired request IDs (`cli-request-unavailable`). Results last at most ten minutes after settlement (sixteen retained entries); restart expires them. Commands time out after ten minutes. Input is limited to 256 argv entries / 64 KiB argv and one MiB stdin, output to one MiB combined. Stdin is never copied into the DM. Keep private request files local. After an uncertain result, read the command owner’s canonical state before starting another request. See [ADR-0345](adr/0345-model-free-tob-cli-uses-the-accepted-human-dm-turn.md).

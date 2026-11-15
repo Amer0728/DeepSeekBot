@@ -179,6 +179,26 @@ describe('Tool approval card in the DM', () => {
     expect(view.textContent).toContain('/home/qa/.dsh/botharness/bots/');
   });
 
+  it('keeps validated effect labels on the full card after rejection', async () => {
+    const fake = host();
+    const timeline = approvalTimeline(true) as {
+      value: { page: { entries: Array<{ toolApprovalRequest: Record<string, unknown> }> } };
+    };
+    timeline.value.page.entries[0]!.toolApprovalRequest['effects'] = {
+      changes: 'irreversible',
+      reach: 'external',
+      personalData: true,
+    };
+    fake.answers.set('channelTimeline', () => timeline);
+    const view = await render(card(connect(fake)));
+    expect(view.textContent).toContain('不可撤销');
+    expect(view.textContent).toContain('外部影响');
+    await press(button(view, t.reject));
+    expect(button(view, t.reject).getAttribute('aria-selected')).toBe('true');
+    expect(view.textContent).toContain('不可撤销');
+    expect(view.textContent).toContain('外部影响');
+  });
+
   it.each(['allowed-once', 'allowed-always-tool', 'rejected'] as const)(
     'keeps the opened full card and selected disabled choice after %s',
     async (outcome) => {

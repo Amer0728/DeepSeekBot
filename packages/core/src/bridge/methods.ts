@@ -250,6 +250,7 @@ import type { AttachmentStore } from '../attachments/store.js';
 import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
+import { tobCliRequestSchema, type TobCliStatus } from '../tob/cli-request.js';
 
 import { TakeoverError, type TakeoverHandoff } from '../takeover/contracts.js';
 import type { TakeoverHandoffs } from '../takeover/handoffs.js';
@@ -896,6 +897,7 @@ export interface BridgeMethods extends TeamBridgeMethods {
   messageSearch(payload: unknown): BridgeResult<HumanMessageSearchPage>;
   channelMessages(payload: unknown): BridgeResult<{ messages: ChannelMessage[]; revision: number }>;
   channelAllBotPreview(payload: unknown): BridgeResult<AllBotPreview>;
+  tobCli(payload: unknown): Promise<BridgeResult<TobCliStatus>>;
   channelSend(payload: unknown): Promise<BridgeResult<{ message: ChannelMessage }>>;
   channelSendStatus(payload: unknown): BridgeResult<ChannelSendStatus>;
   channelGenuiView(payload: unknown): BridgeResult<GenuiPrivateView>;
@@ -1788,6 +1790,11 @@ function dmAdmissionFailure(
       };
     case 'blank-body':
       return invalidInput('body is required');
+    case 'cli-request-expired':
+      return {
+        ok: false,
+        error: { code: reason, message: 'Typed CLI requests cannot be replayed.' },
+      };
     case 'runtime-closed':
       return {
         ok: false,
@@ -3253,6 +3260,28 @@ function buildBridgeMethods(
               : await service.send(slug, grantId, requestId, text),
         };
       });
+    },
+    async tobCli(payload) {
+      if (!isHostOwner())
+        return {
+          ok: false,
+          error: { code: 'permission-required', message: 'Host owner authentication is required.' },
+        };
+      const parsed = tobCliRequestSchema.safeParse(payload);
+      if (!parsed.success) return invalidInput('Invalid bounded Tob CLI request');
+      if (!deps.runtime?.tobCli) return unavailable();
+      try {
+        return { ok: true, value: await deps.runtime.tobCli(human, parsed.data) };
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: error instanceof TobError ? error.code : 'operation-failed',
+            message:
+              error instanceof TobError ? error.code : 'The Tob CLI request could not complete.',
+          },
+        };
+      }
     },
     async tobHome() {
       if (!isHostOwner()) return { ok: true, value: { available: false as const } };

@@ -1,31 +1,6 @@
+export { INBOX_OPTIONS } from './cli-option-spec.js';
 import { watchInbox } from './cli-inbox-watch.js';
 import { CliLiveError } from './cli-live-error.js';
-
-export const INBOX_OPTIONS = {
-  notifications: { type: 'boolean' },
-  category: { type: 'string' },
-  'watch-seconds': { type: 'string' },
-  channel: { type: 'string' },
-  request: { type: 'string' },
-  sort: { type: 'string' },
-  search: { type: 'string' },
-  unread: { type: 'boolean' },
-  'source-key': { type: 'string' },
-  source: { type: 'string' },
-  section: { type: 'string' },
-  unsectioned: { type: 'boolean' },
-  index: { type: 'string' },
-  archived: { type: 'boolean' },
-  unarchived: { type: 'boolean' },
-  rule: { type: 'string' },
-  server: { type: 'string' },
-  confirm: { type: 'boolean' },
-  until: { type: 'string' },
-  snoozed: { type: 'boolean' },
-  dismissed: { type: 'boolean' },
-  activity: { type: 'string' },
-  'include-archived': { type: 'boolean' },
-} as const;
 
 export const INBOX_COMMANDS = [
   {

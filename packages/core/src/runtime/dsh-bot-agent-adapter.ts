@@ -1,3 +1,6 @@
+import { hasIrreversibleExternalEffect, toolEffects } from '../workspaces/tool-effects.js';
+
+import { randomUUID } from 'node:crypto';
 import { createChannelActionTool } from './channel-action-tool.js';
 import {
   executeNativeTool,
@@ -80,6 +83,13 @@ export const TURN_ONLY_BOT_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 const CATALOG_RUN = { sessionId: '', bot: { slug: '' } } as unknown as OrchestratorAgentRun;
+
+interface ModelFreeTobTurn {
+  agent: Agent;
+  turn: NonNullable<OrchestratorAgentRun['tobCliTurn']>;
+  inputId: ReturnType<typeof createUserMessage>['id'];
+  outcome: { kind: 'completed' } | { kind: 'failed'; error: unknown } | undefined;
+}
 
 interface AssignmentRequestArgs {
   session_id: string;
@@ -599,6 +609,7 @@ class DshBotAgentAdapter implements BotAgentAdapter {
     { current: ModelSelection | undefined; assembled: ModelSelection | undefined }
   >();
   readonly #runs = new Map<string, ActiveRun>();
+  readonly #modelFreeTobTurns = new Map<string, ModelFreeTobTurn>();
   readonly #stopping = new Set<string>();
   readonly #stoppedBots = new Set<string>();
   readonly #humanStops = new Set<string>();
@@ -639,31 +650,47 @@ class DshBotAgentAdapter implements BotAgentAdapter {
     this.#preparationVisibleMs = options.preparationVisibleMs ?? PREPARATION_VISIBLE_MS;
   }
 
-  async #prepare<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
+  async #prepare<T>(
+    sessionId: string,
+    work: (signal: AbortSignal) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    if (this.#preparations.has(sessionId))
+      throw new DirectBotToolError(
+        'bot-busy',
+        'The previous native preparation is still being cleaned up',
+      );
     const controller = new AbortController();
     this.#preparations.set(sessionId, controller);
+    const abort = () => controller.abort();
+    const release = () => {
+      if (this.#preparations.get(sessionId) === controller) this.#preparations.delete(sessionId);
+    };
+    let pending: Promise<T> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await Promise.race([
-        work(),
-        new Promise<never>((_, reject) => {
-          controller.signal.addEventListener('abort', () => reject(new PreparationStopped()), {
-            once: true,
-          });
-          timer = setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `Preparing this turn took longer than ${Math.round(this.#preparationTimeoutMs / 1000)} s (model route or Session resume did not answer). Check the DSH model provider, then send the message again.`,
-                ),
-              ),
-            this.#preparationTimeoutMs,
+      const stopped = new Promise<never>((_, reject) => {
+        controller.signal.addEventListener('abort', () => reject(new PreparationStopped()), {
+          once: true,
+        });
+        timer = setTimeout(() => {
+          reject(
+            new Error(
+              `Preparing this turn took longer than ${Math.round(this.#preparationTimeoutMs / 1000)} s (model route or Session resume did not answer). Check the DSH model provider, then send the message again.`,
+            ),
           );
-        }),
-      ]);
+          controller.abort();
+        }, this.#preparationTimeoutMs);
+      });
+      signal?.addEventListener('abort', abort, { once: true });
+      signal?.throwIfAborted();
+      pending = Promise.resolve().then(() => work(controller.signal));
+      void pending.then(release, release);
+      return await Promise.race([pending, stopped]);
     } finally {
+      signal?.removeEventListener('abort', abort);
       clearTimeout(timer);
-      if (this.#preparations.get(sessionId) === controller) this.#preparations.delete(sessionId);
+      if (pending === undefined) release();
     }
   }
 
@@ -696,7 +723,11 @@ class DshBotAgentAdapter implements BotAgentAdapter {
   async runOrchestrator(run: OrchestratorAgentRun): Promise<void> {
     this.#assertOpen();
     if (this.#stoppedBots.has(run.bot.slug)) throw new Error('PersonaBot is deleted');
-    const entry: ActiveRun = { role: 'orchestrator', run };
+    const entry: ActiveRun = {
+      role: 'orchestrator',
+      run,
+      ...(run.tobCliTurn === undefined ? {} : { direct: true as const }),
+    };
     this.#runs.set(run.sessionId, entry);
     this.#stopSeqs.delete(run.sessionId);
     const abandonable = this.#abandonable(run.sessionId);
@@ -735,10 +766,16 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       }, this.#preparationVisibleMs);
       reveal.unref?.();
       try {
-        handle = await this.#prepare(run.sessionId, async () => {
-          await this.#prepareModelRoute?.(run.bot.slug, 'orchestrator');
-          return this.#orchestratorHandle(run);
-        });
+        handle = await this.#prepare(
+          run.sessionId,
+          async (signal) => {
+            run.tobCliTurn?.signal.throwIfAborted();
+            if (run.tobCliTurn === undefined)
+              await this.#prepareModelRoute?.(run.bot.slug, 'orchestrator');
+            return this.#orchestratorHandle(run, signal);
+          },
+          run.tobCliTurn?.signal,
+        );
       } catch (error) {
         if (error instanceof PreparationStopped && this.#humanStops.has(run.sessionId)) return;
         throw error;
@@ -761,6 +798,42 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       selectNativeModel(handle.agent, selection?.current);
       const fromSeq = handle.agent.session.seq;
       run.setExecutionReady?.(true);
+      if (run.tobCliTurn !== undefined) {
+        const agent = handle.agent;
+        if (agent.status !== 'idle' || agent.inbox.nextTurn.length || agent.inbox.nextStep.length)
+          throw new DirectBotToolError('bot-busy', 'The native Agent has pending work');
+        const input = createUserMessage({
+          content: [{ type: 'text', text: run.message }],
+          source: { kind: 'user' },
+        });
+        const pending: ModelFreeTobTurn = {
+          agent,
+          turn: run.tobCliTurn,
+          inputId: input.id,
+          outcome: undefined,
+        };
+        this.#modelFreeTobTurns.set(run.sessionId, pending);
+        const cancel = () => agent.cancel({ kind: 'user' }, { keepInbox: true });
+        run.tobCliTurn.signal.addEventListener('abort', cancel, { once: true });
+        try {
+          run.tobCliTurn.signal.throwIfAborted();
+          agent.followup(input);
+          await agent.whenIdle();
+          run.tobCliTurn.signal.throwIfAborted();
+          if (!pending.outcome)
+            throw new DirectBotToolError(
+              'native-turn-not-accepted',
+              'The native turn did not accept the CLI request',
+            );
+          if (pending.outcome.kind === 'failed') throw pending.outcome.error;
+        } finally {
+          run.tobCliTurn.signal.removeEventListener('abort', cancel);
+          agent.inbox.remove(input.id);
+          if (this.#modelFreeTobTurns.get(run.sessionId) === pending)
+            this.#modelFreeTobTurns.delete(run.sessionId);
+        }
+        return;
+      }
       const text = [run.message, run.inbox].filter((part) => part.trim().length > 0).join('\n\n');
       if (run.acceptNativeInput !== undefined) {
         if (!run.acceptNativeInput()) return;
@@ -806,6 +879,77 @@ class DshBotAgentAdapter implements BotAgentAdapter {
         run.setExecutionReady?.(false);
       }
     }
+  }
+
+  ownsModelFreeTobTurn(agent: Agent): boolean {
+    const pending = this.#modelFreeTobTurns.get(agent.session.id);
+    return pending?.agent === agent;
+  }
+
+  async runModelFreeTobTurn(
+    agent: Agent,
+    messages: readonly ReturnType<typeof createUserMessage>[],
+    signal: AbortSignal,
+    modelSelection: Readonly<ModelSelection>,
+  ): Promise<boolean> {
+    const pending = this.#modelFreeTobTurns.get(agent.session.id);
+    if (!pending || pending.agent !== agent) return false;
+    if (pending.outcome) return true;
+    const turn = pending.turn;
+    try {
+      if (messages.length !== 1 || messages[0]?.id !== pending.inputId)
+        throw new DirectBotToolError(
+          'native-turn-not-accepted',
+          'The native input identity changed',
+        );
+      const active = this.#runs.get(agent.session.id);
+      if (active?.role !== 'orchestrator' || active.run.tobCliTurn !== turn)
+        throw new DirectBotToolError('agent-context-expired', 'The owned CLI turn ended');
+      active.run.requireContent?.();
+      turn.signal.throwIfAborted();
+      const toolSet =
+        typeof agent.ctx.tools.resolve === 'function'
+          ? await agent.ctx.tools.resolve({ agent, modelSelection, signal })
+          : undefined;
+      const result = await (async () => {
+        try {
+          return await executeNativeTool(agent.ctx, {
+            callId: ToolCallId('tob-cli-' + randomUUID()),
+            name: 'deepseekbot_cli',
+            arguments: turn.command,
+            agent,
+            signal: AbortSignal.any([signal, turn.signal]),
+            ...(toolSet === undefined ? {} : { toolSet }),
+          });
+        } finally {
+          toolSet?.dispose();
+        }
+      })();
+      if (result.isError)
+        throw new DirectBotToolError(
+          result.error.info?.code ?? 'tool-failed',
+          result.error.message,
+        );
+      const value: unknown =
+        typeof result.value === 'string' ? JSON.parse(result.value) : result.value;
+      if (
+        typeof value !== 'object' ||
+        value === null ||
+        !('exitCode' in value) ||
+        typeof value.exitCode !== 'number' ||
+        !('stdout' in value) ||
+        typeof value.stdout !== 'string' ||
+        !('stderr' in value) ||
+        typeof value.stderr !== 'string'
+      )
+        throw new DirectBotToolError('tool-failed', 'The scoped CLI did not return a result');
+      turn.complete({ exitCode: value.exitCode, stdout: value.stdout, stderr: value.stderr });
+      pending.outcome = { kind: 'completed' };
+    } catch (error) {
+      pending.outcome = { kind: 'failed', error };
+      throw error;
+    }
+    return true;
   }
 
   stopOrchestratorTurn(botSlug: string): string | undefined {
@@ -1066,13 +1210,14 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       error.name = 'SessionUnavailableError';
       throw error;
     }
-    await this.#prepare(run.sessionId, async () => {
+    await this.#prepare(run.sessionId, async (signal) => {
       await this.#prepareModelRoute?.(run.bot.slug, 'orchestrator');
-      await this.#orchestratorHandle(run);
+      await this.#orchestratorHandle(run, signal);
     });
   }
 
-  async #orchestratorHandle(run: OrchestratorAgentRun): Promise<AgentHandle> {
+  async #orchestratorHandle(run: OrchestratorAgentRun, signal?: AbortSignal): Promise<AgentHandle> {
+    signal?.throwIfAborted();
     const existing = this.#liveHandle(run.sessionId);
     if (existing !== undefined) return existing;
     const resolvedAgentOptions = agentOptions(
@@ -1177,7 +1322,14 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       };
       listBridgeTools(run.externalMessaging?.connected() ?? false);
       if (borrowed) borrowedDisposers.push(() => listBridgeTools(false));
-      this.#orchestratorBridgeTools.set(run.sessionId, listBridgeTools);
+      const disposeBridgeListing = agentCtx.effect(() => {
+        this.#orchestratorBridgeTools.set(run.sessionId, listBridgeTools);
+        return () => {
+          if (this.#orchestratorBridgeTools.get(run.sessionId) === listBridgeTools)
+            this.#orchestratorBridgeTools.delete(run.sessionId);
+        };
+      }, 'botharness: Orchestrator bridge tools lifetime');
+      if (borrowed) borrowedDisposers.push(disposeBridgeListing);
     };
     const live = this.#agents.get?.(SessionId(run.sessionId));
     if (live !== undefined) {
@@ -1189,6 +1341,8 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       this.#authorizeBorrow?.(live, 'orchestrator');
       try {
         await setup(live.ctx, live, true);
+        signal?.throwIfAborted();
+        run.tobCliTurn?.signal.throwIfAborted();
       } catch (error) {
         for (const dispose of borrowedDisposers.reverse()) await dispose();
         throw error;
@@ -1203,7 +1357,11 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       this.#orchestratorSelections.set(run.sessionId, selection);
       return borrowed;
     }
-    const options = { agentOptions: resolvedAgentOptions, setup };
+    const options = {
+      agentOptions: resolvedAgentOptions,
+      setup,
+      ...(signal === undefined ? {} : { signal }),
+    };
     const meta = createMeta(
       run,
       this.#resolveOrchestratorCwd(run.bot),
@@ -1223,6 +1381,8 @@ class DshBotAgentAdapter implements BotAgentAdapter {
           ...options,
         });
     try {
+      signal?.throwIfAborted();
+      run.tobCliTurn?.signal.throwIfAborted();
       assertOrchestratorWorkingDirectory(
         run.sessionId,
         handle.agent.session.header.cwd,
@@ -4027,6 +4187,29 @@ class DshBotAgentAdapter implements BotAgentAdapter {
             result.error.message,
           );
         value = result.value;
+      } else if (
+        hasIrreversibleExternalEffect(toolEffects(name, args)) ||
+        toolEffects(name, args)?.authority === 'management'
+      ) {
+        const handle = await this.#prepare(
+          run.sessionId,
+          (preparationSignal) => this.#orchestratorHandle(run, preparationSignal),
+          signal,
+        );
+        signal.throwIfAborted();
+        const result = await executeNativeTool(handle.agent.ctx, {
+          callId: ToolCallId(run.sessionId),
+          name,
+          arguments: args,
+          agent: handle.agent,
+          signal,
+        });
+        if (result.isError)
+          throw new DirectBotToolError(
+            result.error.info?.code ?? 'tool-failed',
+            result.error.message,
+          );
+        value = result.value;
       } else {
         value = await tool.execute(args, {
           callId: run.sessionId,
@@ -4050,6 +4233,7 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       throw error;
     } finally {
       this.#runs.delete(run.sessionId);
+      await this.releaseSession(run.sessionId);
     }
   }
 
@@ -4255,6 +4439,13 @@ export function createDshBotAgentAdapter(options: DshBotAgentAdapterOptions): Bo
   acceptAssistantStream(sessionId: string, frame: AssistantStreamFrame): void;
   forgetAgent(agent: Agent): void;
   modelSelection(sessionId: string): ModelSelection | undefined;
+  ownsModelFreeTobTurn(agent: Agent): boolean;
+  runModelFreeTobTurn(
+    agent: Agent,
+    messages: readonly ReturnType<typeof createUserMessage>[],
+    signal: AbortSignal,
+    modelSelection: Readonly<ModelSelection>,
+  ): Promise<boolean>;
 } {
   return new DshBotAgentAdapter(options);
 }

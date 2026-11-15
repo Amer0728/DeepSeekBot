@@ -1218,6 +1218,29 @@ export function parseChannelMessage(value: unknown): ChannelMessage | undefined 
               : {}),
           }
         : undefined;
+    const effect = asRecord(request['effects']);
+    let effects: import('../../../core/src/workspaces/tool-effects.js').ToolEffects | undefined;
+    if (
+      effect &&
+      (effect['changes'] === 'none' ||
+        effect['changes'] === 'reversible' ||
+        effect['changes'] === 'irreversible') &&
+      (effect['reach'] === 'local' ||
+        effect['reach'] === 'memory' ||
+        effect['reach'] === 'workspace' ||
+        effect['reach'] === 'external') &&
+      typeof effect['personalData'] === 'boolean' &&
+      (effect['authority'] === undefined || effect['authority'] === 'management') &&
+      (effect['secrets'] === undefined || typeof effect['secrets'] === 'boolean')
+    ) {
+      effects = {
+        changes: effect['changes'],
+        reach: effect['reach'],
+        personalData: effect['personalData'],
+        ...(effect['authority'] === 'management' ? { authority: 'management' } : {}),
+        ...(typeof effect['secrets'] === 'boolean' ? { secrets: effect['secrets'] } : {}),
+      };
+    }
     const review = asRecord(request['approvalReview']);
     let approvalReview:
       | import('../../../core/src/workspaces/tool-approval.js').ToolApprovalReview
@@ -1238,6 +1261,7 @@ export function parseChannelMessage(value: unknown): ChannelMessage | undefined 
         ...(typeof review['fallback'] === 'string' ? { fallback: review['fallback'] } : {}),
       };
     toolApprovalRequest = {
+      ...(effects === undefined ? {} : { effects }),
       ...(approvalReview === undefined ? {} : { approvalReview }),
       ...(typeof request['allowAlways'] === 'boolean'
         ? { allowAlways: request['allowAlways'] }

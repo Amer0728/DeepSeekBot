@@ -1,3 +1,4 @@
+export { TEAM_OPTIONS } from './cli-option-spec.js';
 import { privateKindSchema } from '../team/private-contract.js';
 import { spaceAudienceSchema } from '../workspaces/spaces.js';
 import {
@@ -10,31 +11,6 @@ import { z } from 'zod';
 import { CliLiveError } from './cli-live-error.js';
 import type { BotCreateCliIo } from './bot-create-cli.js';
 
-export const TEAM_OPTIONS = {
-  as: { type: 'string' },
-  after: { type: 'string' },
-  reason: { type: 'string' },
-  audience: { type: 'string' },
-  models: { type: 'string' },
-  'human-id': { type: 'string' },
-  post: { type: 'string' },
-  'add-members': { type: 'string' },
-  'mention-all': { type: 'string' },
-  'add-bots': { type: 'string' },
-  'edit-details': { type: 'string' },
-  to: { type: 'string' },
-  preview: { type: 'boolean' },
-  'token-stdin': { type: 'boolean' },
-  'sign-out-others': { type: 'string' },
-  permissions: { type: 'string' },
-  set: { type: 'string' },
-  revoke: { type: 'string' },
-  'role-ids': { type: 'string' },
-  username: { type: 'string' },
-  'display-name': { type: 'string' },
-  'initial-password-file': { type: 'string' },
-  'password-stdin': { type: 'boolean' },
-} as const;
 export const TEAM_COMMANDS = [
   { command: 'audit', description: 'list [--after] [--limit] | verify' },
   {
