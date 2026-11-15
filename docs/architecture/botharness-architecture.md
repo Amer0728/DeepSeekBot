@@ -1727,3 +1727,5 @@ latency measurement. Runtime and screenshot qualification are recorded separatel
 ### CLI effect declaration ownership
 
 The application-defined CLI declaration table in `bots/cli-effects.ts` supplies effects to direct command dispatch and Channel Tool Approval for typed and exact-argv Tob operations. Each declaration separately retains the broker's existing read admission; effect metadata does not confer caller authority. The broker continues to own Human DM provenance, target authorization, exact operation identity and live revocation fences. Unknown commands and arbitrary Shell text retain the existing protected path. The dispatch inventory check follows real command-family arrays and entry branches rather than help or search text.
+
+CLI flag declarations live in the data-only `bots/cli-option-spec.ts` module. `cli-options.ts` owns strict parsing for both dispatch and effect resolution without importing runtime handlers; the existing command-family modules re-export their option groups. Effect-contract type consumers therefore do not acquire the Host credential and child-process implementation graph.

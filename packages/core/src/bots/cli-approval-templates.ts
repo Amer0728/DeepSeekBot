@@ -1,14 +1,10 @@
+export { APPROVAL_TEMPLATE_OPTIONS } from './cli-option-spec.js';
 import { readFileSync } from 'node:fs';
 
 import type { BotCreateCliIo } from './bot-create-cli.js';
 import { CliLiveError } from './cli-live-error.js';
 
 type Rpc = (method: string, payload: Record<string, unknown>) => Promise<unknown>;
-
-export const APPROVAL_TEMPLATE_OPTIONS = {
-  from: { type: 'string' },
-  'text-stdin': { type: 'boolean' },
-} as const;
 
 export interface ApprovalTemplateValues {
   bot?: string;
