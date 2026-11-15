@@ -1,4 +1,14 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { atomicWriteFile } from '../fs/atomic-write.js';
 
@@ -165,12 +175,30 @@ function textProblem(text: string): boolean {
   );
 }
 
+function readTemplateFile(path: string): string {
+  const descriptor = openSync(path, 'r');
+  try {
+    const buffer = Buffer.alloc(APPROVAL_TEMPLATE_TEXT_LIMIT + 1);
+    let size = 0;
+    while (size < buffer.length) {
+      const count = readSync(descriptor, buffer, size, buffer.length - size, null);
+      if (count === 0) break;
+      size += count;
+    }
+    if (size > APPROVAL_TEMPLATE_TEXT_LIMIT)
+      throw new Error('Approval template file exceeds byte limit');
+    return buffer.toString('utf8', 0, size);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 export function createApprovalTemplateLibrary(dir?: string): ApprovalTemplateLibrary {
   const file = (name: string) => join(dir!, name + '.md');
   const readCustom = (name: string): ApprovalTemplate | undefined => {
     if (dir === undefined || !isApprovalTemplateName(name) || approvalTemplate(name)) return;
     try {
-      return summaryOf(name, readFileSync(file(name), 'utf8'));
+      return summaryOf(name, readTemplateFile(file(name)));
     } catch {
       return undefined;
     }
@@ -195,7 +223,7 @@ export function createApprovalTemplateLibrary(dir?: string): ApprovalTemplateLib
       if (dir === undefined) return { kind: 'off' };
       let value: unknown;
       try {
-        value = JSON.parse(readFileSync(join(dir, '.selection.json'), 'utf8'));
+        value = JSON.parse(readTemplateFile(join(dir, '.selection.json')));
       } catch (error) {
         return error instanceof Error && 'code' in error && error.code === 'ENOENT'
           ? { kind: 'off' }
@@ -239,7 +267,7 @@ export function createApprovalTemplateLibrary(dir?: string): ApprovalTemplateLib
     create(name, text) {
       const problem = check(name, text);
       if (problem !== undefined) return problem;
-      if (readCustom(name) !== undefined) return { ok: false, reason: 'exists' };
+      if (existsSync(file(name))) return { ok: false, reason: 'exists' };
       return { ok: true, template: write(name, text) };
     },
     update(name, text) {

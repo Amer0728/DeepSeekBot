@@ -3,12 +3,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { runBotCreateCli } from '../src/bots/bot-create-cli.js';
 import type { PersonaBotRecord } from '../src/bots/persona-bot.js';
 import { createBridgeMethods, type BridgeMethodsDeps } from '../src/bridge/methods.js';
 import {
+  APPROVAL_TEMPLATE_TEXT_LIMIT,
   changesApprovalPolicy,
   createApprovalTemplateLibrary,
 } from '../src/workspaces/approval-templates.js';
@@ -97,6 +98,27 @@ describe('Approval Template library', () => {
     expect(library.delete('night-shift')).toMatchObject({ ok: true });
     expect(existsSync(join(dir, 'night-shift.md'))).toBe(false);
     expect(library.get('night-shift')).toBeUndefined();
+  });
+
+  it('bounds externally edited template bytes before exposing them for review', () => {
+    const dir = tempDir();
+    const library = createApprovalTemplateLibrary(dir);
+    const path = join(dir, 'external.md');
+    const atLimit = 'x'.repeat(APPROVAL_TEMPLATE_TEXT_LIMIT);
+    writeFileSync(path, atLimit);
+    expect(library.get('external')?.text).toBe(atLimit);
+    for (const text of [atLimit + 'x', '界'.repeat(11_000), 'x'.repeat(65_559)]) {
+      writeFileSync(path, text);
+      expect(library.get('external')).toBeUndefined();
+      expect(library.list().some((template) => template.name === 'external')).toBe(false);
+      expect(library.create('external', MINE)).toEqual({ ok: false, reason: 'exists' });
+      expect(readFileSync(path, 'utf8')).toBe(text);
+    }
+    writeFileSync(
+      join(dir, '.selection.json'),
+      JSON.stringify({ template: 'cautious', padding: atLimit }),
+    );
+    expect(library.global()).toEqual({ kind: 'invalid' });
   });
 
   it('refuses bad names, empty text, unknown templates and changes to built-ins', () => {
@@ -219,6 +241,30 @@ describe('Approval Template bridge methods', () => {
       } as unknown as BridgeMethodsDeps),
     };
   }
+
+  it('uses one fresh global snapshot for a settings response and all template references', () => {
+    const { bridge, library, registry } = methods();
+    library.create('night-shift', MINE);
+    library.setGlobal('night-shift');
+    registry.setApprovalTemplate('bob', '@global');
+    const readGlobal = vi.spyOn(library, 'global');
+    const first = bridge.approvalTemplates({ slug: 'bob' });
+    expect(readGlobal).toHaveBeenCalledTimes(1);
+    expect(first).toMatchObject({
+      value: { globalDefault: 'night-shift', effective: 'night-shift' },
+    });
+    expect(
+      first.ok && first.value.templates.find((template) => template.name === 'night-shift')?.usedBy,
+    ).toEqual(['ada', 'bob']);
+    library.setGlobal('cautious');
+    readGlobal.mockClear();
+    const next = bridge.approvalTemplates({ slug: 'bob' });
+    expect(readGlobal).toHaveBeenCalledTimes(1);
+    expect(next).toMatchObject({ value: { globalDefault: 'cautious', effective: 'cautious' } });
+    expect(
+      next.ok && next.value.templates.find((template) => template.name === 'cautious')?.usedBy,
+    ).toEqual(['bob']);
+  });
 
   it('keeps unreadable global selection distinct from a deliberately empty default', () => {
     const { bridge, dir } = methods();

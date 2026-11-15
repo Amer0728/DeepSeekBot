@@ -461,6 +461,7 @@ import {
   INHERIT_APPROVAL_TEMPLATE,
   createApprovalTemplateLibrary,
   type ApprovalTemplate,
+  type ApprovalTemplateDefault,
   type ApprovalTemplateLibrary,
   type ApprovalTemplateWriteResult,
 } from '../workspaces/approval-templates.js';
@@ -2291,8 +2292,10 @@ function buildBridgeMethods(
       .list()
       .filter((record) => record.approvalTemplate === name)
       .map((record) => record.slug);
-  const templateEntry = (template: ApprovalTemplate): ApprovalTemplateEntry => {
-    const global = approvalTemplateLibrary.global();
+  const templateEntry = (
+    template: ApprovalTemplate,
+    global: ApprovalTemplateDefault,
+  ): ApprovalTemplateEntry => {
     return {
       ...template,
       usedBy: [
@@ -5133,7 +5136,6 @@ function buildBridgeMethods(
       return { ok: true, value: detailOf(result.record) };
     },
     approvalTemplates(payload) {
-      const templates = approvalTemplateLibrary.list().map(templateEntry);
       const global = approvalTemplateLibrary.global();
       if (global.kind === 'invalid')
         return {
@@ -5143,6 +5145,9 @@ function buildBridgeMethods(
             message: 'Approval template selection could not be read.',
           },
         };
+      const templates = approvalTemplateLibrary
+        .list()
+        .map((template) => templateEntry(template, global));
       const globalDefault = global.kind === 'selected' ? global.name : null;
       if (asObject(payload)['slug'] === undefined)
         return { ok: true, value: { templates, globalDefault } };
@@ -5185,7 +5190,10 @@ function buildBridgeMethods(
       if (typeof text !== 'string') return invalidInput('text (Markdown) or from is required');
       const result = approvalTemplateLibrary.create(name, text);
       if (!result.ok) return templateWriteFailure(name, result.reason);
-      return { ok: true, value: { template: templateEntry(result.template) } };
+      return {
+        ok: true,
+        value: { template: templateEntry(result.template, approvalTemplateLibrary.global()) },
+      };
     },
     approvalTemplateUpdate(payload) {
       const object = asObject(payload);
@@ -5195,7 +5203,10 @@ function buildBridgeMethods(
         return invalidInput('name and text (Markdown) are required');
       const result = approvalTemplateLibrary.update(name, text);
       if (!result.ok) return templateWriteFailure(name, result.reason);
-      return { ok: true, value: { template: templateEntry(result.template) } };
+      return {
+        ok: true,
+        value: { template: templateEntry(result.template, approvalTemplateLibrary.global()) },
+      };
     },
     promptParts() {
       return {
