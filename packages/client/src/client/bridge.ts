@@ -1213,7 +1213,27 @@ export function parseChannelMessage(value: unknown): ChannelMessage | undefined 
               : {}),
           }
         : undefined;
+    const review = asRecord(request['approvalReview']);
+    let approvalReview:
+      | import('../../../core/src/workspaces/tool-approval.js').ToolApprovalReview
+      | undefined;
+    if (review?.['kind'] === 'template-unavailable' && typeof review['reason'] === 'string')
+      approvalReview = { kind: 'template-unavailable', reason: review['reason'] };
+    else if (
+      review?.['kind'] === 'review' &&
+      typeof review['reason'] === 'string' &&
+      typeof review['template'] === 'string' &&
+      typeof review['version'] === 'string'
+    )
+      approvalReview = {
+        kind: 'review',
+        template: review['template'],
+        version: review['version'],
+        reason: review['reason'],
+        ...(typeof review['fallback'] === 'string' ? { fallback: review['fallback'] } : {}),
+      };
     toolApprovalRequest = {
+      ...(approvalReview === undefined ? {} : { approvalReview }),
       ...(typeof request['allowAlways'] === 'boolean'
         ? { allowAlways: request['allowAlways'] }
         : {}),
@@ -1358,6 +1378,9 @@ export function parseChannelMessage(value: unknown): ChannelMessage | undefined 
       toolName: auto['toolName'] as string,
       input: auto['input'],
       template: auto['template'] as string,
+      ...(typeof auto['templateVersion'] === 'string'
+        ? { templateVersion: auto['templateVersion'] }
+        : {}),
       outcome: auto['outcome'],
       reason: auto['reason'] as string,
     };
@@ -4375,12 +4398,19 @@ function parseApprovalTemplate(item: unknown): ApprovalTemplateView | undefined 
 export async function loadApprovalTemplates(
   call: BridgeCall,
   slug?: string,
-): Promise<{ templates: ApprovalTemplateView[]; selected: string | null }> {
+): Promise<{
+  templates: ApprovalTemplateView[];
+  selected: string | null;
+  globalDefault?: string | null;
+}> {
   const response = asRecord(
     await unwrap(call, 'approvalTemplates', slug === undefined ? {} : { slug }),
   );
   const templates = response?.['templates'];
   const selected = response?.['selected'] ?? null;
+  const globalDefault = response?.['globalDefault'];
+  if (globalDefault !== undefined && globalDefault !== null && typeof globalDefault !== 'string')
+    throw new Error('invalid global approval selection');
   if (!Array.isArray(templates) || (selected !== null && typeof selected !== 'string'))
     throw new Error('invalid approvalTemplates response');
   return {
@@ -4389,7 +4419,14 @@ export async function loadApprovalTemplates(
       return template === undefined ? [] : [template];
     }),
     selected,
+    ...(globalDefault === undefined ? {} : { globalDefault }),
   };
+}
+export async function setGlobalApprovalTemplate(
+  call: BridgeCall,
+  template: string | null,
+): Promise<void> {
+  await unwrap(call, 'approvalTemplateGlobalSet', { template });
 }
 async function writtenApprovalTemplate(
   call: BridgeCall,
@@ -6304,6 +6341,21 @@ export async function saveMessagingDefaults(
   await unwrap(call, 'messagingDefaultsSet', { input });
   return loadMessagingDefaults(call, input.platform);
 }
+function validReceptionRecovery(value: unknown): boolean {
+  if (value === undefined) return true;
+  const row = asRecord(value);
+  if (row?.['kind'] === 'action-required')
+    return typeof row['reason'] === 'string' && row['reason'].length > 0;
+  return (
+    row?.['kind'] === 'retrying' &&
+    row['reason'] === 'provider-unavailable' &&
+    Number.isSafeInteger(row['attempt']) &&
+    Number(row['attempt']) > 0 &&
+    typeof row['nextRetryAt'] === 'string' &&
+    Number.isFinite(Date.parse(row['nextRetryAt']))
+  );
+}
+
 export async function loadChannelBridges(
   call: BridgeCall,
   channelId: string,
@@ -6325,6 +6377,8 @@ export async function loadChannelBridges(
     !value ||
     value['channelId'] !== channelId ||
     (value['canTargetInbox'] !== undefined && typeof value['canTargetInbox'] !== 'boolean') ||
+    (value['receptionNeedsAttention'] !== undefined &&
+      typeof value['receptionNeedsAttention'] !== 'boolean') ||
     !Array.isArray(value['sources']) ||
     !value['sources'].every(source) ||
     !Array.isArray(value['bridges']) ||
@@ -6341,7 +6395,8 @@ export async function loadChannelBridges(
         Number(row['revision']) > 0 &&
         ['mentions', 'all'].includes(String(row['collection'])) &&
         ['available', 'unavailable', 'rebind-required'].includes(String(row['availability'])) &&
-        ['off', 'connecting', 'receiving', 'unavailable'].includes(String(row['reception']))
+        ['off', 'connecting', 'receiving', 'unavailable'].includes(String(row['reception'])) &&
+        validReceptionRecovery(row['recovery'])
       );
     })
   )
@@ -6517,6 +6572,14 @@ export async function loadMessagingSnapshot(
     !record ||
     !Array.isArray(record['accounts']) ||
     !Array.isArray(record['grants']) ||
+    !record['grants'].every((item: unknown) =>
+      validReceptionRecovery(asRecord(item)?.['recovery']),
+    ) ||
+    (record['identities'] !== undefined &&
+      (!Array.isArray(record['identities']) ||
+        !record['identities'].every((item: unknown) =>
+          validReceptionRecovery(asRecord(item)?.['recovery']),
+        ))) ||
     !Array.isArray(record['intents']) ||
     (record['setup'] !== undefined && !validLarkSetupSnapshot(record['setup'])) ||
     (record['channelTargets'] !== undefined &&

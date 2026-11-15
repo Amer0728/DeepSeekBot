@@ -422,6 +422,8 @@ Slack 的 #1161 候选复用这条 application-defined Messaging 反馈链：che
 
 ### 绑定的应用接收默认流量（ADR-0142）
 
+Binding 的账号接收器和 Grant 的会话接收器分别持有进程内恢复状态。暂时的 `provider-unavailable` 从 250 ms 开始指数退避，上限 30 s，不耗尽重试次数；账号就绪会唤起仍等待它的会话。停用、解绑、撤销、Provider 替换和 Host 关闭取消所属计时器与 lease。永久拒绝进入需处理状态，显式重连沿用既有 Owner 与修订检查。Host 重启只从当前启用的 Binding/Grant 重建，不持久化计时器、不回放消息。状态通过现有 messaging snapshot 与变更通知投影到 Client 和 CLI，界面分别呈现应用连接、消息接收与 Bot 活动（#4242）。
+
 Application-defined IM DM commands (`/commands`, `/help`, `/status`, `/model`, `/effort`, `/stop`, `/new`, `/compact`) reuse this intake's Binding, sender admission, Source Event and deduplication. Only a whole text-only DM is a command; groups, attachments and unrecognized text retain their existing path. Claimed command Admissions are handled without model input or wake; `last_error` retains pending/unconfirmed command work for inspection rather than automatic replay. The Messaging owner serializes commands per PersonaBot across Bindings, rechecks current source authority and management pairing capabilities at execution, and passes a current-authority fence through asynchronous model validation and Session replacement. Model changes use the existing Orchestrator-only customization owner and preserve Assignment inheritance. Replies use the source-bound Outbox's intent, attempt, final-send fences and accepted/failed/unknown outcomes (ADR-0106/0129); a duplicate never executes or sends again. Weixin changes require an admitted paired-owner DM; other platforms require an approved management pairing with current approval capability, or refuse with Web guidance. `/new` and `deepseekbot bot-new-session` share the idle Orchestrator replacement runtime. `/compact`, the Bot DM composer's `/compact` and `deepseekbot bot-compact` share Idle Compaction's DSH `/compact` path: they refuse while the Bot has a running turn or pending Inbox Admission, and load a persisted Orchestrator Session without a model turn before compacting when necessary.
 
 接收以外部身份 Binding 为键，而不是保存的目标。启用的 Binding 把应用的默认流量（私聊和合格的群 @）接收进绑定 Bot 的 Inbox。会话的第一条被接收的消息，会与其 Source Event、Inbox Admission 在同一事务中提交一个隐式会话条目（`messaging_grants` 中 `origin: 'implicit'` 的行），使 Outbox fence、群策略、Channel Bridge 路由和撤销仍挂在同一个锚点上。Binding 的新会话模式（`auto` 或 `ask`）及其上限（每小时 20 个新条目、500 个活跃、200 个等待）决定新会话被接收还是等待处理。屏蔽按 Bot、应用指纹、会话类型和 ID 持久保存；静音只推进 `preferenceRevision`，不改动条目的 Outbox revision。一个 Bot 可以绑定同一平台的多个应用，每个应用仍只属于一个 Bot。Client 中，应用的会话列表管理这些条目并显示已有的 Channel Bridge 路由（新建同步正在围绕外部连接器重新设计），「外部连接器」列出这些路由并保留保存目标的 Service Grant，作为 Provider 无法列出或直接发往会话时的高级后备。
@@ -648,7 +650,11 @@ The application-defined `ConnectionsDialog` presents pairing and device manageme
 
 [ADR-0202](../adr/0202-phone-push-is-a-content-free-projection-of-the-activity-list.md)（[#1655](https://github.com/BotHarness/DeepSeekBot/issues/1655)）：应用定义的 Push delivery 模块（`packages/core/src/push/`）是 Activity 的投影，不另设通知权威。Activity 表或 PersonaBot 的审批、提问、私密输入计数变化时（以及每分钟一次的兜底扫描），模块读取 `action` 项与未读的 `replies` 项，对每台已登记的配对设备只发送一次新项，并经 Expo Push Service 投递；推送标题为频道名（`#名称`，私信为 PersonaBot 名称），正文为所需操作加上工具与主要参数、问题或消息的简短预览（折叠空白，最多 140 字符）；私密输入请求不含内容（[ADR-0213](../adr/0213-phone-push-shows-the-channel-and-a-short-preview.md)）。数据字段只含 Host 标识、Activity 项标识、PersonaBot 标识与读取请求所需的 Channel／消息标识，并携带未处理 Human 操作数作为角标。设备经设备网关的 `/botharness-device/push` 登记 Expo push token、切换各类通知、发送测试通知；撤销设备或 Expo 回报 `DeviceNotRegistered` 时删除 token。发送失败有界重试，结果写入不含内容的 `push` 开发者日志。App 保存每台配对的 Host，点按通知先切换到对应 Host，再打开该审批、提问或私信。
 
-## 已确认目标：Bot 级自动审批策略（尚未实施）
+## 已确认目标：Bot 级自动审批策略（分片实施）
+
+#4211 的首片沿用既有模板文件 owner、Bot Registry 与 Channel Tool Approval owner：全局选择保存在模板目录的 `.selection.json`，Bot 的既有 `approvalTemplate` 字段使用非法模板名标记 `@global` 显式继承；缺字段仍为 Off，新建才写入继承。不新增数据库迁移。认证 Host 的 `approvalTemplateGlobalSet`、既有 Bot setter、在线 CLI 和 Client 的 DSH Select 共用此选择；模板库读失败与主动空值分开。全局选择也参与生效模板的管理识别，ADR-0249 的独立管理授权不变。
+
+Channel Tool Approval 先处理确定性授权，之后固定当次模板正文及 SHA-256 内容版本，才调用 Reviewer。模型只允许当前调用或转 Human；原拒绝触发的暂停／恢复不再运行，旧拒绝记录保留读取兼容。Human 请求的 `approvalReview` 与自动放行的 `templateVersion` 保留当次版本，开发日志同样记录版本；失败卡片给出安全原因。快照不替代现有执行 fence。三部分编辑、卡片规则表、确认删除后的批量回退及 E2 外部效果准入仍属于后续切片。
 
 2026-11-15 的设计访谈确认：Bot 在动态继承全局、选择特定模板、关闭 Reviewer 三态中选一，特定模板完整替换全局，不再叠加 Bot 额外行。模板包含自然语言 Always ask、Always allow 与 free text；确定性授权先处理，Reviewer 只批准当前调用或转 Human，不自主拒绝、不创建规则。Full Access 不一概豁免 E2 的外部效果审批目标。自然语言理解不是硬权限边界，卡片保存的规则仍归具体 Bot 并标注来源。
 

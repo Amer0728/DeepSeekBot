@@ -1,8 +1,10 @@
 # Bot 级自动审批策略
 
-状态：Human 于 2026-11-15 确认的目标设计，尚未实施。本文档不改变运行行为。[English](bot-approval-policy.md)。
+状态：Human 于 2026-11-15 确认的目标设计，分片实施中。本文档不改变运行行为。[English](bot-approval-policy.md)。
 
 [ADR-0342](../adr/0342-bot-approval-selects-one-template-and-keeps-deterministic-authorization-separate.md) 记录长期决策与权衡，本文整合目标行为；GitHub issue 记录交付状态。设计确认不授权实施功能、更改运行权限或推进 SQLite 迁移。
+
+实施首片 #4211 通过既有文件 owner、认证 Host、在线 CLI 和 Client Select 打通全局／Bot 选择及两结果版本化 Review。三部分编辑、规则统一表和确认后的批量删除回退由后续切片交付。
 
 ## 一份有效模板
 

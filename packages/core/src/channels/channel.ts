@@ -313,6 +313,7 @@ export interface ChannelToolAutoApproval {
   toolName: string;
   input: string;
   template: string;
+  templateVersion?: string;
   outcome: 'allowed' | 'rejected';
   reason: string;
 }
