@@ -395,3 +395,49 @@ it('resaves the visible original text after save succeeds but applying fails', a
   expect(template.text).toBe(originalText);
   expect(document.querySelector('textarea')).toBeNull();
 });
+
+it('keeps a custom template named off separate from the Off option', async () => {
+  let selected: string | null = null;
+  const writes: unknown[] = [];
+  const call: BridgeCall = async (endpoint, args) => {
+    if (endpoint === 'approvalTemplates')
+      return {
+        ok: true,
+        value: {
+          templates: [
+            ...templates,
+            { name: 'off', title: 'Off template', description: '', builtIn: false, usedBy: [] },
+          ],
+          globalDefault: selected,
+        },
+      };
+    if (
+      endpoint === 'approvalTemplateGlobalSet' &&
+      args !== null &&
+      typeof args === 'object' &&
+      'template' in args &&
+      (args.template === null || typeof args.template === 'string')
+    ) {
+      writes.push(args);
+      selected = args.template;
+      return { ok: true, value: {} };
+    }
+    throw new Error('Unexpected endpoint');
+  };
+  await render(call);
+  await act(async () => trigger().click());
+  const custom = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+    (button) => button.textContent === 'Off template',
+  );
+  if (!custom) throw new Error('Missing custom off');
+  await act(async () => custom.click());
+  expect(writes).toEqual([{ template: 'off' }]);
+  expect(trigger().textContent).toContain('Off template');
+  await act(async () => trigger().click());
+  const off = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+    (button) => button.textContent === t('autoApproval.off'),
+  );
+  if (!off) throw new Error('Missing Off choice');
+  await act(async () => off.click());
+  expect(writes).toEqual([{ template: 'off' }, { template: null }]);
+});

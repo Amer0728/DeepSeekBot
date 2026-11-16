@@ -819,12 +819,16 @@ deepseekbot approval-template-global-set off
 deepseekbot approval-template-set <bot-id> inherit
 deepseekbot approval-template-set <bot-id> cautious
 deepseekbot approval-template-set <bot-id> off
+deepseekbot approval-template-global-set off --literal-template
+deepseekbot approval-template-set <bot-id> inherit --literal-template
 deepseekbot approval-template show cautious
 deepseekbot approval-template create night-shift --file night-shift.md
 deepseekbot approval-template create my-cautious --from cautious
 deepseekbot approval-template edit night-shift --file night-shift.md
 deepseekbot approval-template delete night-shift
 ```
+
+`off`、`inherit` 仍可作为自定义模板名。选择时加 `--literal-template` 即按字面名称选中；不加时继续保留原有关闭和继承别名。
 
 `list` 返回 `templates` 和 `globalDefault`（模板名或 `null`）。加 `--bot` 时还返回 `selected`（`@global`、特定模板名或 `null`）、`source`（`global`、`specific`、`off`）及 `effective`（模板名或 `null`）。全局设置返回 `{template}`，Bot 设置返回 `{bot}`。写入由认证 Host 持有；不存在的模板不能被选中，全局选择读取失败返回 `approval-selection-unavailable`，不冒充空默认。
 
