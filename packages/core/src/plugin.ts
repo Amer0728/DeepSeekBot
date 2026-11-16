@@ -22,6 +22,7 @@ import {
   type PricedSurface,
 } from './runtime/context-window.js';
 import { createBotRequestRetry } from './runtime/bot-request-retry.js';
+import { createContextOverflowRecovery } from './runtime/context-overflow-recovery.js';
 import { messageText, systemPromptFromLog } from './runtime/prompt-inspection.js';
 
 import { createWindowZoomSetup, WINDOW_ZOOM_SETUP_PATH } from './window-zoom/setup.js';
@@ -246,6 +247,18 @@ import { createMediaVersions, type MediaVersions } from './attachments/media-ver
 import { loadImageProcessor } from './attachments/thumbnails.js';
 import { createChannelLiveHub, CHANNEL_STREAM_PATH, type ChannelLiveHub } from './channels/live.js';
 import type { ChannelDraftEvent } from './channels/draft.js';
+import { watchSkillCatalog } from './skills/refresh.js';
+import { SkillCatalog, type SkillRegistryPort } from './skills/catalog.js';
+import { createSkillViewPort, type SkillAgentPresetsPort } from './skills/agent-view.js';
+import {
+  degradeHostCapability,
+  hostAgentPresets,
+  hostSkillRegistry,
+  installHostSkillInvalidation,
+  onHostSkillsChange,
+  hostSkillAgent,
+  onHostSkillAgentsChange,
+} from './runtime/native-agent-compat.js';
 import { DeveloperModeSkillGate } from './logs/skill.js';
 import { openLogDatabase, type LogDatabase } from './logs/log-db.js';
 import type { ChannelStore } from './channels/store.js';
@@ -1092,6 +1105,7 @@ function initializeCore(
       if (
         topics.some((topic) =>
           [
+            'channels',
             'bindings',
             'grants',
             'bot-schedules',
@@ -2451,6 +2465,14 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     }),
     { global: true },
   );
+  const contextOverflowRecovery = createContextOverflowRecovery({
+    isBotSession: (sessionId) => core.ownership.resolve(sessionId) !== undefined,
+    log: (event) =>
+      ctx.logger[event['outcome'] === 'declined' ? 'warn' : 'info'](
+        `context-overflow-recovery ${JSON.stringify(event)}`,
+      ),
+  });
+  ctx.on('agent/request-error', contextOverflowRecovery, { global: true, prepend: true });
   const approvalTemplates = createApprovalTemplateLibrary(
     join(dshHome, 'botharness', 'approval-templates'),
   );
@@ -3264,8 +3286,72 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     drafts: shareDrafts,
     log: (event) => ctx.logger.info(JSON.stringify(event)),
   });
+  let invalidateNativeSkills: (() => void) | undefined;
+  const skillAgentFor = (slug: string) =>
+    hostSkillAgent(ctx, core.runtime.currentOrchestratorSessionId?.(slug));
+  const skillCatalog = new SkillCatalog({
+    memoryDirFor: (slug) =>
+      core.registry.get(slug) === undefined ? undefined : core.registry.memoryDirFor(slug),
+    viewFor: createSkillViewPort({
+      agentFor: skillAgentFor,
+      presetFor: (slug) =>
+        core.registry.get(slug)?.preset ?? config.agentPreset ?? DEFAULT_AGENT_PRESET,
+      agentPresets: () => hostAgentPresets<SkillAgentPresetsPort<Agent>>(ctx),
+    }),
+  });
+  ctx.effect(() => {
+    if (core.operationalDatabase.mode !== 'ready') return () => undefined;
+    const refresh = watchSkillCatalog({
+      catalog: skillCatalog,
+      invalidateNative: () => invalidateNativeSkills?.(),
+      bots: () =>
+        core.registry.list().flatMap((bot) => {
+          const memoryDir = core.registry.memoryDirFor(bot.slug);
+          return memoryDir === undefined
+            ? []
+            : [
+                {
+                  slug: bot.slug,
+                  memoryDir,
+                  agent: skillAgentFor(bot.slug),
+                  ...(bot.preset === undefined ? {} : { preset: bot.preset }),
+                },
+              ];
+        }),
+      changed: (botSlugs) =>
+        core.live.publishSkillCatalogChanged({
+          botSlugs,
+          channelIds: core.channels
+            .list()
+            .filter(
+              (channel) =>
+                channel.deletedAt === undefined &&
+                channel.members.some((slug) => botSlugs.includes(slug)),
+            )
+            .map((channel) => channel.id),
+        }),
+      diagnostic: (phase, fields) => diagnosticEvents.record('skills', phase, fields),
+    });
+    const offRegistry = core.operationalDatabase.subscribe(({ topics }) => {
+      if (
+        topics.some((topic) =>
+          ['bot-registry', 'member-purged', 'session-ownership'].includes(topic),
+        )
+      )
+        refresh.reconcile();
+    });
+    const offHost = onHostSkillsChange(ctx, () => refresh.hostChanged());
+    const offAgents = onHostSkillAgentsChange(ctx, () => refresh.reconcile());
+    return () => {
+      offAgents();
+      offHost();
+      offRegistry();
+      refresh.close();
+    };
+  }, 'botharness: live skill catalog');
   const bridgeDeps: BridgeMethodsDeps = {
     team,
+    skills: skillCatalog,
     hostVersion: () => release.version(),
     callText: createCallTextHarvest({ calls: () => voiceCalls, attachments: core.attachments }),
     voiceProviders: core.voiceProviders,
@@ -3839,6 +3925,21 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
       },
     });
     developerModeTarget.gate = gate;
+    skillsCtx.effect(() => {
+      const registry = hostSkillRegistry<SkillRegistryPort>(skillsCtx);
+      if (registry === undefined) return degradeHostCapability(skillsCtx, 'skills.list');
+      const detach = skillCatalog.attach(registry);
+      const stop = installHostSkillInvalidation(skillsCtx, (invalidate) => {
+        invalidateNativeSkills = invalidate;
+        return () => {
+          if (invalidateNativeSkills === invalidate) invalidateNativeSkills = undefined;
+        };
+      });
+      return () => {
+        stop();
+        detach();
+      };
+    }, 'botharness: skill catalog');
     skillsCtx.effect(
       () =>
         skills.register({
