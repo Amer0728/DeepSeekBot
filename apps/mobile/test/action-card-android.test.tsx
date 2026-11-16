@@ -30,6 +30,7 @@ vi.mock(
   () => import('../src/ui/primitives/loading-indicator.android'),
 );
 vi.mock('../src/ui/chat/action-card', () => import('../src/ui/chat/action-card.android'));
+vi.mock('../src/ui/chat/approval-diff', () => import('../src/ui/chat/approval-diff.android'));
 vi.mock('../src/ui/design/theme', async () => {
   const { theme } = await import('./compose-card-shim');
   return { useDesignTheme: () => theme };
@@ -37,7 +38,7 @@ vi.mock('../src/ui/design/theme', async () => {
 
 import type { QuestionItem } from '../src/host/wire';
 import type { ApprovalRequest } from '../src/host/requests';
-import { ApprovalCard, type ApprovalCardPort } from '../src/ui/chat/approval-card';
+import type { ApprovalCardPort } from '../src/ui/chat/approval-card';
 import { emptyDraft } from '../src/host/requests';
 import {
   ActionCard,
@@ -51,6 +52,8 @@ import { FileDiff } from '../src/ui/chat/approval-diff.android';
 import { QuestionFields } from '../src/ui/chat/question-fields.android';
 import { Button } from '../src/ui/primitives/button.android';
 import { t } from '../src/ui/strings';
+
+const { ApprovalCard } = await import('../src/ui/chat/approval-card');
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
