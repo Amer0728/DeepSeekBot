@@ -205,7 +205,12 @@ function ApprovalCardContent({
           )}
           {contentCleared || resolution !== undefined ? null : (
             <CardButtons>
-              <Button symbol="refresh" label={t.tryAgain} onPress={() => void load()} />
+              <Button
+                testID="approval-retry"
+                symbol="refresh"
+                label={t.tryAgain}
+                onPress={() => void load()}
+              />
             </CardButtons>
           )}
         </ActionCard>
@@ -323,7 +328,12 @@ function ApprovalCardContent({
         )}
         {phase.kind !== 'failed' ? null : (
           <CardButtons>
-            <Button symbol="refresh" label={t.tryAgain} onPress={() => void load()} />
+            <Button
+              testID="approval-retry"
+              symbol="refresh"
+              label={t.tryAgain}
+              onPress={() => void load()}
+            />
           </CardButtons>
         )}
         <CardButtons stack>

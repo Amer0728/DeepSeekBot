@@ -75,7 +75,7 @@ type BrowseRow =
   | { kind: 'loading'; key: string }
   | { kind: 'empty'; key: string; text: string; tone?: 'warning' };
 
-const OFF = 'off';
+const OFF = '@off';
 
 export function OpenFolderTarget({ listing }: { listing: Loadable<HostFolderListing> }) {
   const t = useStrings();
@@ -370,6 +370,12 @@ export function WorkspaceSheet({
         onTemplates(previous);
         throw cause;
       }
+      try {
+        onTemplates(await settings.loadTemplates());
+      } catch (cause) {
+        onTemplates({ templates: previous.templates, selected: name });
+        throw cause;
+      }
     });
   };
 
@@ -619,7 +625,8 @@ export function WorkspaceSheet({
       : templates.status === 'failed'
         ? [{ kind: 'failed', key: 'templates-failed', text: templates.error }]
         : [
-            ...(templates.value.globalDefault === undefined
+            ...(templates.value.globalDefault === undefined &&
+            templates.value.selected !== INHERIT_APPROVAL_TEMPLATE
               ? []
               : [
                   {

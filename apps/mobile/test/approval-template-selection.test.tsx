@@ -72,11 +72,15 @@ function named(text: string): HTMLButtonElement {
   if (!row) throw new Error('Missing choice ' + text);
   return row;
 }
-async function mount(initial: string | null, globalDefault: string | null | undefined) {
+async function mount(
+  initial: string | null,
+  globalDefault: string | null | undefined,
+  extra: ApprovalTemplates['templates'] = [],
+) {
   const fake = new FakeHost();
   let selected = initial;
   fake.methods.set('approvalTemplates', () => ({
-    templates: [{ name: 'cautious', title: 'Cautious', description: 'Read carefully.' }],
+    templates: [{ name: 'cautious', title: 'Cautious', description: 'Read carefully.' }, ...extra],
     selected,
     ...(globalDefault === undefined ? {} : { globalDefault }),
   }));
@@ -147,4 +151,38 @@ it('does not offer unsupported inheritance on legacy Hosts that omit global sele
     ),
   ).toBe(false);
   expect(named(t.autoApprovalOff).getAttribute('aria-pressed')).toBe('true');
+});
+
+it('refreshes the actual global default after selecting inheritance', async () => {
+  const fake = await mount(null, 'cautious');
+  fake.methods.set('approvalTemplates', () => ({
+    templates: [{ name: 'get-work-done', title: 'Get the work done', description: '' }],
+    selected: '@global',
+    globalDefault: 'get-work-done',
+  }));
+  await act(async () => named(t.autoApprovalInherit).click());
+  expect(named(t.autoApprovalInherit).textContent).toContain(t.autoApprovalGetWorkDone);
+  expect(fake.calls.filter((call) => call.method === 'botApprovalTemplateSet')).toHaveLength(1);
+});
+it('keeps confirmed inheritance but marks the source unknown when readback fails', async () => {
+  const fake = await mount(null, 'cautious');
+  fake.methods.set('approvalTemplates', () => {
+    throw new Error('read unavailable');
+  });
+  await act(async () => named(t.autoApprovalInherit).click());
+  const inherited = named(t.autoApprovalInherit);
+  expect(inherited.getAttribute('aria-pressed')).toBe('true');
+  expect(inherited.textContent).toContain(t.contextUnavailable);
+  expect(inherited.textContent).not.toContain(t.autoApprovalCautious);
+  await act(async () => inherited.click());
+  expect(fake.calls.filter((call) => call.method === 'botApprovalTemplateSet')).toHaveLength(1);
+});
+it('can select a custom off template separately from Off', async () => {
+  const fake = await mount(null, null, [{ name: 'off', title: 'Off template', description: '' }]);
+  await act(async () => named('Off template').click());
+  expect(named('Off template').getAttribute('aria-pressed')).toBe('true');
+  expect(named(t.autoApprovalOff).getAttribute('aria-pressed')).toBe('false');
+  expect(
+    fake.calls.filter((call) => call.method === 'botApprovalTemplateSet').map((call) => call.args),
+  ).toEqual([{ slug: 'ada', template: 'off' }]);
 });

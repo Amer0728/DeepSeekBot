@@ -61,6 +61,48 @@ function fakeRegistry(records: Partial<PersonaBotRecord>[]) {
 }
 
 describe('Approval Template library', () => {
+  it('lets Human management replace and remove oversized custom files without unbounded review reads', () => {
+    const dir = tempDir();
+    const library = createApprovalTemplateLibrary(dir);
+    const file = join(dir, 'external.md');
+    writeFileSync(file, 'x'.repeat(APPROVAL_TEMPLATE_TEXT_LIMIT + 1));
+    expect(library.get('external')).toBeUndefined();
+    expect(library.create('external', MINE)).toMatchObject({ ok: false, reason: 'exists' });
+    expect(library.update('external', MINE)).toMatchObject({ ok: true });
+    expect(library.get('external')?.text).toBe(MINE);
+    writeFileSync(file, 'x'.repeat(APPROVAL_TEMPLATE_TEXT_LIMIT + 1));
+    expect(library.delete('external')).toEqual({ ok: true });
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('uses the actual library when the Bot directory resolves outside its Profile', () => {
+    const home = tempDir(),
+      external = tempDir();
+    const bots = join(home, 'bots');
+    nativeFs.symlinkSync(external, bots, 'junction');
+    const registry = { ...fakeRegistry([]), rootDir: nativeFs.realpathSync(bots) };
+    const library = createApprovalTemplateLibrary(join(home, 'approval-templates'));
+    library.create('night-shift', MINE);
+    library.setGlobal('night-shift');
+    const inUse = approvalTemplateInUse(registry, library);
+    expect(
+      requiresHumanToolApproval(
+        'bash',
+        { command: 'echo changed > approval-templates/night-shift.md' },
+        inUse,
+      ),
+    ).toBe(true);
+    expect(
+      requiresHumanToolApproval(
+        'bash',
+        { command: 'echo draft > approval-templates/unused.md' },
+        inUse,
+      ),
+    ).toBe(false);
+    library.setGlobal(null);
+    expect(inUse('night-shift')).toBe(false);
+  });
+
   it('keeps each Human template as one Markdown file next to the read-only built-ins', () => {
     const dir = join(tempDir(), 'approval-templates');
     const library = createApprovalTemplateLibrary(dir);
@@ -233,7 +275,10 @@ describe('self-escalation guard for Approval Templates', () => {
 
   it('turns a Shell edit of a template a Bot uses into a Human approval', () => {
     const registry = fakeRegistry([{ slug: 'ada', approvalTemplate: 'night-shift' }]);
-    const templateInUse = approvalTemplateInUse(registry);
+    const templateInUse = approvalTemplateInUse(
+      registry,
+      createApprovalTemplateLibrary(join(tempDir(), 'approval-templates')),
+    );
     expect(
       requiresHumanToolApproval(
         'bash',
@@ -484,6 +529,25 @@ describe('deepseekbot approval-template', () => {
     ]);
   });
 
+  it('selects literal reserved-looking template names without changing legacy Off or inheritance', async () => {
+    const live = await host();
+    for (const argv of [
+      ['approval-template-global-set', 'off', '--literal-template'],
+      ['approval-template-set', 'ada', 'off', '--literal-template'],
+      ['approval-template-set', 'ada', 'inherit', '--literal-template'],
+      ['approval-template-global-set', 'off'],
+      ['approval-template-set', 'ada', 'inherit'],
+    ])
+      expect((await invoke(argv, live.url)).code).toBe(0);
+    expect(live.calls).toEqual([
+      { method: 'approvalTemplateGlobalSet', args: { template: 'off' } },
+      { method: 'botApprovalTemplateSet', args: { slug: 'ada', template: 'off' } },
+      { method: 'botApprovalTemplateSet', args: { slug: 'ada', template: 'inherit' } },
+      { method: 'approvalTemplateGlobalSet', args: { template: null } },
+      { method: 'botApprovalTemplateSet', args: { slug: 'ada', template: '@global' } },
+    ]);
+  });
+
   it('refuses bad usage before calling the Host', async () => {
     const live = await host();
     for (const argv of [
@@ -493,6 +557,7 @@ describe('deepseekbot approval-template', () => {
       ['approval-template', 'create', 'mine', '--from', 'cautious', '--text-stdin'],
       ['approval-template', 'edit'],
       ['approval-template', 'delete', 'a', 'b'],
+      ['approval-template', 'list', '--literal-template'],
     ]) {
       const result = await invoke(argv, live.url);
       expect(result.code, argv.join(' ')).not.toBe(0);
