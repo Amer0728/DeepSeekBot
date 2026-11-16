@@ -16,6 +16,7 @@ import { GENUI_STYLE_GUIDANCE } from '../channels/genui-appearance.js';
 import type { GenuiPreviewDiagnostic } from './genui-preview.js';
 import { assertOrchestratorWorkingDirectory } from './orchestrator-working-directory.js';
 import { TOB_CLI_PROMPT } from '../tob/service.js';
+import { ModelFreeTobCliInvocation } from '../tob/cli-invocation.js';
 import { AssignmentInboxAcceptanceUncertainError } from './assignment-delivery.js';
 import type { Context } from '@deepseek-ai/cordis';
 import { mkdirSync } from 'node:fs';
@@ -368,6 +369,7 @@ export interface DshAgentPresetHost {
 }
 
 export interface DshBotAgentAdapterOptions {
+  tobCliInvocation?: ModelFreeTobCliInvocation;
   onGenuiDiagnostic?: (event: GenuiPreviewDiagnostic) => void;
   genuiPreviewBrowserPath?: string;
   genuiAttachmentContext?: Pick<Context, 'get'>;
@@ -610,6 +612,7 @@ class DshBotAgentAdapter implements BotAgentAdapter {
   >();
   readonly #runs = new Map<string, ActiveRun>();
   readonly #modelFreeTobTurns = new Map<string, ModelFreeTobTurn>();
+  readonly #tobCliInvocation: ModelFreeTobCliInvocation;
   readonly #stopping = new Set<string>();
   readonly #stoppedBots = new Set<string>();
   readonly #humanStops = new Set<string>();
@@ -623,6 +626,7 @@ class DshBotAgentAdapter implements BotAgentAdapter {
   #closed = false;
 
   constructor(options: DshBotAgentAdapterOptions) {
+    this.#tobCliInvocation = options.tobCliInvocation ?? new ModelFreeTobCliInvocation();
     this.#onGenuiDiagnostic = options.onGenuiDiagnostic;
     this.#genuiPreviewBrowserPath = options.genuiPreviewBrowserPath;
     this.#genuiAttachmentContext = options.genuiAttachmentContext;
@@ -913,14 +917,41 @@ class DshBotAgentAdapter implements BotAgentAdapter {
           : undefined;
       const result = await (async () => {
         try {
-          return await executeNativeTool(agent.ctx, {
-            callId: ToolCallId('tob-cli-' + randomUUID()),
-            name: 'deepseekbot_cli',
-            arguments: turn.command,
-            agent,
-            signal: AbortSignal.any([signal, turn.signal]),
-            ...(toolSet === undefined ? {} : { toolSet }),
-          });
+          if (!toolSet)
+            throw new DirectBotToolError('tool-failed', 'Native tool selection is unavailable');
+          const callId = ToolCallId('tob-cli-' + randomUUID());
+          const invocationSignal = AbortSignal.any([signal, turn.signal]);
+          return await this.#tobCliInvocation.run(
+            {
+              agent,
+              callId,
+              command: turn.command,
+              toolSet,
+              signal: invocationSignal,
+              requireCurrentTurn: () => {
+                const current = this.#runs.get(agent.session.id);
+                if (
+                  this.#closed ||
+                  this.#modelFreeTobTurns.get(agent.session.id) !== pending ||
+                  pending.outcome ||
+                  current !== active ||
+                  current.run.tobCliTurn !== turn
+                )
+                  throw new DirectBotToolError('agent-context-expired', 'The owned CLI turn ended');
+                current.run.requireContent?.();
+                turn.signal.throwIfAborted();
+              },
+            },
+            () =>
+              executeNativeTool(agent.ctx, {
+                callId,
+                name: 'deepseekbot_cli',
+                arguments: turn.command,
+                agent,
+                signal: invocationSignal,
+                toolSet,
+              }),
+          );
         } finally {
           toolSet?.dispose();
         }

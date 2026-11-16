@@ -90,6 +90,7 @@ import {
   TOB_MAINTENANCE_CAPABILITIES,
 } from './tob/cli-maintenance-operations.js';
 import { cliModulePath, installTobCliShell } from './tob/cli-shell.js';
+import { ModelFreeTobCliInvocation } from './tob/cli-invocation.js';
 import { createTobVoiceOperations, TOB_VOICE_CAPABILITIES } from './tob/cli-voice-operations.js';
 import {
   LOCAL_VOICE_SKILL_CONTENT,
@@ -1709,7 +1710,9 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
   );
   const turnRefusals = new Map<string, string | TeamError>();
   ctx.effect(() => () => turnRefusals.clear(), 'botharness: refused Turn reasons');
+  const tobCliInvocation = new ModelFreeTobCliInvocation();
   const agentAdapter = createDshBotAgentAdapter({
+    tobCliInvocation,
     ...(config.genuiPreviewBrowserPath === undefined
       ? {}
       : { genuiPreviewBrowserPath: config.genuiPreviewBrowserPath }),
@@ -1762,9 +1765,18 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
         (name, args) => nativeExecutionRoot(core, agent.session, name, args),
         (shellCtx, shell) =>
           installTobCliShell(shellCtx, shell, {
-            nativeCli: () =>
-              core.tob.isTob(core.ownership.resolve(agent.session.id)?.botSlug ?? '') &&
-              agentAdapter.ownsModelFreeTobTurn(agent),
+            nativeCli: {
+              available: () =>
+                core.tob.isTob(core.ownership.resolve(agent.session.id)?.botSlug ?? '') &&
+                agentAdapter.ownsModelFreeTobTurn(agent),
+              register: (definition) =>
+                tobCliInvocation.register(agent, definition, () => {
+                  if (!core.runtime.captureTobCliAuthority)
+                    throw new TobError('tob-authority-required');
+                  return core.runtime.captureTobCliAuthority(agent.session.id);
+                }),
+              require: (execution) => tobCliInvocation.require(execution),
+            },
             capture: (execution) => {
               const actor = execution.agent;
               if (
@@ -2719,7 +2731,8 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
         return next();
       if (
         !isDshGovernedTool(execution.name) &&
-        !requiresHumanToolApproval(execution.name, execution.arguments, templateInUse)
+        !requiresHumanToolApproval(execution.name, execution.arguments, templateInUse) &&
+        execution.name !== 'deepseekbot_cli'
       )
         return next();
       const storeDenial = credentialStoreDenial(
@@ -2942,6 +2955,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
       }
       const denial = permissionDenial(agent.session);
       if (denial !== undefined) return { kind: 'deny', reason: denial };
+      if (tobCliInvocation.delegate(execution)) return next();
       if (!requiresHumanToolApproval(execution.name, execution.arguments, templateInUse))
         return next();
       const eachUse = execution.name === 'secret_cli' || execution.name === 'secret_mcp_connect';
@@ -3047,7 +3061,10 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
   );
 
   installNativeSearchResultGuard(ctx, core, (session) => sessionHasFullAccess(core, session.id));
-  ctx.tools.guard(({ agent, name, arguments: args, token }) => {
+  ctx.tools.guard((execution) => {
+    const invocationDenial = tobCliInvocation.guard(execution);
+    if (invocationDenial) return invocationDenial;
+    const { agent, name, arguments: args, token } = execution;
     const approvalGuard = approvedCalls.get(token);
     if (approvalGuard && !approvalGuard(name, args))
       return 'Approval authority or operation changed before execution';
