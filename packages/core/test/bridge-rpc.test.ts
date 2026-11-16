@@ -872,6 +872,7 @@ describe('bridge typert service', () => {
       'messageSearch',
       'channelUnreadCounts',
       'channelAllBotPreview',
+      'channelSkillCatalog',
       'channelSend',
       'channelSendStatus',
       'channelGenuiView',
@@ -1240,7 +1241,9 @@ describe('bridge typert service', () => {
       'assignmentReply',
       'allBotMention',
       'genuiReply',
+      'skillInvocations',
     ]);
+    expect(parameterNames(service.channelSkillCatalog)).toEqual(['channelId']);
     expect(parameterNames(service.botAttention)).toEqual(['slug', 'limit', 'cursor', 'state']);
     expect(parameterNames(service.humanAssignmentContext)).toEqual([
       'slug',

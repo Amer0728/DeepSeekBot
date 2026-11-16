@@ -214,6 +214,8 @@ From a built checkout, `node scripts/cli-smoke.mjs --preset <id> [--zip ./shared
 deepseekbot send <bot-id> --body "Reply with QA_OK" --timeout 60
 deepseekbot send <bot-id> --body-stdin --message-id human-<UUID>
 deepseekbot send <bot-id> --body "Yes, this one" --reply-to <message-id>
+deepseekbot skills-list --bot <bot-id> [--query <text>]
+deepseekbot send <bot-id> --body "/summarize-pr #42" --skill bot:<bot-id>/summarize-pr
 deepseekbot send-status <bot-id> --message-id <receipt-message-id>
 deepseekbot channel-messages <channel-id> --host http://127.0.0.1:31917 --limit 20
 deepseekbot tool-approval-status <channel-id> --message-id <card-id>
@@ -235,6 +237,8 @@ deepseekbot workspace-options
 deepseekbot folder-browse [<folder-path>] [--offset <n>]
 deepseekbot grant-create <bot-id> --workspace <workspace-id>
 ```
+
+`skills-list` returns the Skills the `/` menu offers in that conversation, ranked like the menu by `--query` (name prefix, then name subsequence, then description): Host Skills (`owner.kind` `host`) and the Project Skills under each PersonaBot's Memory Repository `.agents/skills` or `.dsh/skills` (`owner.kind` `bot`), as that Bot's Orchestrator sees them. Pass `--channel <channel-id>` instead of `--bot` for any Channel. `send --skill <owner>/<name>` (owner `host` or `bot:<bot-id>`, repeatable) turns the first unused `/name` token in the body into a Skill Invocation for each flag, in flag order (the token must start and end at whitespace or a body boundary; the send is refused if no unused occurrence remains): the Host stores the Skill's text as it is now with the message and the Bot reads it as a `<skill_invocation>` block. The Skill does not choose who replies; a Skill that is gone refuses with `skill-unavailable`, and Skill text longer than 64,000 characters refuses with `skill-too-large` instead of being truncated. See [ADR-0346](adr/0346-skill-invocation-is-snapshotted-text-that-addresses-no-one.md).
 
 `tool-approval-status` returns `status` and, while the card is still `pending`, its `expiresAt`, the time the Web card counts down to. `--outcome allowed-always-kind` is the `secret_cli` card's "Always allow this kind": it allows this call and saves a rule for the same program, account and environment variable names, which `tool-approval-rules` lists with kind `secret-cli`; any other card refuses it.
 
