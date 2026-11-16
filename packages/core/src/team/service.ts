@@ -2,6 +2,7 @@ import { audienceContains, type BotVisibility } from './bot-contract.js';
 import { TeamBots } from './bots.js';
 import { SpeakerPolicy } from './speaker-policy.js';
 import { TeamPrivateContent } from './private-content.js';
+import type { ConfinementStatus } from '../execution/linux-confinement.js';
 import { accountSpaceFiles, prepareSpaceTransfer } from '../workspaces/space-lifecycle.js';
 import type { WorkspaceSpaces } from '../workspaces/spaces.js';
 import { TeamApprovals } from './approvals.js';
@@ -57,6 +58,7 @@ const memberSchema = z.object({
 export type TeamMember = z.infer<typeof memberSchema>;
 export interface TeamModeView {
   isolation: 'trial' | 'enforced';
+  confinement?: ConfinementStatus;
   enabled: boolean;
   privateAccessNotice?: true;
   activeMembers: number;
@@ -210,6 +212,7 @@ export class TeamService {
   private peerFactory: ((principal: MemberPrincipal) => PeerScope) | undefined;
   private invalidate: () => void = () => {};
   private urls: () => string[] = () => [];
+  private confinement: () => ConfinementStatus | undefined = () => undefined;
   private readonly ensureTob: ((human: HumanContext) => Promise<unknown>) | undefined;
   private readonly now: () => number;
   private readonly log: (phase: string, facts: Record<string, string | number | boolean>) => void;
@@ -311,6 +314,18 @@ export class TeamService {
     };
   }
 
+  bindConfinement(status: () => ConfinementStatus | undefined): void {
+    this.confinement = status;
+  }
+
+  enabled(): boolean {
+    return this.settings().enabled;
+  }
+
+  isolation(): 'trial' | 'enforced' {
+    return this.confinement()?.enforcement === 'full' ? 'enforced' : 'trial';
+  }
+
   private settings() {
     return z
       .object({ enabled: z.coerce.boolean(), insecure_http_allowed: z.coerce.boolean() })
@@ -400,8 +415,10 @@ export class TeamService {
     const settings = this.settings();
     const member = this.member(human.humanId);
     if (!member) throw new TeamError('credentials-invalid');
+    const confinement = this.confinement();
     return {
-      isolation: 'trial',
+      isolation: confinement?.enforcement === 'full' ? 'enforced' : 'trial',
+      ...(confinement === undefined || !this.isOwner(human) ? {} : { confinement }),
       enabled: settings.enabled,
       ...(settings.enabled ? { privateAccessNotice: true as const } : {}),
       activeMembers: this.db.read((db) =>
@@ -570,7 +587,7 @@ export class TeamService {
     );
     this.spaceProvider?.().ensureAccount(humanId);
     this.invalidate();
-    return { member: this.member(humanId)!, initialPassword, isolation: 'trial' };
+    return { member: this.member(humanId)!, initialPassword, isolation: this.isolation() };
   }
 
   private byUsername(username: string): TeamMember | undefined {
