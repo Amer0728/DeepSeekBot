@@ -366,6 +366,9 @@ describe('plugin entry', () => {
         apply(ctx, { enabled: true });
         const core = ctx.get('botharness') as unknown as BotHarnessCore;
         core.registry.create({ slug: 'ada', displayName: 'Ada' });
+        const origin = core.channels.getOrCreateDm(OWNER_HUMAN_CONTEXT, 'ada', 'Ada');
+        if (!origin) throw new Error('Missing device fixture DM');
+        vi.spyOn(core.runtime, 'askChannel').mockReturnValue(origin.id);
         core.ownership.claim({
           sessionId: 'device-session',
           botSlug: 'ada',

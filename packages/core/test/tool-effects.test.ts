@@ -749,3 +749,48 @@ it.each([
       expect(toolApprovalRequired('deepseekbot ' + argv[0], { patch: { argv } }, true)).toBe(true);
   },
 );
+
+it.each(['input', 'open', 'status', 'takeover'])(
+  'keeps computer-video %s effects aligned with actual desktop input',
+  (action) => {
+    const argv = ['computer-video', action, '--args-stdin'];
+    const expected = {
+      changes: action === 'input' ? 'irreversible' : 'reversible',
+      reach: action === 'input' ? 'external' : 'local',
+      personalData: true,
+    };
+    expect(cliEffects(argv)).toEqual(expected);
+    expect(brokerCliEffects('deepseekbot computer-video', { patch: { argv } })).toEqual(expected);
+    expect(toolEffects('deepseekbot_cli', { argv })).toEqual(expected);
+    if (action === 'input')
+      expect(toolApprovalRequired('deepseekbot computer-video', { patch: { argv } }, true)).toBe(
+        true,
+      );
+  },
+);
+it.each([false, true])(
+  'declares template deletion preview versus permanent confirm (%s)',
+  (confirmed) => {
+    const argv = [
+      'approval-template',
+      'delete',
+      'qa',
+      ...(confirmed ? ['--confirm', '--delete-revision', 'a'.repeat(64)] : []),
+    ];
+    const expected = {
+      changes: confirmed ? 'irreversible' : 'none',
+      reach: 'local',
+      personalData: true,
+      ...(confirmed ? { authority: 'management' } : {}),
+    };
+    expect(cliEffects(argv)).toEqual(expected);
+    expect(brokerCliEffects('deepseekbot approval-template', { patch: { argv } })).toEqual(
+      expected,
+    );
+    expect(toolEffects('deepseekbot_cli', { argv })).toEqual(expected);
+    if (confirmed)
+      expect(toolApprovalRequired('deepseekbot approval-template', { patch: { argv } }, true)).toBe(
+        true,
+      );
+  },
+);

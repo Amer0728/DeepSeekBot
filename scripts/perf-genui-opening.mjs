@@ -1,3 +1,4 @@
+import { createPrivateHostRedactor } from './private-host-redaction.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -58,14 +59,7 @@ const git = (...args) => execFileSync('git', args, { cwd: root, maxBuffer: 20e6 
 const budgetPath = resolve(values.budget);
 const budget = readBudget(budgetPath);
 const runId = randomUUID();
-const privateUrl = new URL(instance.url);
-const redact = (error) => {
-  let text = String(error).replaceAll(instance.url, '[private Host URL]');
-  for (const value of [privateUrl.searchParams.get('token'), privateUrl.hash.slice(1)]) {
-    if (value) text = text.replaceAll(value, '[redacted]');
-  }
-  return text;
-};
+const redact = createPrivateHostRedactor(instance.url);
 const manifest = {
   runId,
   startedAt: new Date().toISOString(),

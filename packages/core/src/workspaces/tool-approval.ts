@@ -7,7 +7,7 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { ToolExecution } from '@deepseek-ai/dsh-tools';
-import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval';
+import type { ApprovalOutcome, ApprovalService } from '@deepseek-ai/dsh-user-approval';
 
 import { dmChannelId, type ChannelMessage } from '../channels/channel.js';
 import type { ChannelStore } from '../channels/store.js';
@@ -1124,6 +1124,25 @@ export class ChannelToolApproval {
     pending.signal?.removeEventListener('abort', pending.abort);
     pending.resolve(outcome);
   }
+}
+
+export async function requestRequiredToolApproval({
+  approval,
+  channelApproval,
+  ownership,
+  request,
+  forceChannel,
+}: {
+  approval: Pick<ApprovalService, 'request'>;
+  channelApproval: Pick<ChannelToolApproval, 'ask'>;
+  ownership: Pick<SessionOwnership, 'resolve'>;
+  request: Parameters<ApprovalService['request']>[0];
+  forceChannel: boolean;
+}): Promise<ApprovalOutcome> {
+  const owner = ownership.resolve(request.agent.session.id);
+  if (forceChannel && owner !== undefined && owner.parentSessionId === undefined)
+    return (await channelApproval.ask(request)) ?? 'unavailable';
+  return approval.request(request);
 }
 
 export function registerChannelToolApproval(

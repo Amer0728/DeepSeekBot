@@ -299,8 +299,12 @@ export function ApprovalTemplateLibrarySettings({
         if (deletionGeneration.current === generation)
           setDeleting({ template, kind: 'ready', preview });
       },
-      () => {
+      (cause: unknown) => {
         if (deletionGeneration.current !== generation) return;
+        if (cause instanceof BridgeCallError && cause.code === 'unknown-template') {
+          cancelDeletion();
+          return;
+        }
         setDeleting({ template, kind: 'failed' });
         setError(t('autoApproval.library.deletePreviewFailed'));
       },
@@ -312,8 +316,18 @@ export function ApprovalTemplateLibrarySettings({
       if (
         deletionGeneration.current === generation &&
         !next.templates.some((template) => template.name === name)
-      )
-        cancelDeletion();
+      ) {
+        try {
+          await previewApprovalTemplateDeletion(call, name);
+        } catch (cause: unknown) {
+          if (
+            deletionGeneration.current === generation &&
+            cause instanceof BridgeCallError &&
+            cause.code === 'unknown-template'
+          )
+            cancelDeletion();
+        }
+      }
     } catch {
       setGlobalDefault(undefined);
       setGlobalError(true);
@@ -324,10 +338,8 @@ export function ApprovalTemplateLibrarySettings({
     const generation = deletionGeneration.current;
     setBusy(true);
     void reload()
-      .then((next) => {
-        if (deletionGeneration.current !== generation) return;
-        if (next.templates.some((entry) => entry.name === template.name)) beginDeletion(template);
-        else cancelDeletion();
+      .then(() => {
+        if (deletionGeneration.current === generation) beginDeletion(template);
       })
       .catch(() => {
         setGlobalDefault(undefined);

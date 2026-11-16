@@ -1,3 +1,4 @@
+import { createPrivateHostRedactor } from './private-host-redaction.mjs';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -102,6 +103,7 @@ const pkg = readdirSync(store).find((name) => name.startsWith('puppeteer@'));
 const puppeteer = createRequire(resolve(store, pkg, 'node_modules/'))('puppeteer');
 assert.ok(process.env.BH_E2E_INSTANCE, 'Set BH_E2E_INSTANCE to the task-owned instance.json');
 const instance = JSON.parse(readFileSync(process.env.BH_E2E_INSTANCE, 'utf8'));
+const redact = createPrivateHostRedactor(instance.url);
 const out = resolve(options.out);
 mkdirSync(out, { recursive: true });
 const seconds = Number(options.seconds);
@@ -187,7 +189,7 @@ await localeSession.send('Emulation.setUserAgentOverride', {
   acceptLanguage: 'en-US,en',
 });
 const errors = [];
-page.on('pageerror', (error) => errors.push(error.message));
+page.on('pageerror', (error) => errors.push(redact(error.message)));
 const setup = { phase: 'browser-ready', rpcCalls: 0, pending: [], recent: [] };
 const saveSetup = () =>
   writeFileSync(resolve(out, options.label + '.setup.json'), JSON.stringify(setup, null, 2));
@@ -499,10 +501,10 @@ try {
       {
         setup,
         seedFailure: error?.timelineSeed,
-        pageErrors: errors.slice(-20).map((message) => message.slice(0, 500)),
+        pageErrors: errors.slice(-20).map((message) => redact(message).slice(0, 500)),
         error:
           error instanceof Error
-            ? { name: error.name, message: error.message.slice(0, 1000) }
+            ? { name: error.name, message: redact(error.message).slice(0, 1000) }
             : { name: 'unknown' },
       },
       null,
@@ -512,7 +514,7 @@ try {
   const shot = resolve(out, `${options.label}.failure.png`);
   await page.screenshot({ path: shot }).catch(() => {});
   console.error(`perf run failed; page screenshot: ${shot}`);
-  throw error;
+  throw new Error(redact(error instanceof Error ? (error.stack ?? error.message) : error));
 } finally {
   await browser.close();
 }

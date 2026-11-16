@@ -350,7 +350,9 @@ it.each(['immediate', 'retry'] as const)(
         };
       }
       if (endpoint === 'approvalTemplateDeletePreview')
-        return { ok: true, value: { preview: deletePreview } };
+        return deleted
+          ? { ok: false, error: { code: 'unknown-template', message: 'removed', details: {} } }
+          : { ok: true, value: { preview: deletePreview } };
       if (endpoint === 'approvalTemplateDelete') {
         writes++;
         deleted = true;
@@ -892,3 +894,50 @@ it.each([
     expect(selections).toBe(2);
   },
 );
+
+it('retains an unreadable template deletion failure when the readable list omits its file', async () => {
+  let omitted = false;
+  let writes = 0;
+  let previews = 0;
+  const call: BridgeCall = async (endpoint) => {
+    if (endpoint === 'approvalTemplates')
+      return {
+        ok: true,
+        value: {
+          templates: [...templates, ...(omitted ? [] : [customTemplate])],
+          globalDefault: 'cautious',
+        },
+      };
+    if (endpoint === 'approvalTemplateDeletePreview') {
+      previews++;
+      return { ok: true, value: { preview: { ...deletePreview, contentUnavailable: omitted } } };
+    }
+    if (endpoint === 'approvalTemplateDelete') {
+      writes++;
+      omitted = true;
+      return {
+        ok: false,
+        error: {
+          code: 'approval-template-delete-unavailable',
+          message: 'File still exists',
+          details: {},
+        },
+      };
+    }
+    throw new Error('Unexpected ' + endpoint);
+  };
+  await openDeletion(call);
+  await act(async () => confirmDeletion().click());
+  expect(document.body.textContent).toContain(t('autoApproval.library.deleteUnconfirmed'));
+  expect(confirmDeletion().disabled).toBe(true);
+  expect(previews).toBe(2);
+  const reload = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === t('autoApproval.reload'),
+  );
+  if (!reload) throw new Error('Missing recovery');
+  await act(async () => reload.click());
+  expect(document.body.textContent).toContain(t('autoApproval.library.deleteContentUnavailable'));
+  expect(confirmDeletion().disabled).toBe(false);
+  expect(previews).toBe(3);
+  expect(writes).toBe(1);
+});

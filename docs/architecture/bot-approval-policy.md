@@ -125,3 +125,5 @@ The Web and mobile Human approval card keeps its full request content after Allo
 Typed Tob command preparation must provide a review proposal whenever the shared declaration requires approval. A completed operation receipt is explicitly read back without starting the effect again; caller-supplied completion claims cannot select that path.
 
 Tool approval requests and Reviewer records for an Orchestrator stay in the actual originating DM or Group. A participant DM never falls back to the principal’s legacy DM. An unavailable or mismatched origin refuses review and card creation; this does not grant the participant any approval permission. Existing approver and audience checks still control visibility and decisions.
+
+Authenticated direct `bot-tool` requests bind their transient native execution to the calling Human’s DM, before dispatch, and remove that binding when the call settles. Tool targets and historical Channel placements do not select the approval recipient. A missing calling context does not fall back to another Human.

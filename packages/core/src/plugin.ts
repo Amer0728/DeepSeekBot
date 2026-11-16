@@ -322,6 +322,7 @@ import {
 import {
   ChannelToolApproval,
   registerChannelToolApproval,
+  requestRequiredToolApproval,
   type ToolAutoApproval,
 } from './workspaces/tool-approval.js';
 import {
@@ -2834,16 +2835,18 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
           };
         }
         try {
-          const outcome = await (
-            irreversibleExternal
-              ? toolApproval.ask.bind(toolApproval)
-              : computerApproval.request.bind(computerApproval)
-          )({
-            agent,
-            toolName: execution.name,
-            callId: execution.callId,
-            reason: "This PersonaBot wants to act on the profile's shared Computer.",
-            signal: execution.signal,
+          const outcome = await requestRequiredToolApproval({
+            approval: computerApproval,
+            channelApproval: toolApproval,
+            ownership: core.ownership,
+            forceChannel: irreversibleExternal,
+            request: {
+              agent,
+              toolName: execution.name,
+              callId: execution.callId,
+              reason: "This PersonaBot wants to act on the profile's shared Computer.",
+              signal: execution.signal,
+            },
           });
           if (outcome !== 'allowed-once') {
             const reviewed = toolApproval.takeReviewRejection(agent.session.id, execution.callId);
@@ -2939,16 +2942,18 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
           };
         }
         try {
-          const outcome = await (
-            irreversibleExternal
-              ? toolApproval.ask.bind(toolApproval)
-              : browserApproval.request.bind(browserApproval)
-          )({
-            agent,
-            toolName: execution.name,
-            callId: execution.callId,
-            reason: 'This PersonaBot wants to use the Browser authorized by the Human.',
-            signal: AbortSignal.any([execution.signal, browserSignal ?? execution.signal]),
+          const outcome = await requestRequiredToolApproval({
+            approval: browserApproval,
+            channelApproval: toolApproval,
+            ownership: core.ownership,
+            forceChannel: irreversibleExternal,
+            request: {
+              agent,
+              toolName: execution.name,
+              callId: execution.callId,
+              reason: 'This PersonaBot wants to use the Browser authorized by the Human.',
+              signal: AbortSignal.any([execution.signal, browserSignal ?? execution.signal]),
+            },
           });
           if (outcome !== 'allowed-once') {
             const reviewed = toolApproval.takeReviewRejection(agent.session.id, execution.callId);
@@ -3017,37 +3022,36 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
         };
       }
       try {
-        const outcome =
-          eachUse ||
-          irreversibleExternal ||
-          toolEffects(execution.name, execution.arguments)?.authority === 'management'
-            ? ((await toolApproval.ask({
-                agent,
-                toolName: execution.name,
-                callId: execution.callId,
-                signal: execution.signal,
-              })) ?? 'unavailable')
-            : await approval.request({
-                agent,
-                toolName: execution.name,
-                callId: execution.callId,
-                reason:
-                  execution.name === 'channel_attachment_open'
-                    ? 'This PersonaBot wants to edit the selected original attachment. All references to this file will show its current contents.'
-                    : execution.name === 'bot_create'
-                      ? 'This PersonaBot wants to create a new PersonaBot with a new Memory folder. The new Bot gets no grants, accesses or secrets from it.'
-                      : publishesBotMemory(JSON.stringify(execution.arguments) ?? '')
-                        ? 'This PersonaBot wants to upload a Bot to the Bot Marketplace. Its Memory files become public. Check them for secrets and private details first.'
-                        : deletesMarketplaceBot(JSON.stringify(execution.arguments) ?? '')
-                          ? 'This PersonaBot wants to delete one of your Uploaded Bots from the Bot Marketplace. Its files and counts are erased and cannot be restored.'
-                          : changesApprovalPolicy(
-                                JSON.stringify(execution.arguments) ?? '',
-                                templateInUse,
-                              )
-                            ? 'This PersonaBot wants to change persistent permissions or its approval policy. A Human can approve once or save Always allow for this tool in the current scope.'
-                            : 'This PersonaBot wants to run a command-line tool with a secret you entered. The program receives the secret and could reveal it. Check the program and every argument.',
-                signal: execution.signal,
-              });
+        const outcome = await requestRequiredToolApproval({
+          approval,
+          channelApproval: toolApproval,
+          ownership: core.ownership,
+          forceChannel:
+            eachUse ||
+            irreversibleExternal ||
+            toolEffects(execution.name, execution.arguments)?.authority === 'management',
+          request: {
+            agent,
+            toolName: execution.name,
+            callId: execution.callId,
+            reason:
+              execution.name === 'channel_attachment_open'
+                ? 'This PersonaBot wants to edit the selected original attachment. All references to this file will show its current contents.'
+                : execution.name === 'bot_create'
+                  ? 'This PersonaBot wants to create a new PersonaBot with a new Memory folder. The new Bot gets no grants, accesses or secrets from it.'
+                  : publishesBotMemory(JSON.stringify(execution.arguments) ?? '')
+                    ? 'This PersonaBot wants to upload a Bot to the Bot Marketplace. Its Memory files become public. Check them for secrets and private details first.'
+                    : deletesMarketplaceBot(JSON.stringify(execution.arguments) ?? '')
+                      ? 'This PersonaBot wants to delete one of your Uploaded Bots from the Bot Marketplace. Its files and counts are erased and cannot be restored.'
+                      : changesApprovalPolicy(
+                            JSON.stringify(execution.arguments) ?? '',
+                            templateInUse,
+                          )
+                        ? 'This PersonaBot wants to change persistent permissions or its approval policy. A Human can approve once or save Always allow for this tool in the current scope.'
+                        : 'This PersonaBot wants to run a command-line tool with a secret you entered. The program receives the secret and could reveal it. Check the program and every argument.',
+            signal: execution.signal,
+          },
+        });
         if (outcome !== 'allowed-once') {
           const reviewed = toolApproval.takeReviewRejection(agent.session.id, execution.callId);
           return {

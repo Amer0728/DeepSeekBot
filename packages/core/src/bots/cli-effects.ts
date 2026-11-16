@@ -601,12 +601,18 @@ function familyEffects(
             : action === 'remove'
               ? destructiveSecretManagement
               : undefined;
+    case 'computer-video':
+      return action === 'input' ? external : write;
     case 'approval-template':
-      return action === 'list' || action === 'show'
-        ? read
-        : action === 'create' && values['apply-to'] === undefined
-          ? write
-          : management;
+      return action === 'delete'
+        ? values.confirm
+          ? destructiveManagement
+          : read
+        : action === 'list' || action === 'show'
+          ? read
+          : action === 'create' && values['apply-to'] === undefined
+            ? write
+            : management;
     case 'bot-lan':
       return action === 'list' ? read : management;
     case 'relationships':

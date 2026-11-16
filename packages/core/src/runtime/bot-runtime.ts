@@ -958,6 +958,7 @@ export interface BotRuntime {
     signal: AbortSignal,
     parentSessionId?: string,
     sourceEventId?: string,
+    human?: HumanContext,
   ): Promise<{ tool: string; sessionId: 'direct'; result: unknown }>;
   triageOpenCount?(botSlug: string): number | undefined;
   listChannelAssignments?(channelId: string): ChannelAssignmentSummary[];
@@ -1793,7 +1794,7 @@ class BotRuntimeImplementation implements BotRuntime {
   readonly #assignmentNotices = new Set<Promise<void>>();
   readonly #waitLifetime = new AbortController();
   readonly #waitOptions: Pick<BotRuntimeOptions, 'database' | 'beginAssignmentWait'>;
-  readonly #activeDirectTools = new Map<string, string>();
+  readonly #activeDirectTools = new Map<string, { botSlug: string; approvalChannelId?: string }>();
   readonly #tobCliRequests = new Map<string, TobCliRequestLease>();
   #closed = false;
   readonly #tob: TobService | undefined;
@@ -2491,7 +2492,7 @@ class BotRuntimeImplementation implements BotRuntime {
       throw new TobError('tob-authority-required');
     if (
       this.#tails.has(bot.slug) ||
-      [...this.#activeDirectTools.values()].includes(bot.slug) ||
+      [...this.#activeDirectTools.values()].some((call) => call.botSlug === bot.slug) ||
       [...this.#tobCliRequests.values()].some((request) => request.status.state === 'running')
     )
       throw new TobError('bot-busy');
@@ -4601,6 +4602,14 @@ class BotRuntimeImplementation implements BotRuntime {
   askChannel(sessionId: string): string | undefined {
     const owner = this.#ownership.resolve(sessionId);
     if (this.#closed || owner?.rootRole !== 'orchestrator') return undefined;
+    const direct = this.#activeDirectTools.get(sessionId);
+    if (direct?.botSlug === owner.botSlug) {
+      const channel =
+        direct.approvalChannelId === undefined
+          ? undefined
+          : this.#channels.get(direct.approvalChannelId);
+      return channel?.type === 'dm' && channel.botSlug === owner.botSlug ? channel.id : undefined;
+    }
     const turn = this.#turnSources.get(owner.botSlug);
     if (
       turn?.sessionId !== sessionId ||
@@ -5194,6 +5203,7 @@ class BotRuntimeImplementation implements BotRuntime {
     signal: AbortSignal,
     parentSessionId?: string,
     sourceEventId?: string,
+    human?: HumanContext,
   ): Promise<{ tool: string; sessionId: 'direct'; result: unknown }> {
     if (this.#closed) throw new DirectBotToolError('runtime-closed', 'BotRuntime is closed');
     this.#team?.bots.requireActive(botSlug);
@@ -5302,10 +5312,13 @@ class BotRuntimeImplementation implements BotRuntime {
         observeReads: false,
       }),
     };
+    let approvalChannelId: string | undefined;
     if (
       hasIrreversibleExternalEffect(toolEffects(tool, args)) ||
       toolEffects(tool, args)?.authority === 'management'
     ) {
+      if (human !== undefined)
+        approvalChannelId = this.#channels.getOrCreateDm(human, botSlug, bot.displayName)?.id;
       this.#ownership.claim({
         sessionId,
         botSlug,
@@ -5328,7 +5341,10 @@ class BotRuntimeImplementation implements BotRuntime {
       });
       this.#directToolCalls.set(bot.slug, calls.slice(-DIRECT_TOOL_CALL_LIMIT));
     };
-    this.#activeDirectTools.set(sessionId, bot.slug);
+    this.#activeDirectTools.set(sessionId, {
+      botSlug: bot.slug,
+      ...(approvalChannelId === undefined ? {} : { approvalChannelId }),
+    });
     try {
       const result = await runDirect(
         run,

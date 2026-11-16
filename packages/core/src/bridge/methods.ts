@@ -9555,6 +9555,7 @@ function buildBridgeMethods(
           AbortSignal.timeout(DIRECT_TOOL_TIMEOUT_MS),
           session?.trim(),
           sourceEventId,
+          human,
         );
         return { ok: true, value: { slug, ...run } };
       } catch (error) {
