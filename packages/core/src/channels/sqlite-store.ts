@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { skillOwnerKey } from '../skills/entries.js';
 import { TeamError } from '../team/error.js';
 import { acceptedQuestionAnswer } from './accepted-question-answer.js';
 import { channelAudienceSql } from '../team/channel-contract.js';
@@ -242,7 +243,7 @@ function noticeOrigin(
 function skillInvocationIntent(message: ChannelMessage) {
   return (message.skillInvocations ?? []).map(({ name, owner, start, end }) => ({
     name,
-    owner,
+    owner: skillOwnerKey(owner),
     start,
     end,
   }));
