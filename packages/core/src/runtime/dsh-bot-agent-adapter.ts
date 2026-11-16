@@ -418,6 +418,7 @@ export interface DshBotAgentAdapterOptions {
   preparationVisibleMs?: number;
 
   observePreparation?: (botSlug: string, sessionId: string, preparing: boolean) => void;
+  observeDirectToolCleanupFailure?: (event: { sessionId: string; durationMs: number }) => void;
 }
 
 export interface BotAgentSetupInfo {
@@ -628,6 +629,7 @@ class DshBotAgentAdapter implements BotAgentAdapter {
   readonly #preparations = new Map<string, AbortController>();
   readonly #preparationTimeoutMs: number;
   readonly #observePreparation: DshBotAgentAdapterOptions['observePreparation'];
+  readonly #observeDirectToolCleanupFailure: DshBotAgentAdapterOptions['observeDirectToolCleanupFailure'];
   readonly #preparationVisibleMs: number;
   readonly #drafts: ChannelDraftTracker;
   #closed = false;
@@ -658,6 +660,7 @@ class DshBotAgentAdapter implements BotAgentAdapter {
     this.#drafts = new ChannelDraftTracker(options.publishDraft ?? (() => undefined));
     this.#preparationTimeoutMs = options.preparationTimeoutMs ?? PREPARATION_TIMEOUT_MS;
     this.#observePreparation = options.observePreparation;
+    this.#observeDirectToolCleanupFailure = options.observeDirectToolCleanupFailure;
     this.#preparationVisibleMs = options.preparationVisibleMs ?? PREPARATION_VISIBLE_MS;
   }
 
@@ -4300,7 +4303,17 @@ class DshBotAgentAdapter implements BotAgentAdapter {
       throw error;
     } finally {
       this.#runs.delete(run.sessionId);
-      await this.releaseSession(run.sessionId);
+      const cleanupStarted = Date.now();
+      try {
+        await this.releaseSession(run.sessionId);
+      } catch {
+        try {
+          this.#observeDirectToolCleanupFailure?.({
+            sessionId: run.sessionId,
+            durationMs: Date.now() - cleanupStarted,
+          });
+        } catch {}
+      }
     }
   }
 

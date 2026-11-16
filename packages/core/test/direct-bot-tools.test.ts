@@ -16,7 +16,7 @@ import { createChannelStore } from '../src/channels/store.js';
 import { attachOperationalModule, mountOperationalDatabase } from '../src/database/owner.js';
 import { BOT_HARNESS_SCHEMA_PLAN } from '../src/database/schema-plan.js';
 import { directToolTrace } from '../src/bots/tool-trace.js';
-import { createBotRuntime } from '../src/runtime/bot-runtime.js';
+import { createBotRuntime, DirectBotToolError } from '../src/runtime/bot-runtime.js';
 import { createSessionOwnership } from '../src/sessions/ownership.js';
 import {
   createDshBotAgentAdapter,
@@ -34,7 +34,12 @@ function botToolNamesFrom(source: string): string[] {
   return block === null ? [] : [...block[1]!.matchAll(/'([a-z_]+)'/g)].map((name) => name[1]!);
 }
 
-function setup(suppressAssignmentReports = false) {
+function setup(
+  suppressAssignmentReports = false,
+  observeDirectToolCleanupFailure?: Parameters<
+    typeof createDshBotAgentAdapter
+  >[0]['observeDirectToolCleanupFailure'],
+) {
   const home = createTempRoot('botharness-direct-tools-');
   const registry = createTestRegistry({ rootDir: join(home, 'bots'), now: FIXED_NOW });
   expect(registry.create({ slug: 'ada', displayName: 'Ada' }).ok).toBe(true);
@@ -48,6 +53,7 @@ function setup(suppressAssignmentReports = false) {
     : new FakeAgentHost({ kind: 'completed' });
   const agents = createDshBotAgentAdapter({
     agents: host,
+    ...(observeDirectToolCleanupFailure === undefined ? {} : { observeDirectToolCleanupFailure }),
     onAgentSetup: (ctx) => {
       Object.assign(ctx.tools, {
         execute: async (input: {
@@ -103,6 +109,7 @@ function setup(suppressAssignmentReports = false) {
     channels,
     dm,
     host,
+    agents,
     registry,
     ownership,
     owner,
@@ -457,3 +464,47 @@ describe('direct Bot tool runner', () => {
     );
   });
 });
+
+it.each([true, false])(
+  'preserves the direct tool outcome when disposal fails (success: %s)',
+  async (success) => {
+    const cleanupFailure = vi.fn();
+    const { runtime, channels, dm, agents, host } = setup(false, cleanupFailure);
+    const release = agents.releaseSession?.bind(agents);
+    if (!release) throw new Error('Missing release owner');
+    const failedCleanup = vi
+      .spyOn(agents, 'releaseSession')
+      .mockImplementation(async (sessionId) => {
+        await release(sessionId);
+        throw new Error('Synthetic disposal rejection');
+      });
+    try {
+      const operation = runtime.runDirectBotTool!(
+        'ada',
+        'bot_send_message',
+        success
+          ? { channel_id: dm.id, body: 'Completed once despite cleanup failure.' }
+          : { body: 'No destination' },
+        new AbortController().signal,
+      );
+      if (success) {
+        expect(await operation).toMatchObject({
+          result: { channelId: dm.id, status: 'committed' },
+        });
+        expect(
+          channels
+            .readMessages(dm.id)
+            .filter((message) => message.body === 'Completed once despite cleanup failure.'),
+        ).toHaveLength(1);
+      } else await expect(operation).rejects.toBeInstanceOf(DirectBotToolError);
+      expect(cleanupFailure).toHaveBeenCalledExactlyOnceWith({
+        sessionId: expect.stringMatching(/^direct-/),
+        durationMs: expect.any(Number),
+      });
+      expect(host.disposed).toHaveLength(host.sessions.length);
+    } finally {
+      failedCleanup.mockRestore();
+      await runtime.close();
+    }
+  },
+);

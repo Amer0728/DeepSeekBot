@@ -941,3 +941,49 @@ it('retains an unreadable template deletion failure when the readable list omits
   expect(previews).toBe(3);
   expect(writes).toBe(1);
 });
+
+it.each([false, true])(
+  'refreshes canonical state after a concurrent deletion (read fails: %s)',
+  async (readFails) => {
+    let reads = 0;
+    let writes = 0;
+    const call: BridgeCall = async (endpoint) => {
+      if (endpoint === 'approvalTemplates') {
+        reads++;
+        if (readFails && reads === 2) throw new Error('Canonical read failed');
+        return {
+          ok: true,
+          value: {
+            templates: [...templates, ...(reads === 1 ? [customTemplate] : [])],
+            globalDefault: reads === 1 ? 'night-shift' : null,
+          },
+        };
+      }
+      if (endpoint === 'approvalTemplateDeletePreview')
+        return {
+          ok: false,
+          error: { code: 'unknown-template', message: 'Removed by another client', details: {} },
+        };
+      writes++;
+      throw new Error('No mutation expected');
+    };
+    await openDeletion(call);
+    if (readFails) {
+      expect(document.body.textContent).toContain(t('autoApproval.library.deletePreviewFailed'));
+      expect(confirmDeletion().disabled).toBe(true);
+      const dialog = confirmDeletion().closest('[role="dialog"]');
+      if (!dialog) throw new Error('Missing deletion dialog');
+      const reload = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent === t('autoApproval.reload'),
+      );
+      if (!reload) throw new Error('Missing read-only retry');
+      await act(async () => reload.click());
+    }
+    expect(host.querySelector('[data-approval-template="night-shift"]')).toBeNull();
+    expect(trigger().textContent).toContain(t('autoApproval.off'));
+    expect(document.body.textContent).not.toContain(
+      t('autoApproval.library.deleteTitle', { title: 'Night shift' }),
+    );
+    expect(writes).toBe(0);
+  },
+);

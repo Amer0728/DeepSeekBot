@@ -603,6 +603,68 @@ describe('Tob canonical identity and settings', () => {
 });
 
 describe('authenticated model-free Tob CLI DM admission', () => {
+  it('preserves pending Memory notifications for the next model turn', async () => {
+    const modelInboxes: string[] = [];
+    const f = fixture(async (run) => {
+      if (run.tobCliTurn)
+        run.tobCliTurn.complete({ exitCode: 0, stdout: '{"templates":[]}', stderr: '' });
+      else modelInboxes.push(run.inbox);
+    });
+    const bridge = createBridgeMethods(OWNER_HUMAN_CONTEXT, { ...f.core });
+    try {
+      const home = await f.core.tob.ensure(OWNER_HUMAN_CONTEXT);
+      const db = attachOperationalModule(
+        f.core.operationalDatabase,
+        'tob-cli-memory-notification-test',
+      );
+      db.transaction((sql) => {
+        sql
+          .prepare(
+            "INSERT INTO source_events(source_event_id,source_kind,bot_slug,body,created_at,payload_json) VALUES('pending-tob-memory','memory-change',?,'PENDING_MEMORY_NOTIFICATION',?, '{}')",
+          )
+          .run(home.botSlug, new Date().toISOString());
+        sql
+          .prepare(
+            "INSERT INTO inbox_admissions(source_event_id,bot_slug,reason) VALUES('pending-tob-memory',?,'memory-change')",
+          )
+          .run(home.botSlug);
+      });
+      const state = () =>
+        db.read((sql) =>
+          sql
+            .prepare(
+              'SELECT e.observed_at AS sourceObserved,e.handled_at AS sourceHandled,a.attempt_state AS state,a.observed_at AS admissionObserved FROM source_events e JOIN inbox_admissions a USING(source_event_id) WHERE e.source_event_id=? AND a.bot_slug=?',
+            )
+            .get('pending-tob-memory', home.botSlug),
+        );
+      const started = await bridge.tobCli({
+        action: 'start',
+        command: { argv: ['approval-templates'] },
+      });
+      expect(started.ok).toBe(true);
+      await f.core.runtime.whenIdle();
+      expect(modelInboxes).toEqual([]);
+      expect(state()).toMatchObject({
+        sourceObserved: null,
+        sourceHandled: null,
+        state: 'pending',
+        admissionObserved: null,
+      });
+      const sent = await bridge.channelSend({
+        channelId: home.channelId,
+        body: 'Read pending Memory notices.',
+      });
+      expect(sent.ok).toBe(true);
+      await f.core.runtime.whenIdle();
+      expect(modelInboxes.some((inbox) => inbox.includes('PENDING_MEMORY_NOTIFICATION'))).toBe(
+        true,
+      );
+      expect(state()).toMatchObject({ state: 'handled' });
+    } finally {
+      await f.close();
+    }
+  });
+
   it('owns the accepted Human DM turn, exposes the result, and expires captured authority on completion', async () => {
     let captured!: () => void;
     const f = fixture(async (run) => {

@@ -6637,6 +6637,7 @@ class BotRuntimeImplementation implements BotRuntime {
         .get(bot.slug, sourceEventId ?? null),
     );
     const observeMemory =
+      tobCliTurn === undefined &&
       memoryObservation === 'source-event' &&
       sourceEventId !== undefined &&
       memorySource?.source_kind !== 'bridge-message' &&

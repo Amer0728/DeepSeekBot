@@ -299,10 +299,22 @@ export function ApprovalTemplateLibrarySettings({
         if (deletionGeneration.current === generation)
           setDeleting({ template, kind: 'ready', preview });
       },
-      (cause: unknown) => {
+      async (cause: unknown) => {
         if (deletionGeneration.current !== generation) return;
         if (cause instanceof BridgeCallError && cause.code === 'unknown-template') {
-          cancelDeletion();
+          try {
+            await reload();
+            if (deletionGeneration.current === generation) cancelDeletion();
+          } catch (readCause: unknown) {
+            if (deletionGeneration.current !== generation) return;
+            setTemplates(undefined);
+            setGlobalDefault(undefined);
+            setGlobalError(true);
+            setLoadError(errorMessage(readCause));
+            setEditor(undefined);
+            setDeleting({ template, kind: 'failed' });
+            setError(t('autoApproval.library.deletePreviewFailed'));
+          }
           return;
         }
         setDeleting({ template, kind: 'failed' });

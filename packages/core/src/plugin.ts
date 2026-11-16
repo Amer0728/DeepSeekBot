@@ -1753,6 +1753,10 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     promptText: (sessionId) => core.prompts.textForSession(sessionId),
     defaultModel,
     observeTurnFailure: (provider, code) => providerCredentials.observe(provider, code),
+    observeDirectToolCleanupFailure: ({ sessionId, durationMs }) =>
+      ctx.logger.warn(
+        `direct-tool-cleanup phase=dispose outcome=failed session=${sessionId} durationMs=${durationMs}`,
+      ),
     turnRefusal: (sessionId) => turnRefusals.get(sessionId),
     resolveModelPlan: (slug) => core.registry.get(slug)?.modelPlan,
     subagentTools: (slug) =>
