@@ -321,16 +321,22 @@ export class ChannelToolApproval {
     }
     const origin =
       tracked.role === 'orchestrator' ? this.#askChannel?.(tracked.sessionId) : undefined;
+    if (tracked.role === 'orchestrator' && this.#askChannel !== undefined && origin === undefined)
+      return 'unavailable';
     const originChannel = origin === undefined ? undefined : this.#channels.get(origin);
-    const channelId =
-      originChannel?.type === 'group' && originChannel.members.includes(tracked.botSlug)
-        ? originChannel.id
-        : dmChannelId(tracked.botSlug);
     const channel =
-      this.#channels.get(channelId) ??
-      this.#channels.getOrCreateDm(OWNER_HUMAN_CONTEXT, tracked.botSlug);
+      origin === undefined
+        ? (this.#channels.get(dmChannelId(tracked.botSlug)) ??
+          this.#channels.getOrCreateDm(OWNER_HUMAN_CONTEXT, tracked.botSlug))
+        : originChannel;
     if (channel === undefined) return 'unavailable';
-    if (channel.type !== 'group' && channel.botSlug !== tracked.botSlug) return 'unavailable';
+    if (
+      channel.type === 'group'
+        ? !channel.members.includes(tracked.botSlug)
+        : channel.botSlug !== tracked.botSlug
+    )
+      return 'unavailable';
+    const channelId = channel.id;
     if (
       this.#decisionPolicy(tracked, { reviewer: true }).path === 'reviewer' &&
       this.#overrides.delete(overrideKey(tracked))

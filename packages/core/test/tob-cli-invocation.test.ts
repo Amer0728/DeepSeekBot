@@ -64,6 +64,9 @@ async function fixture() {
   const core: BotHarnessCore | undefined = ctx.get('botharness');
   if (!core) throw new Error('Missing core');
   expect(core.registry.create({ slug: 'ada', displayName: 'Ada' }).ok).toBe(true);
+  const origin = core.channels.getOrCreateDm(OWNER_HUMAN_CONTEXT, 'ada', 'Ada');
+  if (!origin) throw new Error('Missing fixture DM');
+  vi.spyOn(core.runtime, 'askChannel').mockReturnValue(origin.id);
   core.ownership.claim({
     sessionId: 'owned-cli',
     botSlug: 'ada',
