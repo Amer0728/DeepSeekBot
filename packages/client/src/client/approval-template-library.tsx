@@ -52,6 +52,8 @@ const NAME = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
 
 const styles = stylex.create({
   meta: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space.x2 },
+  ruleMain: { alignItems: 'baseline' },
+  ruleNumber: { fontSize: text.bodySize, lineHeight: text.bodyLine },
   ruleInput: {
     boxSizing: 'border-box',
     width: '100%',
@@ -121,7 +123,12 @@ function GuidanceFields({
                   return (
                     <SidebarCardRow
                       key={index}
-                      leading={<span aria-hidden>{index + 1}</span>}
+                      mainClassName={stylex.props(styles.ruleMain).className}
+                      leading={
+                        <span aria-hidden {...stylex.props(styles.ruleNumber)}>
+                          {index + 1}
+                        </span>
+                      }
                       title={
                         <Input
                           aria-label={rowLabel}
