@@ -1,3 +1,7 @@
+export const SKILL_OPTIONS = {
+  skill: { type: 'string', multiple: true },
+} as const;
+
 export const APPROVAL_REVIEWER_OPTIONS = {
   effort: { type: 'string' },
 } as const;
@@ -329,6 +333,7 @@ export const LIVE_OPTIONS = {
   ...CALL_OPTIONS,
   ...CALL_TIMELINE_OPTIONS,
   ...STORAGE_OPTIONS,
+  ...SKILL_OPTIONS,
   host: { type: 'string' },
   'token-file': { type: 'string' },
   'image-source': { type: 'string' },

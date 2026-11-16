@@ -759,6 +759,7 @@ describe('bridge typert service', () => {
       'channelAdminsSet',
       'channelPolicySet',
       'channelHumanAdd',
+      'channelMemberCandidates',
       'channelDescriptionSet',
       'teamDirectory',
       'humanDm',
@@ -902,6 +903,7 @@ describe('bridge typert service', () => {
       'channelUnreadCounts',
       'channelAllBotPreview',
       'tobCli',
+      'channelSkillCatalog',
       'channelSend',
       'channelSendStatus',
       'channelGenuiView',
@@ -954,6 +956,7 @@ describe('bridge typert service', () => {
       'sessionOwner',
       'botSessionIds',
       'memoryFileTarget',
+      'memoryImage',
       'memorySnapshot',
       'memoryFile',
       'memoryHistory',
@@ -1272,7 +1275,9 @@ describe('bridge typert service', () => {
       'assignmentReply',
       'allBotMention',
       'genuiReply',
+      'skillInvocations',
     ]);
+    expect(parameterNames(service.channelSkillCatalog)).toEqual(['channelId']);
     expect(parameterNames(service.botAttention)).toEqual(['slug', 'limit', 'cursor', 'state']);
     expect(parameterNames(service.humanAssignmentContext)).toEqual([
       'slug',

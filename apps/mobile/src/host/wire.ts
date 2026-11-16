@@ -404,6 +404,7 @@ export interface WireGroupJoinRequest {
 }
 
 export type RosterLiveFrame =
+  | { type: 'skills'; change: { botSlugs: string[]; channelIds: string[] } }
   | { type: 'attention' }
   | { type: 'baseline'; placements: unknown[] }
   | { type: 'changed' }

@@ -4,7 +4,7 @@ Date: 2026-11-16
 Issues: [#4212](https://github.com/BotHarness/DeepSeekBot/issues/4212)
 ---
 
-# ADR-0345: Model-free Tob CLI uses the accepted Human DM turn
+# ADR-0347: Model-free Tob CLI uses the accepted Human DM turn
 
 ## Context
 

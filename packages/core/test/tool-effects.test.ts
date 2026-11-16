@@ -656,3 +656,29 @@ it('treats stdin-driven conversation changes conservatively on both CLI paths', 
     toolApprovalRequired('deepseekbot messaging-conversation', { patch: { argv } }, true),
   ).toBe(true);
 });
+
+it.each([
+  ['skills-list', '--bot', 'ada'],
+  ['channels', 'member-candidates', 'group-a', '--query', 'Alice'],
+])('keeps new main read commands declared on both execution paths: %j', (...argv) => {
+  const expected = { changes: 'none', reach: 'local', personalData: true };
+  expect(cliEffects(argv)).toEqual(expected);
+  expect(brokerCliEffects('deepseekbot ' + argv[0], { patch: { argv } })).toEqual(expected);
+  expect(toolEffects('deepseekbot_cli', { argv })).toEqual(expected);
+});
+it('parses repeatable Skill Invocations through the same strict send options without weakening delivery effects', () => {
+  const argv = [
+    'send',
+    'ada',
+    '--text',
+    '/first /second',
+    '--skill',
+    'host/first',
+    '--skill',
+    'bot:ada/second',
+  ];
+  const expected = { changes: 'irreversible', reach: 'external', personalData: true };
+  expect(cliEffects(argv)).toEqual(expected);
+  expect(brokerCliEffects('deepseekbot send', { patch: { argv } })).toEqual(expected);
+  expect(toolEffects('deepseekbot_cli', { argv })).toEqual(expected);
+});

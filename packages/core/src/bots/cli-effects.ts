@@ -440,6 +440,7 @@ export const CLI_EFFECTS = {
   'storage-messages-cleanup-confirm': { effects: destructive, brokerRead: false },
   'storage-messages-cleanup-preview': { effects: read, brokerRead: true },
   'storage-usage': { effects: read, brokerRead: true },
+  'skills-list': { effects: read, brokerRead: true },
   'takeover-cancel': { effects: write, brokerRead: false },
   'takeover-complete': { effects: write, brokerRead: false },
   'takeover-request': { effects: write, brokerRead: false },
@@ -527,7 +528,10 @@ function familyEffects(
       }
     }
     case 'channels':
-      if (action === undefined || ['get', 'roles', 'browse', 'browse-public'].includes(action))
+      if (
+        action === undefined ||
+        ['get', 'roles', 'browse', 'browse-public', 'member-candidates'].includes(action)
+      )
         return read;
       if (action === 'send') return external;
       if (['visibility', 'admins', 'add-member', 'policy', 'set-public'].includes(action))
