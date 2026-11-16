@@ -442,6 +442,9 @@ export const CLI_EFFECTS = {
   'storage-messages-cleanup-preview': { effects: read, brokerRead: true },
   'storage-usage': { effects: read, brokerRead: true },
   'skills-list': { effects: read, brokerRead: true },
+  'skills-memory': { effects: memoryRead, brokerRead: true },
+  'skills-show': { effects: read, brokerRead: true },
+  'skills-remove': { effects: memoryWrite, brokerRead: false },
   'speaker-policy': { effects: read, brokerRead: true },
   'takeover-cancel': { effects: write, brokerRead: false },
   'takeover-complete': { effects: write, brokerRead: false },
@@ -601,6 +604,12 @@ function familyEffects(
             : action === 'remove'
               ? destructiveSecretManagement
               : undefined;
+    case 'skills-show':
+      return values.owner?.startsWith('bot:')
+        ? memoryRead
+        : values.owner?.startsWith('workspace:')
+          ? { ...read, reach: 'workspace' }
+          : read;
     case 'computer-video':
       return action === 'input' ? external : write;
     case 'approval-template':

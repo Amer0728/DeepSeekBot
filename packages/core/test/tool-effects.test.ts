@@ -794,3 +794,30 @@ it.each([false, true])(
       );
   },
 );
+
+it.each([
+  {
+    argv: ['skills-memory', '--bot', 'ada'],
+    expected: { changes: 'none', reach: 'memory', personalData: true },
+  },
+  {
+    argv: ['skills-show', 'review', '--owner', 'host'],
+    expected: { changes: 'none', reach: 'local', personalData: true },
+  },
+  {
+    argv: ['skills-show', 'review', '--owner', 'bot:ada'],
+    expected: { changes: 'none', reach: 'memory', personalData: true },
+  },
+  {
+    argv: ['skills-show', 'review', '--owner', 'workspace:project'],
+    expected: { changes: 'none', reach: 'workspace', personalData: true },
+  },
+  {
+    argv: ['skills-remove', 'review', '--bot', 'ada', '--confirm'],
+    expected: { changes: 'reversible', reach: 'memory', personalData: true },
+  },
+])('declares newly landed Skill commands on shared CLI paths: $argv', ({ argv, expected }) => {
+  expect(cliEffects(argv)).toEqual(expected);
+  expect(brokerCliEffects('deepseekbot ' + argv[0], { patch: { argv } })).toEqual(expected);
+  expect(toolEffects('deepseekbot_cli', { argv })).toEqual(expected);
+});
