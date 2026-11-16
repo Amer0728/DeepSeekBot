@@ -1,10 +1,10 @@
 # Bot 级自动审批策略
 
-状态：Human 于 2026-11-15 确认的目标设计，分片实施中。本文档不改变运行行为。[English](bot-approval-policy.md)。
+状态：Human 于 2026-11-15 确认的设计。本文记录设计与实现边界；GitHub issue 记录交付状态，文档不改变运行设置。[English](bot-approval-policy.md)。
 
 [ADR-0342](../adr/0342-bot-approval-selects-one-template-and-keeps-deterministic-authorization-separate.md) 记录长期决策与权衡，本文整合目标行为；GitHub issue 记录交付状态。设计确认不授权实施功能、更改运行权限或推进 SQLite 迁移。
 
-实施首片 #4211 通过既有文件 owner、认证 Host、在线 CLI 和 Client Select 打通全局／Bot 选择及两结果版本化 Review。三部分编辑和规则统一表由各自切片交付；确认删除通过绑定 revision 的影响预览及批量回退交付。
+实现沿用既有模板文件 owner 保存模板与全局选择、Bot Registry 保存 Bot 选择、Tool Approval Rule owner 保存卡片授权、Channel Tool Approval 决定审批。#4205、#4211、#4244、#4245、#4246、#4210、#4212 分别覆盖效果声明、选择、三部分编辑、规则管理、确认删除及 CLI/native 共用准入。交付证据保留源码与平台范围；iOS 和未完成的匹配性能检查仍在 [QA #2742](https://github.com/BotHarness/DeepSeekBot/issues/2742#issuecomment-6909957258) 跟踪。
 
 ## 一份有效模板
 
@@ -39,9 +39,9 @@ Profile 有一个可选的全局默认模板，来源是共享 Approval Template
 
 先由代码判断行为是否需要审批，再处理有效的确定性授权；已覆盖的请求不调用 LLM。未覆盖时使用有效模板 Reviewer；未启用 Reviewer 则交给 Human。
 
-Full Access 本身不豁免 [E2 #4210](https://github.com/BotHarness/DeepSeekBot/issues/4210) 所指的不可撤销外部调用审批。具体效果声明与准入机制仍属于 [E1 #4205](https://github.com/BotHarness/DeepSeekBot/issues/4205)、E2 与 [E4 #4212](https://github.com/BotHarness/DeepSeekBot/issues/4212)，本次不实施，也不声称能从任意命令文本可靠推断其全部行为。
+实现切片 #4210 将可信声明的不可撤销外部效果送入统一审批，Full Access 不豁免。确定性授权先于 Reviewer，审批记录保存本次效果供呈现；管理操作继续使用 ADR-0249 的专用显式授权范围。具体效果声明与准入机制见 [E1 #4205](https://github.com/BotHarness/DeepSeekBot/issues/4205)、[E2 #4210](https://github.com/BotHarness/DeepSeekBot/issues/4210) 与 [E4 #4212](https://github.com/BotHarness/DeepSeekBot/issues/4212)；不声称能从任意命令文本可靠推断全部行为。
 
-卡片 Always allow 保存的 Tool Approval Rule 是确定性授权，继续绑定具体 Bot、角色、授权范围及执行检查。在 Always allow 表格共同展示时，必须标注“来自卡片”、作用范围及撤销入口；共同展示不改变两类条目的执行方式。它不写入共享模板，不授权使用同模板的其他 Bot，也不随模板复制。已经命中确定性规则时，模板中的自然语言不会覆盖它；需要重新审核时，由 Human 撤销该规则。
+卡片 Always allow 保存的 Tool Approval Rule 是确定性授权，继续绑定具体 Bot、角色、授权范围及执行检查。Bot 权限表标注“来自卡片”、角色、作用范围及撤销入口；独立展示不会将它们变成模板编辑器中的自然语言 Always allow 行。它不写入共享模板，不授权使用同模板的其他 Bot，也不随模板复制。已经命中确定性规则时，模板中的自然语言不会覆盖它；需要重新审核时，由 Human 撤销该规则。
 
 当前所有权、Workspace Grant、设备目标及授权撤销检查独立于模型判断。生效中的策略管理跳过 Reviewer 与 Full Access，须由 Human 决定，或使用 ADR-0249 独立管理范围中确实覆盖该操作的显式已保存授权。旧普通规则不因此获得管理权限。管理审批展示受影响的 Bot。
 
@@ -106,13 +106,15 @@ Full Access 本身不豁免 [E2 #4210](https://github.com/BotHarness/DeepSeekBot
 - Q16–Q18：保持既有 Bot 选择；模型放行不存规则；删除全局默认时清空全局。
 - 最终确认：Human 确认完整汇总后，才开始写入设计文档。
 
-## 确认与交付边界
+## 访谈时的交付边界（2026-11-15 历史记录）
 
-Human 在 Q1–Q18 分轮访谈后确认了完整汇总；原设计树无未决产品分支。实现机制、CLI 契约、版本表示、持久化格式与迁移留待实施任务，不在本文偷偷作决定。既有应用定义的审批 owner 仍持有决定权；不新设另一套权威，不替换 DSH-native approval/request、Session 或 API Gateway seam。
+Human 在 Q1–Q18 分轮访谈后确认了完整汇总；原设计树无未决产品分支。当时将实现机制、CLI 契约、版本表示、持久化格式与迁移留待实施任务，而非由访谈暗中决定。当前实现边界另列于下文；SQLite 迁移仍独立处理。既有应用定义的审批 owner 仍持有决定权；不新设另一套权威，不替换 DSH-native approval/request、Session 或 API Gateway seam。
 
-后续交付须验证：继承／特定／关闭的有效选择；冲突及不确定转 Human；确定性命中时没有 LLM 调用；卡片规则只授权所属 Bot；删除结果披露及回退；Review 固定版本；故障转 Human；无有效管理授权时拒绝策略变更。这是未来验收要求，不是已实现或已通过测试的声明。
+访谈记录的交付要求是验证：继承／特定／关闭的有效选择；冲突及不确定转 Human；确定性命中时没有 LLM 调用；卡片规则只授权所属 Bot；删除结果披露及回退；Review 固定版本；故障转 Human；无有效管理授权时拒绝策略变更。具体证据保留源码范围，未完成检查见实施票与 QA #2742；历史访谈本身不能证明运行或测试结果。
 
-性能评估：本次只有文档变更，无新依赖、无运行热路径变化，因此免运行性能基准。未来 E2／E3 须分别预算新增准入工作及模型调用，证明确定性命中不调用 Reviewer，并依仓库性能规则验证实际旅程。
+性能评估：纯文档编辑无新依赖、无运行热路径变化，因此免运行性能基准；该豁免不覆盖功能实现。新增准入工作及模型调用须分别预算，确定性命中不调用 Reviewer，实际旅程依仓库性能规则验证。未完成的匹配比较仍在 QA #2742 跟踪。
+
+## 当前实现边界
 
 #4244 的三部分编辑沿用模板文件 owner 与 32 KiB 有界读取；使用 ADR-0342 记录的 v1 内容表示，旧 Markdown 完整映射为补充说明。复制只复制内容；保存与应用分开，编辑共享原件显示全局继承者在内的使用者。编辑仅影响后续 Review。
 

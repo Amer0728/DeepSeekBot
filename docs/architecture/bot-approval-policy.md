@@ -1,10 +1,10 @@
 # Bot approval policy
 
-Status: Human-confirmed target design, 2026-11-15. Runtime behavior is unchanged by this documentation. [中文](bot-approval-policy.zh.md).
+Status: Human-confirmed design, 2026-11-15. This document records design and implementation boundaries; GitHub issues own delivery status. Documentation changes no runtime settings. [中文](bot-approval-policy.zh.md).
 
 [ADR-0342](../adr/0342-bot-approval-selects-one-template-and-keeps-deterministic-authorization-separate.md) owns the durable choices and trade-offs. This document owns the integrated target behavior. GitHub issues own delivery status. Neither this interview nor these documents authorize implementation, live permission changes or a SQLite migration.
 
-Implementation slice #4211 adds global/Bot selection through the existing file owner, authenticated Host, online CLI and Client Select, plus two-outcome versioned Reviews. The remaining editor, rules-table and confirmed bulk-deletion workflows are subsequent slices.
+The implementation keeps template files and global selection in the existing file owner, Bot choices in the Bot Registry, card authorizations in the Tool Approval Rule owner, and decisions in Channel Tool Approval. Slices #4205, #4211, #4244, #4245, #4246, #4210 and #4212 cover declarations, selection, three-part editing, rule management, confirmed deletion and shared CLI/native admission. Delivery evidence is source-qualified; iOS and outstanding matched-performance checks remain in [QA #2742](https://github.com/BotHarness/DeepSeekBot/issues/2742#issuecomment-6909957258).
 
 ## One effective template
 
@@ -41,7 +41,7 @@ The target first uses deterministic code to determine whether the action needs a
 
 Implementation slice #4210 routes trusted irreversible external effects through the common approval owner even under Full Access. Deterministic rules resolve before the Reviewer; approval records capture the declared effects for presentation. Management keeps ADR-0249’s dedicated scope. Full Access does not by itself waive the external-effect approval specified in [E2 #4210](https://github.com/BotHarness/DeepSeekBot/issues/4210). The concrete effect declarations and admission mechanism remain in [E1 #4205](https://github.com/BotHarness/DeepSeekBot/issues/4205), E2 and [E4 #4212](https://github.com/BotHarness/DeepSeekBot/issues/4212). No claim is made that arbitrary behavior can be inferred reliably from a command string.
 
-Card-created Tool Approval Rules remain deterministic, Bot-scoped authorizations with their existing role, authority scope and execution checks. They appear in the Always allow table with a source such as “From approval card”, their scope and a revoke action. Their display alongside natural-language rows does not change how either kind executes. They are not written into the shared template, granted to other Bots using it, or included in template copies. A natural-language row cannot override an already matched deterministic rule; the Human must revoke that rule to return those requests to review.
+Card-created Tool Approval Rules remain deterministic, Bot-scoped authorizations with their existing role, authority scope and execution checks. The Bot permissions table shows their source such as “From approval card”, role, scope and revoke action. This separate display does not turn them into the template editor's natural-language Always allow rows. They are not written into the shared template, granted to other Bots using it, or included in template copies. A natural-language row cannot override an already matched deterministic rule; the Human must revoke that rule to return those requests to review.
 
 Current ownership, Workspace Grant, device-target and rule-revocation checks remain independent of model permission. Effective policy management skips the model Reviewer and Full Access, but may use an explicitly saved authorization covering that management operation under ADR-0249. Existing ordinary rules do not gain management authority. Management approval identifies affected Bots.
 
@@ -104,13 +104,15 @@ The official Claude Code [permissions documentation](https://code.claude.com/doc
 - Q16–Q18: preserve existing Bot choices; no standing rules from model allow; clear the global selection when its default is deleted.
 - Final confirmation: the Human accepted the complete summary before any design documentation was written.
 
-## Delivery and verification boundary
+## Interview delivery boundary (historical, 2026-11-15)
 
-The User confirmed the design after questions Q1–Q18 and a complete summary. There are no outstanding product decisions in that interview tree. Implementation mechanics, CLI contracts, storage/version representation and migration are future work, not silently selected here. The existing application-defined approval owner remains the owner; DSH-native approval/request, Session and API Gateway seams are not replaced by a second authority.
+The User confirmed the design after questions Q1–Q18 and a complete summary. There are no outstanding product decisions in that interview tree. Implementation mechanics, CLI contracts, storage/version representation and migration were left to implementation tasks at that time, rather than silently selected by the interview. Current implementation facts follow below; SQLite migration remains separate. The existing application-defined approval owner remains the owner; DSH-native approval/request, Session and API Gateway seams are not replaced by a second authority.
 
-Future delivery must demonstrate inherited versus specific/Off behavior, Reviewer conflict/uncertainty routing, deterministic bypass without an LLM call, Bot-only card-rule scope, disclosed deletion fallback, captured policy versions, failure routing and management refusal without valid authority. These are acceptance requirements, not claims that tests or the runtime already implement them.
+The interview recorded these delivery requirements: demonstrate inherited versus specific/Off behavior, Reviewer conflict/uncertainty routing, deterministic bypass without an LLM call, Bot-only card-rule scope, disclosed deletion fallback, captured policy versions, failure routing and management refusal without valid authority. Their source-qualified evidence and outstanding checks live in the implementation issues and QA #2742; the historical interview itself proves no runtime or test result.
 
-Performance assessment: this change edits documentation only, introduces no dependency and changes no runtime hot path, so no runtime benchmark is warranted. Future E2/E3 work must separately budget added admission work and model calls, prove deterministic hits make no Reviewer call, and verify the affected real journey under the repository's performance policy.
+Performance assessment: documentation-only edits introduce no dependency and change no runtime hot path, so no runtime benchmark is warranted for those edits. This exemption does not cover feature implementation. Added admission work and model calls require separate budgets, deterministic hits must make no Reviewer call, and real-journey verification follows the repository's performance policy. Outstanding matched comparisons remain in QA #2742.
+
+## Current implementation boundaries
 
 The #4244 editor retains the template-file owner and 32 KiB bounded reads. ADR-0342 records the v1 content representation; legacy Markdown maps intact to free text. Copies contain only content. Save and apply are separate choices, shared-original editing shows global inheritors among actual users, and content edits affect future Reviews.
 
