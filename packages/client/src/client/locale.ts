@@ -4469,6 +4469,7 @@ export const zh = {
   'autoApproval.library.guidanceHint':
     '这些是 Reviewer 的自然语言指导，不保证模型判断。总是询问优先；冲突、未覆盖或不确定时交给你。修改仅影响后续审批。',
   'autoApproval.library.removeRow': '移除此行',
+  'autoApproval.library.add': '添加',
   'autoApproval.library.addRow': '添加{section}项',
   'autoApproval.library.saveChoice': '保存方式',
   'autoApproval.library.saveOnly': '仅保存',
@@ -10579,6 +10580,7 @@ My relationship with you, established lore and topics to avoid: [fill in].
   'autoApproval.library.guidanceHint':
     'Natural-language Reviewer guidance cannot guarantee model decisions. Always ask takes priority; conflicts, missing coverage and uncertainty go to you. Edits affect future Reviews.',
   'autoApproval.library.removeRow': 'Remove row',
+  'autoApproval.library.add': 'Add',
   'autoApproval.library.addRow': 'Add {section} row',
   'autoApproval.library.saveChoice': 'Save behavior',
   'autoApproval.library.saveOnly': 'Save only',

@@ -12,8 +12,8 @@ import { zhTranslate as t } from '../src/client/locale.js';
 import { createStore } from '../src/client/store.js';
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', async () => ({
-  ...(await import('./primitive-mocks.js')).dialogPrimitives(),
   ...(await import('./primitive-mocks.js')).comboboxPrimitives(),
+  ...(await import('./primitive-mocks.js')).dialogPrimitives(),
   Tag: ({ children }: { children: ReactNode }) => createElement('span', null, children),
   Menu: ({
     items,
@@ -541,6 +541,57 @@ it('keeps the visible View action in accessible template names', async () => {
     expect(button.getAttribute('aria-label')).toContain(button.textContent);
   }
 });
+
+it.each(['alwaysAsk', 'alwaysAllow'] as const)(
+  'adds and focuses a %s rule from either end without saving or changing other sections',
+  async (section) => {
+    const parts = {
+      alwaysAsk: Array.from({ length: 20 }, (_, index) => 'Ask ' + String(index + 1)),
+      alwaysAllow: Array.from({ length: 20 }, (_, index) => 'Allow ' + String(index + 1)),
+      freeText: 'Keep this note.',
+    };
+    const calls: string[] = [];
+    const template = { ...customTemplate, usedBy: [], text: encodeApprovalTemplateGuidance(parts) };
+    const call: BridgeCall = async (endpoint) => {
+      calls.push(endpoint);
+      if (endpoint === 'approvalTemplates')
+        return { ok: true, value: { templates: [template], globalDefault: null } };
+      throw new Error('Adding a draft row must not write to the Host');
+    };
+    await render(call);
+    const edit = host.querySelector<HTMLButtonElement>(
+      '[data-approval-template="night-shift"] button',
+    );
+    if (!edit) throw new Error('Missing template');
+    await act(async () => edit.click());
+    const top = document.querySelector<HTMLButtonElement>(
+      'button[data-approval-guidance-add="' + section + '"]',
+    );
+    if (!top) throw new Error('Missing top add action');
+    const label = t(
+      section === 'alwaysAsk'
+        ? 'autoApproval.library.alwaysAsk'
+        : 'autoApproval.library.alwaysAllow',
+    );
+    await act(async () => top.click());
+    const added = document.querySelector<HTMLInputElement>('input[aria-label="' + label + ' 21"]');
+    expect(added?.value).toBe('');
+    expect(document.activeElement).toBe(added);
+    await clickText(t('autoApproval.library.addRow', { section: label }));
+    const last = document.querySelector<HTMLInputElement>('input[aria-label="' + label + ' 22"]');
+    expect(last?.value).toBe('');
+    expect(document.activeElement).toBe(last);
+    const other = t(
+      section === 'alwaysAsk'
+        ? 'autoApproval.library.alwaysAllow'
+        : 'autoApproval.library.alwaysAsk',
+    );
+    expect(document.querySelector('input[aria-label="' + other + ' 21"]')).toBeNull();
+    expect(document.querySelector('textarea')?.value).toBe(parts.freeText);
+    expect(calls).toEqual(['approvalTemplates']);
+    expect(decodeApprovalTemplateGuidance(template.text)).toEqual(parts);
+  },
+);
 
 it('edits and removes independent guidance cards without changing neighbouring rules or applying', async () => {
   let template = {

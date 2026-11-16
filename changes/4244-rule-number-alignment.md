@@ -4,8 +4,8 @@ section: Fixed
 
 ## en
 
-- Aligned approval-template rule numbers with the first text line in Always ask and Always allow lists ([#4244](https://github.com/BotHarness/DeepSeekBot/issues/4244)).
+- Improved approval-template rule lists with aligned numbers, clearer section spacing and surfaces, and top/bottom add actions that focus the new row ([#4244](https://github.com/BotHarness/DeepSeekBot/issues/4244)).
 
 ## zh
 
-- 审批模板的 Always ask 与 Always allow 列表中，规则序号与文字首行对齐（[#4244](https://github.com/BotHarness/DeepSeekBot/issues/4244)）。
+- 改善审批模板规则列表：序号对齐文字，增加标题间距和底色区分，顶部与底部均可添加并聚焦新条目（[#4244](https://github.com/BotHarness/DeepSeekBot/issues/4244)）。
