@@ -9,6 +9,18 @@ import {
 } from '../src/workspaces/tool-effects.js';
 
 describe('public tool effects', () => {
+  it.each([{}, { humanId: 'alice', topic: 'publishing' }])(
+    'keeps speaker policy lookup read-only with existing admission for %j',
+    (args) => {
+      expect(toolEffects('speaker_policy', args)).toEqual({
+        changes: 'none',
+        reach: 'local',
+        personalData: true,
+      });
+      expect(toolApprovalRequired('speaker_policy', args, false)).toBe(false);
+      expect(toolApprovalRequired('speaker_policy', args, true)).toBe(false);
+    },
+  );
   it.each(['GET', 'get', 'GeT'])('uses HTTP execution normalization for %s', (method) => {
     expect(toolEffects('secret_http', { method })).toEqual({
       changes: 'none',
@@ -682,3 +694,58 @@ it('parses repeatable Skill Invocations through the same strict send options wit
   expect(brokerCliEffects('deepseekbot send', { patch: { argv } })).toEqual(expected);
   expect(toolEffects('deepseekbot_cli', { argv })).toEqual(expected);
 });
+
+it.each([
+  {
+    argv: ['speaker-policy', '--human-id', 'human-a', '--topic', 'project-a'],
+    effect: { changes: 'none' },
+  },
+  { argv: ['bot-access', 'reachable'], effect: { changes: 'none' } },
+  { argv: ['bot-access', 'visibility', 'ada'], effect: { changes: 'none' } },
+  { argv: ['bots', 'visibility', 'ada'], effect: { changes: 'none' } },
+  { argv: ['bot-access', 'switches', 'ada'], effect: { changes: 'none' } },
+  {
+    argv: ['bots', 'switches', 'ada', '--speaker-context', 'off'],
+    effect: { changes: 'reversible', authority: 'management' },
+  },
+  {
+    argv: ['bot-access', 'switches', 'ada', '--proactive-dms', 'on', '--join-channels', 'off'],
+    effect: { changes: 'reversible', authority: 'management' },
+  },
+  {
+    argv: ['bots', 'visibility-set', 'ada', '--private', '--preview'],
+    effect: { changes: 'none' },
+  },
+  {
+    argv: ['bot-access', 'visibility-set', 'ada', '--public', 'everyone', '--preview', '--confirm'],
+    effect: { changes: 'none' },
+  },
+  {
+    argv: ['bots', 'visibility-set', 'ada', '--public', 'everyone'],
+    effect: { changes: 'reversible', authority: 'management' },
+  },
+  {
+    argv: ['bot-access', 'visibility-set', 'ada', '--private', '--confirm'],
+    effect: { changes: 'reversible', authority: 'management' },
+  },
+  { argv: ['bot-access', 'proactive-opt-out', 'ada', 'on'], effect: { changes: 'reversible' } },
+  { argv: ['roles', 'conflicts', 'alice'], effect: { changes: 'none' } },
+  {
+    argv: ['roles', 'update', 'role-a', '--policy-stdin'],
+    effect: { changes: 'reversible', authority: 'management' },
+  },
+])(
+  'keeps principal policy read/write effects aligned with actual CLI dispatch for $argv',
+  ({ argv, effect }) => {
+    const expected = {
+      reach: 'local',
+      personalData: true,
+      ...effect,
+    };
+    expect(cliEffects(argv)).toEqual(expected);
+    expect(brokerCliEffects('deepseekbot ' + argv[0], { patch: { argv } })).toEqual(expected);
+    expect(toolEffects('deepseekbot_cli', { argv })).toEqual(expected);
+    if ('authority' in effect)
+      expect(toolApprovalRequired('deepseekbot ' + argv[0], { patch: { argv } }, true)).toBe(true);
+  },
+);

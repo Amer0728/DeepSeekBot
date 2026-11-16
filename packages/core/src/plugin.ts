@@ -1,4 +1,5 @@
 import { hasIrreversibleExternalEffect, toolEffects } from './workspaces/tool-effects.js';
+import { reconcilePublicBotMemories } from './workspaces/bot-memory-placement.js';
 import { installNativeSearchResultGuard, currentRoots } from './workspaces/grant-native-tools.js';
 import { relocateTobWorkspaces, recoverSpaceTransfers } from './workspaces/space-lifecycle.js';
 import { WorkspaceSpaces } from './workspaces/spaces.js';
@@ -769,6 +770,11 @@ function initializeCore(
         attachOperationalModule(operationalDatabase, 'workspace-spaces'),
         realpathSync(dshHome),
       );
+    if (operationalDatabase.mode === 'ready')
+      reconcilePublicBotMemories(
+        attachOperationalModule(operationalDatabase, 'workspace-spaces'),
+        realpathSync(dshHome),
+      );
     startup.enter('bot-registry', 'initialize');
     registry = createPersonaBotRegistry({
       rootDir,
@@ -1053,6 +1059,12 @@ function initializeCore(
   const team = new TeamService(attachOperationalModule(operationalDatabase, 'team'), channels, {
     purge: contentPurge,
     spaces: () => spaces,
+    replaceBotMemory: async (slug, action) => {
+      if (!runtime?.replaceOrchestrator) throw new TeamError('unavailable');
+      const result = await runtime.replaceOrchestrator(slug, action);
+      if (result.outcome === 'refused') throw new TeamError(result.code, undefined, { slug });
+      return result.value;
+    },
     settleBotPreparations: (humanId) => registry.settled(humanId),
     stopBots: async (slugs) => {
       if (!slugs.length) return;
@@ -1069,9 +1081,9 @@ function initializeCore(
     options.activeQuestionMessageIds,
     options.activeToolApprovalMessageIds,
     options.activePrivateInputMessageIds,
-    () => {
+    (human) => {
       try {
-        return roster.snapshot().muted;
+        return roster.forHuman(human.humanId).snapshot().muted;
       } catch {
         return [];
       }
@@ -1346,6 +1358,7 @@ function initializeCore(
   const voiceZoom: { zoom?: VoiceCalls['zoom'] | undefined } = {};
   startup.enter('bot-runtime', 'initialize');
   runtime = createBotRuntime({
+    ...(team.bots.available ? { team } : {}),
     voiceMessages,
     callFrames: {
       zoom: (input) =>
@@ -1467,7 +1480,10 @@ function initializeCore(
       await externalMessaging.disableBot(slug);
       await options.erasePrivateAccounts?.(slug);
     },
-    changed: () => live?.publishRosterCommitted(),
+    changed: (slug) => {
+      spaces.botMemory.cleanupErased(slug);
+      live?.publishRosterCommitted();
+    },
     log: (event) => options.warn?.(JSON.stringify(event)),
   });
   contentPurge.bindMemberBots(deletions);

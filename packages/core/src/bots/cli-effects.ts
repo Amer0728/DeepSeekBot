@@ -77,6 +77,7 @@ export const CLI_EFFECTS = {
   'bot-activity': { effects: read, brokerRead: true },
   'bot-activity-history': { effects: read, brokerRead: true },
   'bot-appearance-set': { effects: write, brokerRead: false },
+  'bot-access': { effects: management, brokerRead: true },
   'bot-attention': { effects: read, brokerRead: true },
   'bot-avatar-set': { effects: write, brokerRead: false },
   'bot-banner-set': { effects: write, brokerRead: false },
@@ -441,6 +442,7 @@ export const CLI_EFFECTS = {
   'storage-messages-cleanup-preview': { effects: read, brokerRead: true },
   'storage-usage': { effects: read, brokerRead: true },
   'skills-list': { effects: read, brokerRead: true },
+  'speaker-policy': { effects: read, brokerRead: true },
   'takeover-cancel': { effects: write, brokerRead: false },
   'takeover-complete': { effects: write, brokerRead: false },
   'takeover-request': { effects: write, brokerRead: false },
@@ -506,6 +508,22 @@ export function hasCliDeclaration(command: string): boolean {
   return Object.hasOwn(declarations, canonicalCliCommandName(command));
 }
 
+function botAccessEffects(
+  action: string | undefined,
+  values: ReturnType<typeof parseBotCliArgs>['values'],
+): ToolEffects | undefined {
+  if (action === 'reachable' || action === 'visibility') return read;
+  if (action === 'visibility-set') return values.preview ? read : management;
+  if (action === 'switches')
+    return values['proactive-dms'] === undefined &&
+      values['join-channels'] === undefined &&
+      values['speaker-context'] === undefined
+      ? read
+      : management;
+  if (action === 'proactive-opt-out') return write;
+  return undefined;
+}
+
 function familyEffects(
   command: string,
   action: string | undefined,
@@ -524,9 +542,11 @@ function familyEffects(
         case 'delete':
           return destructive;
         default:
-          return undefined;
+          return botAccessEffects(action, values);
       }
     }
+    case 'bot-access':
+      return botAccessEffects(action, values);
     case 'channels':
       if (
         action === undefined ||
@@ -548,7 +568,7 @@ function familyEffects(
       if (action === 'purge') return destructiveSecretManagement;
       return action === undefined ? secretManagement : management;
     case 'roles':
-      return action === 'list' || action === 'catalog'
+      return action === 'list' || action === 'catalog' || action === 'conflicts'
         ? read
         : action === 'delete'
           ? destructiveManagement

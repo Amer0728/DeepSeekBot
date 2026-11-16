@@ -59,6 +59,7 @@ const DESTINATION_FIELDS = [
   'channel_id',
   'grant_id',
   'bot_id',
+  'human_id',
   'binding_id',
 ] as const;
 
@@ -120,6 +121,11 @@ export function createBotMessageTool(
       channel_id: {
         type: 'string',
         description: 'Explicit authorized Channel destination for a proactive send.',
+      },
+      human_id: {
+        type: 'string',
+        description:
+          'Proactively DM this Host Human; requires the Bot proactive switch, current audience and no per-Bot opt-out.',
       },
       bot_id: {
         type: 'string',
@@ -233,7 +239,12 @@ export function createBotMessageTool(
         throw new BotMessageError('unavailable-source', 'The trusted reply source is unavailable.');
       const external =
         reply?.kind === 'external' || args.grant_id !== undefined || args.binding_id !== undefined;
-      let channelId = reply?.kind === 'channel' ? reply.channelId : args.channel_id;
+      let channelId =
+        args.human_id === undefined
+          ? reply?.kind === 'channel'
+            ? reply.channelId
+            : args.channel_id
+          : run.channels.startHumanDm?.(args.human_id).id;
       const channel =
         external || args.bot_id !== undefined
           ? undefined

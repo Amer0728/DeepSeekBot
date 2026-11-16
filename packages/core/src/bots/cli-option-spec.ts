@@ -232,6 +232,12 @@ export const TAKEOVER_OPTIONS = {
 } as const;
 
 export const TEAM_OPTIONS = {
+  private: { type: 'boolean' },
+  public: { type: 'string' },
+  'proactive-dms': { type: 'string' },
+  'join-channels': { type: 'string' },
+  'speaker-context': { type: 'string' },
+  'policy-stdin': { type: 'boolean' },
   as: { type: 'string' },
   after: { type: 'string' },
   reason: { type: 'string' },
