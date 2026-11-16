@@ -3341,6 +3341,14 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
   const skillAgentFor = (slug: string) =>
     hostSkillAgent(ctx, core.runtime.currentOrchestratorSessionId?.(slug));
   const skillCatalog = new SkillCatalog({
+    grantsFor: (slug) =>
+      core.grants.list(slug).flatMap((grant) => {
+        try {
+          return [core.grants.requireActive(slug, grant.id)];
+        } catch {
+          return [];
+        }
+      }),
     memoryDirFor: (slug) =>
       core.registry.get(slug) === undefined ? undefined : core.registry.memoryDirFor(slug),
     viewFor: createSkillViewPort({
@@ -3386,7 +3394,9 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     const offRegistry = core.operationalDatabase.subscribe(({ topics }) => {
       if (
         topics.some((topic) =>
-          ['bot-registry', 'member-purged', 'session-ownership'].includes(topic),
+          ['bot-registry', 'member-purged', 'session-ownership', 'workspace-grants'].includes(
+            topic,
+          ),
         )
       )
         refresh.reconcile();
