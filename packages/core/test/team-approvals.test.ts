@@ -1173,12 +1173,12 @@ describe('M5 approval projections and decisions', () => {
           expect(() =>
             f.team.approvals.requireRequest(bob, memberDm.id, request.messageId),
           ).toThrow();
-          masked(
-            f.team.approvals.project(bob, {
-              channelId: memberDm.id,
-              message: f.channels.message(memberDm.id, request.messageId),
-            }),
-          );
+          const projection = f.team.approvals.project(bob, {
+            channelId: memberDm.id,
+            message: f.channels.message(memberDm.id, request.messageId),
+          });
+          masked(projection);
+          expect(JSON.stringify(projection)).not.toContain('PARTICIPANT_PRIVATE_INPUT');
         }
         expect(JSON.stringify(f.channels.readMessages(principalDm.id))).not.toContain(
           'PARTICIPANT_',
