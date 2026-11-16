@@ -4485,6 +4485,7 @@ export const zh = {
   'autoApproval.library.inUse': '{names} 正在使用这个共享模板。保存仅影响后续审批。',
   'autoApproval.library.deleteTitle': '删除“{title}”？',
   'autoApproval.library.deleteBody': '将永久删除模板“{name}”。',
+  'autoApproval.library.deleteContentUnavailable': '无法读取模板内容。确认后仍会删除此文件。',
   'autoApproval.library.deletePreviewFailed': '删除影响读取失败。重新读取后再确认。',
   'autoApproval.library.deleteChanged': '引用或全局选择已变化。核对最新结果后再确认。',
   'autoApproval.library.deleteUnconfirmed': '删除结果尚未确认。重新读取当前状态后再决定。',
@@ -10510,6 +10511,8 @@ My relationship with you, established lore and topics to avoid: [fill in].
   'autoApproval.library.inUse': 'Used by {names}. Saves affect their future Reviews.',
   'autoApproval.library.deleteTitle': 'Delete “{title}”?',
   'autoApproval.library.deleteBody': 'Permanently delete template “{name}”.',
+  'autoApproval.library.deleteContentUnavailable':
+    'The template content cannot be read. Confirming still deletes this file.',
   'autoApproval.library.deletePreviewFailed':
     'Could not read deletion effects. Reload before confirming.',
   'autoApproval.library.deleteChanged':

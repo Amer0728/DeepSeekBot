@@ -833,7 +833,7 @@ deepseekbot approval-template delete night-shift --confirm --delete-revision <re
 
 删除命令先返回只读 `preview`：`revision` 绑定模板内容、当前全局选择及全部引用。预览包含 `globalDefaultBefore`、`globalDefaultAfter`、`globalDefaultAvailable`、可见 `affectedBots`（`slug` 和 `source`），以及身份不可见引用的 `hiddenBotCount`。加 `--confirm --delete-revision` 才删除；未确认不删除、不改选择。模板内容、引用或全局策略已变时返回 `approval-template-delete-changed`，须重新预览。
 
-确认后，特定引用统一改为 `@global`；删除全局默认会清空默认，原继承者保持继承并关闭 Reviewer。全局仍选另一模板时会使用它；默认不可读时仍显示不可用，未解决调用交给 Human。其他特定选择、关闭、Full Access 及已保存确定性规则不变；已开始的 Review 保留当次版本。结果含 `inheritedBots` 和 `globalDefault`；兼容字段 `clearedBots` 表示已移除特定选择的可见引用。删除失败返回 `approval-template-delete-unavailable`；若恢复选择也失败则为 `approval-template-delete-incomplete`，重试前先读取当前状态。意外缺失或读失败不会触发删除回退。
+确认后，特定引用统一改为 `@global`；删除全局默认会清空默认，原继承者保持继承并关闭 Reviewer。全局仍选另一模板时会使用它；默认不可读时仍显示不可用，未解决调用交给 Human。其他特定选择、关闭、Full Access 及已保存确定性规则不变；已开始的 Review 保留当次版本。结果含 `inheritedBots` 和 `globalDefault`；兼容字段 `clearedBots` 表示已移除特定选择的可见引用。删除失败返回 `approval-template-delete-unavailable`；若恢复选择也失败则为 `approval-template-delete-incomplete`，重试前先读取当前状态。自定义模板内容不可读或超限时，仍可显式删除：预览返回 `contentUnavailable: true`。此时确认版本绑定有界的文件系统身份（设备/inode、大小及时间戳），不对不可读正文做完整哈希；正常模板仍绑定正文。文件身份变化或修复内容后必须重新预览。不可读文件不在模板列表中；恢复时使用已知名称运行 CLI 预览/删除命令。全局选择读取失败仍拒绝删除。
 
 `off`、`inherit` 仍可作为自定义模板名。选择时加 `--literal-template` 即按字面名称选中；不加时继续保留原有关闭和继承别名。
 

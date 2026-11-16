@@ -599,6 +599,61 @@ describe('Approval Template bridge methods', () => {
     },
   );
 
+  it('explicitly deletes oversized custom content and keeps bulk fallback and global clearing', () => {
+    const { bridge, registry, library, dir } = methods();
+    library.create('night-shift', MINE);
+    library.setGlobal('night-shift');
+    registry.setApprovalTemplate('bob', '@global');
+    const file = join(dir, 'night-shift.md');
+    writeFileSync(file, 'x'.repeat(APPROVAL_TEMPLATE_TEXT_LIMIT + 1));
+    expect(library.get('night-shift')).toBeUndefined();
+    const preview = bridge.approvalTemplateDeletePreview({ name: 'night-shift' });
+    if (!preview.ok) throw new Error(preview.error.code);
+    expect(preview.value.preview).toMatchObject({
+      contentUnavailable: true,
+      globalDefaultAfter: null,
+      affectedBots: [
+        { slug: 'ada', source: 'specific' },
+        { slug: 'bob', source: 'global' },
+      ],
+    });
+    expect(bridge.approvalTemplateDelete({ name: 'night-shift' })).toMatchObject({
+      ok: false,
+      error: { code: 'confirmation-required' },
+    });
+    expect(existsSync(file)).toBe(true);
+    expect(
+      bridge.approvalTemplateDelete({
+        name: 'night-shift',
+        confirmed: true,
+        revision: preview.value.preview.revision,
+      }),
+    ).toMatchObject({ ok: true, value: { inheritedBots: ['ada'], globalDefault: null } });
+    expect(existsSync(file)).toBe(false);
+    expect(registry.get('ada')?.approvalTemplate).toBe('@global');
+    expect(registry.get('bob')?.approvalTemplate).toBe('@global');
+    expect(library.global()).toEqual({ kind: 'off' });
+  });
+
+  it.each(['grow', 'repair'] as const)('refuses stale oversized deletion after %s', (change) => {
+    const { bridge, registry, library, dir } = methods();
+    library.create('night-shift', MINE);
+    const file = join(dir, 'night-shift.md');
+    writeFileSync(file, 'x'.repeat(APPROVAL_TEMPLATE_TEXT_LIMIT + 1));
+    const preview = bridge.approvalTemplateDeletePreview({ name: 'night-shift' });
+    if (!preview.ok) throw new Error(preview.error.code);
+    writeFileSync(file, change === 'repair' ? MINE : 'x'.repeat(APPROVAL_TEMPLATE_TEXT_LIMIT + 2));
+    expect(
+      bridge.approvalTemplateDelete({
+        name: 'night-shift',
+        confirmed: true,
+        revision: preview.value.preview.revision,
+      }),
+    ).toMatchObject({ ok: false, error: { code: 'approval-template-delete-changed' } });
+    expect(existsSync(file)).toBe(true);
+    expect(registry.get('ada')?.approvalTemplate).toBe('night-shift');
+  });
+
   it('refuses unreadable selection instead of silently choosing a deletion fallback', () => {
     const { bridge, registry, library, dir } = methods();
     library.create('night-shift', MINE);

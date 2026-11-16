@@ -394,6 +394,11 @@ export function ApprovalTemplateLibrarySettings({
           {deleting.kind === 'loading' ? <Note>{t('autoApproval.loading')}</Note> : null}
           {preview === undefined ? null : (
             <>
+              {preview.contentUnavailable ? (
+                <Callout tone="warning">
+                  {t('autoApproval.library.deleteContentUnavailable')}
+                </Callout>
+              ) : null}
               {direct.length === 0 ? null : (
                 <Callout tone="warning">
                   {t('autoApproval.library.deleteDirect', { names: botNames(store, direct) })}

@@ -6,6 +6,7 @@ export const approvalTemplateDeletionPreviewSchema = z.object({
   globalDefaultBefore: z.string().nullable(),
   globalDefaultAfter: z.string().nullable(),
   globalDefaultAvailable: z.boolean(),
+  contentUnavailable: z.boolean().optional(),
   hiddenBotCount: z.number().int().nonnegative(),
   affectedBots: z.array(
     z.object({ slug: z.string().min(1), source: z.enum(['specific', 'global']) }),

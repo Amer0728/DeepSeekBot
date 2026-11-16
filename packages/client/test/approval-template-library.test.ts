@@ -732,3 +732,30 @@ it('keeps a custom template named off separate from the Off option', async () =>
   await act(async () => off.click());
   expect(writes).toEqual([{ template: 'off' }, { template: null }]);
 });
+
+it('warns when deletion targets unreadable content and still requires explicit confirmation', async () => {
+  const writes: unknown[] = [];
+  const call: BridgeCall = async (endpoint, payload) => {
+    if (endpoint === 'approvalTemplates')
+      return {
+        ok: true,
+        value: {
+          templates: [...templates, customTemplate],
+          globalDefault: 'cautious',
+        },
+      };
+    if (endpoint === 'approvalTemplateDeletePreview')
+      return { ok: true, value: { preview: { ...deletePreview, contentUnavailable: true } } };
+    if (endpoint === 'approvalTemplateDelete') {
+      writes.push(payload);
+      return { ok: true, value: {} };
+    }
+    throw new Error('Unexpected endpoint ' + endpoint);
+  };
+  await openDeletion(call);
+  expect(document.body.textContent).toContain(t('autoApproval.library.deleteContentUnavailable'));
+  expect(writes).toEqual([]);
+  expect(confirmDeletion().disabled).toBe(false);
+  await act(async () => confirmDeletion().click());
+  expect(writes).toHaveLength(1);
+});

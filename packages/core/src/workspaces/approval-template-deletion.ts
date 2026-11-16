@@ -39,8 +39,11 @@ export class ApprovalTemplateDeletion {
     if (!isApprovalTemplateName(name)) return { ok: false, reason: 'invalid-name' };
     try {
       const template = this.library.get(name);
-      if (template === undefined) return { ok: false, reason: 'not-found' };
-      if (template.builtIn) return { ok: false, reason: 'built-in' };
+      const fileIdentity =
+        template === undefined ? this.library.customFileIdentity(name) : undefined;
+      if (template === undefined && fileIdentity === undefined)
+        return { ok: false, reason: 'not-found' };
+      if (template?.builtIn) return { ok: false, reason: 'built-in' };
       const global = this.library.global();
       if (global.kind === 'invalid') return { ok: false, reason: 'selection-unavailable' };
       const before = global.kind === 'selected' ? global.name : null;
@@ -59,13 +62,14 @@ export class ApprovalTemplateDeletion {
         .sort((a, b) => a.slug.localeCompare(b.slug));
       const impact = {
         name,
+        ...(template === undefined ? { contentUnavailable: true } : {}),
         globalDefaultBefore: before,
         globalDefaultAfter: after,
         globalDefaultAvailable: remaining !== undefined,
         affectedBots,
       };
       const revision = createHash('sha256')
-        .update(JSON.stringify([impact, template.text, remaining?.text]))
+        .update(JSON.stringify([impact, template?.text ?? { fileIdentity }, remaining?.text]))
         .digest('hex');
       const visibleBots = affectedBots.filter((bot) => visibleSlugs.has(bot.slug));
       return {
