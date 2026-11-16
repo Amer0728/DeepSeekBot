@@ -1,14 +1,33 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  existsSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { expect, it } from 'vitest';
 
 function withRunner({ from = 'inherit', to = 'off', failure = '', baseline }, check) {
   const directory = mkdtempSync(join(tmpdir(), 'perf-cli-effects-unit-'));
   try {
+    const checkout = join(directory, 'checkout');
+    for (const file of [
+      'perf-cli-effects.mjs',
+      'test/fixtures/perf-cli-effects-preload.mjs',
+      'perf-budgets/cli-effects.json',
+    ]) {
+      const target = join(checkout, 'scripts', file);
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(fileURLToPath(new URL('../' + file, import.meta.url)), target);
+    }
+    expect(existsSync(join(checkout, 'packages/core/cli/index.mjs'))).toBe(false);
     const fixture = join(directory, 'fixture.json');
     const instance = join(directory, 'instance.json');
     const output = join(directory, 'output.json');
@@ -18,7 +37,7 @@ function withRunner({ from = 'inherit', to = 'off', failure = '', baseline }, ch
     writeFileSync(fixture, fixtureText);
     writeFileSync(instance, JSON.stringify({ url: 'http://127.0.0.1:1/?token=unit-only' }));
     const args = [
-      fileURLToPath(new URL('../perf-cli-effects.mjs', import.meta.url)),
+      join(checkout, 'scripts/perf-cli-effects.mjs'),
       '--source-sha',
       'f'.repeat(40),
       '--fixture',
@@ -50,7 +69,9 @@ function withRunner({ from = 'inherit', to = 'off', failure = '', baseline }, ch
       writeFileSync(baselinePath, JSON.stringify(valid));
       args.push('--baseline', baselinePath);
     }
-    const preload = new URL('./fixtures/perf-cli-effects-preload.mjs', import.meta.url).href;
+    const preload = pathToFileURL(
+      join(checkout, 'scripts/test/fixtures/perf-cli-effects-preload.mjs'),
+    ).href;
     const child = spawnSync(process.execPath, args, {
       encoding: 'utf8',
       shell: false,

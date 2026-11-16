@@ -51,8 +51,8 @@ const cli = `
 `;
 
 export async function resolve(specifier, context, next) {
-  const resolved = await next(specifier, context);
-  return resolved.url.endsWith('/packages/core/cli/index.mjs')
-    ? { url: 'data:text/javascript,' + encodeURIComponent(cli), shortCircuit: true }
-    : resolved;
+  const cliUrl = new URL('../../../packages/core/cli/index.mjs', import.meta.url).href;
+  if (specifier === cliUrl)
+    return { url: 'data:text/javascript,' + encodeURIComponent(cli), shortCircuit: true };
+  return next(specifier, context);
 }

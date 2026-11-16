@@ -18,6 +18,7 @@ import {
   traceGenuiOpening,
 } from './perf-genui-opening-observer.mjs';
 import { openTimelineConversation } from './perf-timeline-navigation.mjs';
+import { runTimelineSeedTool } from './perf-timeline-seed.mjs';
 import { dismissGenuiOpeningOverlays as dismiss } from './perf-genui-opening-overlays.mjs';
 import {
   assertNativeViewportUnchanged,
@@ -342,9 +343,13 @@ try {
         assert.deepEqual(target.previewDiagnostics, []);
       }
       const before = performance.now();
-      const sent = await call('botToolRun', {
+      const sent = await runTimelineSeedTool({
+        rpc: call,
         slug: bot.slug,
-        tool: 'bot_send_message',
+        onState: (state) => {
+          target.approval = state;
+          save();
+        },
         args: {
           channel_id: bot.channelId,
           body: 'Synthetic project comparison. Review the projects and their current metrics.',
