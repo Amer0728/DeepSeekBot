@@ -431,11 +431,11 @@ describe('owned model-free Tob CLI invocation', () => {
     await f.native();
     shouldDelegate = true;
     await f.authority.run(f.input, () => f.native());
+    if (!captured) throw new Error('Native executor did not enter policy');
+    const admitted = captured;
+    expect(() => f.authority.require(admitted)).toThrow();
     shouldDelegate = false;
     await f.native();
-    if (!captured) throw new Error('Native executor did not enter policy');
-    const expired = captured;
-    expect(() => f.authority.require(expired)).toThrow();
     expect(f.runHost).not.toHaveBeenCalled();
   });
 
