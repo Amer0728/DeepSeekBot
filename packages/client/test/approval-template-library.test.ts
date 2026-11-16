@@ -987,3 +987,73 @@ it.each([false, true])(
     expect(writes).toBe(0);
   },
 );
+
+it.each([false, true])(
+  'keeps the latest library, global choice and editor after an older read finishes (fails: %s)',
+  async (olderFails) => {
+    const pending: ((value: Awaited<ReturnType<BridgeCall>>) => void)[] = [];
+    const latestTemplate = {
+      ...customTemplate,
+      name: 'dawn-shift',
+      title: 'Dawn shift',
+      text: 'Latest guidance',
+    };
+    let reads = 0;
+    let writes = 0;
+    const call: BridgeCall = async (endpoint) => {
+      if (endpoint === 'approvalTemplates') {
+        if (++reads === 1)
+          return {
+            ok: true,
+            value: { templates: [...templates, customTemplate], globalDefault: 'night-shift' },
+          };
+        return new Promise((resolve) => pending.push(resolve));
+      }
+      if (endpoint === 'approvalTemplateDeletePreview')
+        return {
+          ok: false,
+          error: { code: 'unknown-template', message: 'Removed by another client', details: {} },
+        };
+      if (endpoint === 'approvalTemplateGlobalSet') {
+        writes++;
+        return { ok: true, value: {} };
+      }
+      throw new Error('Unexpected ' + endpoint);
+    };
+    await openDeletion(call);
+    expect(pending).toHaveLength(1);
+    await clickText(t('common.cancel'));
+    await clickText(t('common.cancel'));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await act(async () => trigger().click());
+    await clickText(t('autoApproval.template.getWorkDone'));
+    expect(pending).toHaveLength(2);
+    const later = pending[1];
+    const earlier = pending[0];
+    if (!later || !earlier) throw new Error('Missing concurrent reads');
+    await act(async () =>
+      later({
+        ok: true,
+        value: { templates: [...templates, latestTemplate], globalDefault: 'get-work-done' },
+      }),
+    );
+    const edit = host.querySelector<HTMLButtonElement>(
+      '[data-approval-template="dawn-shift"] button',
+    );
+    if (!edit) throw new Error('Missing latest template');
+    await act(async () => edit.click());
+    expect(document.querySelector('textarea')?.value).toBe('Latest guidance');
+    await act(async () =>
+      earlier(
+        olderFails
+          ? { ok: false, error: { code: 'read-failed', message: 'Older read failed', details: {} } }
+          : { ok: true, value: { templates, globalDefault: null } },
+      ),
+    );
+    expect(host.querySelector('[data-approval-template="dawn-shift"]')).not.toBeNull();
+    expect(trigger().textContent).toContain(t('autoApproval.template.getWorkDone'));
+    expect(document.querySelector('textarea')?.value).toBe('Latest guidance');
+    expect(document.body.textContent).not.toContain('Older read failed');
+    expect(writes).toBe(1);
+  },
+);

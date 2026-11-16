@@ -193,6 +193,7 @@ export function ApprovalTemplateLibrarySettings({
   const [editor, setEditor] = useState<Editor>();
   const [deleting, setDeleting] = useState<Deleting>();
   const deletionGeneration = useRef(0);
+  const reloadGeneration = useRef(0);
   const [applyTo, setApplyTo] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -201,7 +202,14 @@ export function ApprovalTemplateLibrarySettings({
   const currentBot = bots.find((bot) => bot.slug === currentBotSlug);
 
   const reload = async () => {
-    const next = await loadApprovalTemplates(call);
+    const generation = ++reloadGeneration.current;
+    const result = await loadApprovalTemplates(call).then(
+      (value) => ({ kind: 'loaded' as const, value }),
+      (cause: unknown) => ({ kind: 'failed' as const, cause }),
+    );
+    if (generation !== reloadGeneration.current) return { kind: 'superseded' as const, result };
+    if (result.kind === 'failed') throw result.cause;
+    const next = result.value;
     setTemplates(next.templates);
     setGlobalDefault(next.globalDefault ?? null);
     setGlobalError(false);
@@ -213,22 +221,16 @@ export function ApprovalTemplateLibrarySettings({
         ? undefined
         : current,
     );
-    return next;
+    return result;
   };
   const mount = useMountedResource<HTMLDivElement>(() => {
     let live = true;
-    loadApprovalTemplates(call)
-      .then((next) => {
-        if (live) {
-          setTemplates(next.templates);
-          setGlobalDefault(next.globalDefault ?? null);
-        }
-      })
-      .catch((cause: unknown) => {
-        if (live) setLoadError(errorMessage(cause));
-      });
+    void reload().catch((cause: unknown) => {
+      if (live) setLoadError(errorMessage(cause));
+    });
     return () => {
       live = false;
+      reloadGeneration.current++;
       deletionGeneration.current++;
     };
   }, [call]);
@@ -303,8 +305,14 @@ export function ApprovalTemplateLibrarySettings({
         if (deletionGeneration.current !== generation) return;
         if (cause instanceof BridgeCallError && cause.code === 'unknown-template') {
           try {
-            await reload();
-            if (deletionGeneration.current === generation) cancelDeletion();
+            const next = await reload();
+            if (deletionGeneration.current === generation) {
+              if (next.kind === 'loaded') cancelDeletion();
+              else {
+                setDeleting({ template, kind: 'failed' });
+                setError(t('autoApproval.library.deletePreviewFailed'));
+              }
+            }
           } catch (readCause: unknown) {
             if (deletionGeneration.current !== generation) return;
             setTemplates(undefined);
@@ -325,9 +333,10 @@ export function ApprovalTemplateLibrarySettings({
   const reconcileDeletion = async (name: string, generation: number): Promise<void> => {
     try {
       const next = await reload();
+      if (next.kind === 'superseded') return;
       if (
         deletionGeneration.current === generation &&
-        !next.templates.some((template) => template.name === name)
+        !next.value.templates.some((template) => template.name === name)
       ) {
         try {
           await previewApprovalTemplateDeletion(call, name);
@@ -350,8 +359,9 @@ export function ApprovalTemplateLibrarySettings({
     const generation = deletionGeneration.current;
     setBusy(true);
     void reload()
-      .then(() => {
-        if (deletionGeneration.current === generation) beginDeletion(template);
+      .then((next) => {
+        if (next.kind === 'loaded' && deletionGeneration.current === generation)
+          beginDeletion(template);
       })
       .catch(() => {
         setGlobalDefault(undefined);
