@@ -337,6 +337,7 @@ it.each(['immediate', 'retry'] as const)(
     let deleted = false;
     let writes = 0;
     let reads = 0;
+    let absentPreviews = 0;
     const call: BridgeCall = async (endpoint) => {
       if (endpoint === 'approvalTemplates') {
         reads++;
@@ -349,10 +350,16 @@ it.each(['immediate', 'retry'] as const)(
           },
         };
       }
-      if (endpoint === 'approvalTemplateDeletePreview')
-        return deleted
-          ? { ok: false, error: { code: 'unknown-template', message: 'removed', details: {} } }
-          : { ok: true, value: { preview: deletePreview } };
+      if (endpoint === 'approvalTemplateDeletePreview') {
+        if (deleted) {
+          absentPreviews++;
+          return {
+            ok: false,
+            error: { code: 'unknown-template', message: 'removed', details: {} },
+          };
+        }
+        return { ok: true, value: { preview: deletePreview } };
+      }
       if (endpoint === 'approvalTemplateDelete') {
         writes++;
         deleted = true;
@@ -365,7 +372,9 @@ it.each(['immediate', 'retry'] as const)(
     expect(writes).toBe(1);
     if (recovery === 'retry') {
       expect(trigger().textContent).toContain('读取失败');
-      const retry = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+      const dialog = confirmDeletion().closest('[role="dialog"]');
+      if (!dialog) throw new Error('Missing deletion dialog');
+      const retry = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(
         (b) => b.textContent === t('autoApproval.reload'),
       );
       if (!retry) throw new Error('Missing read recovery');
@@ -373,6 +382,10 @@ it.each(['immediate', 'retry'] as const)(
     }
     expect(host.querySelector('[data-approval-template="night-shift"]')).toBeNull();
     expect(trigger().textContent).toContain(t('autoApproval.off'));
+    expect(document.body.textContent).not.toContain(
+      t('autoApproval.library.deleteTitle', { title: 'Night shift' }),
+    );
+    expect(absentPreviews).toBe(1);
     expect(writes).toBe(1);
   },
 );
