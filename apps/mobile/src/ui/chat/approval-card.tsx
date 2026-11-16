@@ -200,9 +200,9 @@ function ApprovalCardContent({
               : {})}
         >
           {line === undefined ? null : (
-            <View testID="approval-result">
-              <CardNote live>{line.text}</CardNote>
-            </View>
+            <CardNote testID="approval-result" live>
+              {line.text}
+            </CardNote>
           )}
           {contentCleared || resolution !== undefined ? null : (
             <CardButtons>
@@ -321,9 +321,9 @@ function ApprovalCardContent({
         {highRisk(request.toolName) ? <CardNote>{riskNote(request.toolName)}</CardNote> : null}
         <CardNote>{alwaysNote(request)}</CardNote>
         {line === undefined ? null : (
-          <View testID="approval-result">
-            <CardNote live>{line.text}</CardNote>
-          </View>
+          <CardNote testID="approval-result" live>
+            {line.text}
+          </CardNote>
         )}
         {phase.kind !== 'failed' ? null : (
           <CardButtons>
