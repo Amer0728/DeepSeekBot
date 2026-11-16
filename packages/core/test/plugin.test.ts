@@ -822,6 +822,7 @@ describe('plugin entry', () => {
       'channelAdminsSet',
       'channelPolicySet',
       'channelHumanAdd',
+      'channelMemberCandidates',
       'channelDescriptionSet',
       'teamDirectory',
       'humanDm',

@@ -1562,7 +1562,7 @@
       "behaviors": ["desktop.composer", "desktop.group.manage"],
       "reason": "Task cookie profile; checks draft persistence, composer clearing, invite controls and Client errors across Channel changes.",
       "task": 1967,
-      "sha256": "e770745c5c2f4cd6127c4016b8cc02f12f6183b3ab022cc10c83f22edbfcce3d"
+      "sha256": "05f16e29a66a658faef886484c0a0e2c5154cc7665395fddc8607e0c664712f2"
     },
     {
       "path": "scripts/e2e-client-reads.mjs",
@@ -1738,7 +1738,7 @@
       "behaviors": ["desktop.group.manage"],
       "reason": "Task cookie profile with optional restart/join phases; group name/avatar, membership decisions and refresh persistence.",
       "task": 1967,
-      "sha256": "7bd3d2a01baef1419390ef8b0836ed1d52116de51e8e46e334a85995595d2256"
+      "sha256": "424ca27bf88a299440ca73d7c916eeb1c4444f4616c2d7c86ea4cd14c77dc881"
     },
     {
       "path": "scripts/e2e-group-motion-matrix.mjs",
