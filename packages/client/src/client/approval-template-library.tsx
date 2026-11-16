@@ -27,6 +27,7 @@ import { Callout } from './ds/callout.js';
 import { Field, FieldStack, TextAreaField, TextField } from './ds/field.js';
 import { ConfirmDialog, DangerTextButton, FormDialog } from './ds/form-dialog.js';
 import { Note } from './ds/note.js';
+import { ReadFailure } from './ds/read-failure.js';
 import { Select } from './ds/select.js';
 import { SettingsRow, SettingsSection } from './ds/settings-row.js';
 import { border, color, space, text } from './ds/tokens.stylex.js';
@@ -275,7 +276,17 @@ export function ApprovalTemplateLibrarySettings({
         close();
         await reload();
       })
-      .catch((cause: unknown) => setError(errorMessage(cause)))
+      .catch(async (cause: unknown) => {
+        setError(errorMessage(cause));
+        setTemplates(undefined);
+        setGlobalDefault(undefined);
+        setGlobalError(true);
+        try {
+          await reload();
+        } catch (readCause: unknown) {
+          setLoadError(errorMessage(readCause));
+        }
+      })
       .finally(() => setBusy(false));
   };
 
@@ -723,7 +734,13 @@ export function ApprovalTemplateLibrarySettings({
           loadError === undefined ? (
             <LoadingSkeleton kind="sidebar" label={t('autoApproval.library.title')} />
           ) : (
-            <Note tone="danger">{loadError}</Note>
+            <ReadFailure
+              retryLabel={t('autoApproval.reload')}
+              busy={busy}
+              onRetry={() => updateGlobal({ kind: 'reload' })}
+            >
+              {loadError}
+            </ReadFailure>
           )
         ) : (
           list.map((template) => {

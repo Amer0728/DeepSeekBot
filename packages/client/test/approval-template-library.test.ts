@@ -759,3 +759,136 @@ it('warns when deletion targets unreadable content and still requires explicit c
   await act(async () => confirmDeletion().click());
   expect(writes).toHaveLength(1);
 });
+
+it.each([
+  { creation: false, readFails: false },
+  { creation: false, readFails: true },
+  { creation: true, readFails: false },
+  { creation: true, readFails: true },
+])(
+  'reopens persisted guidance after partial save (create=$creation, reload fails=$readFails)',
+  async ({ creation, readFails }) => {
+    const record = (freeText: string) => ({
+      name: 'reopen-qa',
+      title: 'Reopen QA',
+      description: '',
+      builtIn: false,
+      usedBy: [],
+      text: encodeApprovalTemplateGuidance({ alwaysAsk: [], alwaysAllow: [], freeText }),
+    });
+    let saved: ReturnType<typeof record> | undefined = creation
+      ? undefined
+      : record('Original guidance');
+    let reads = 0,
+      updates = 0,
+      creates = 0,
+      selections = 0;
+    const applied: string[] = [];
+    const store = createStore();
+    store.setRoster(
+      [
+        {
+          slug: 'qa',
+          displayName: 'QA',
+          roles: [],
+          aggregateState: 'idle',
+          workspaces: [],
+          createdAt: '2026-11-16',
+        },
+      ],
+      [],
+    );
+    store.select({ kind: 'bot', slug: 'qa' });
+    const call: BridgeCall = async (endpoint, payload) => {
+      if (endpoint === 'approvalTemplates') {
+        reads++;
+        if (readFails && reads === 2) throw new Error('Read unavailable');
+        return {
+          ok: true,
+          value: {
+            templates: [...templates, ...(saved === undefined ? [] : [saved])],
+            globalDefault: null,
+          },
+        };
+      }
+      if (endpoint === 'approvalTemplateCreate' || endpoint === 'approvalTemplateUpdate') {
+        if (typeof payload.text !== 'string') throw new Error('Missing text');
+        if (endpoint === 'approvalTemplateCreate') creates++;
+        else updates++;
+        saved = { ...record(''), text: payload.text };
+        return { ok: true, value: { template: saved } };
+      }
+      if (endpoint === 'botApprovalTemplateSet') {
+        selections++;
+        if (selections === 1) throw new Error('Apply unavailable');
+        if (saved === undefined) throw new Error('Missing persisted template');
+        applied.push(saved.text);
+        return { ok: true, value: { bot: { slug: 'qa' } } };
+      }
+      throw new Error('Unexpected endpoint ' + endpoint);
+    };
+    const fill = async (field: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+      const prototype =
+        field instanceof HTMLTextAreaElement
+          ? HTMLTextAreaElement.prototype
+          : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+      if (!setter) throw new Error('Missing field setter');
+      await act(async () => {
+        setter.call(field, value);
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    const edit = async () => {
+      const button = host.querySelector<HTMLButtonElement>(
+        '[data-approval-template="reopen-qa"] button',
+      );
+      if (!button) throw new Error('Missing current library row');
+      await act(async () => button.click());
+    };
+    const chooseApply = async () => {
+      const button = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="' + t('autoApproval.library.saveChoice') + '"]',
+      );
+      if (!button) throw new Error('Missing save choice');
+      await act(async () => button.click());
+      await clickText(t('autoApproval.library.saveApply', { name: 'QA' }));
+    };
+    await render(call, store);
+    if (creation) {
+      await clickText(t('autoApproval.library.create'));
+      await clickText(t('autoApproval.library.chooseSource'));
+      await clickText(t('autoApproval.library.blank'));
+      const name = document.querySelector<HTMLInputElement>('input');
+      if (!name) throw new Error('Missing template name');
+      await fill(name, 'reopen-qa');
+    } else await edit();
+    const text = document.querySelector('textarea');
+    if (!text) throw new Error('Missing guidance');
+    await fill(text, 'Changed guidance');
+    await chooseApply();
+    await clickText(
+      t(creation ? 'autoApproval.library.createSubmit' : 'autoApproval.library.save'),
+    );
+    expect(document.body.textContent).toContain('Apply unavailable');
+    expect(selections).toBe(1);
+    expect(
+      saved === undefined ? undefined : decodeApprovalTemplateGuidance(saved.text).freeText,
+    ).toBe('Changed guidance');
+    await clickText(t('common.cancel'));
+    if (readFails) {
+      expect(host.querySelector('[data-approval-template="reopen-qa"]')).toBeNull();
+      expect(document.body.textContent).toContain('Read unavailable');
+      await clickText(t('autoApproval.reload'));
+      expect(selections).toBe(1);
+    }
+    await edit();
+    expect(document.querySelector('textarea')?.value).toBe('Changed guidance');
+    await chooseApply();
+    await clickText(t('autoApproval.library.save'));
+    expect(applied).toEqual([record('Changed guidance').text]);
+    expect(creates).toBe(creation ? 1 : 0);
+    expect(updates).toBe(creation ? 0 : 1);
+    expect(selections).toBe(2);
+  },
+);
