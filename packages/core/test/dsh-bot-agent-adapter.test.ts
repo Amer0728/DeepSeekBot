@@ -4163,9 +4163,14 @@ describe('Assignment Directory Tools', () => {
 });
 
 describe('model-free Tob preparation cancellation', () => {
-  it.each(['create', 'resume'] as const)(
-    'cancels pending native %s and disposes its late handle before execution',
-    async (operation) => {
+  it.each([
+    { operation: 'create', cancellation: 'signal' },
+    { operation: 'resume', cancellation: 'signal' },
+    { operation: 'create', cancellation: 'session-stop' },
+    { operation: 'resume', cancellation: 'session-stop' },
+  ] satisfies { operation: 'create' | 'resume'; cancellation: 'signal' | 'session-stop' }[])(
+    'cancels pending native $operation through $cancellation and disposes its late handle before execution',
+    async ({ operation, cancellation }) => {
       const agents = new FakeAgentHost();
       let release: (() => void) | undefined;
       const gate = new Promise<void>((resolve) => {
@@ -4215,7 +4220,9 @@ describe('model-free Tob preparation cancellation', () => {
         );
       try {
         await vi.waitFor(() => expect(pending).toHaveBeenCalledOnce());
-        controller.abort();
+        expect(adapter.steerOrchestrator?.(reportRun.bot.slug, 'interruption')).toBe(false);
+        if (cancellation === 'signal') controller.abort();
+        else expect(adapter.stopOrchestratorTurn?.(reportRun.bot.slug)).toBe(reportRun.sessionId);
         await vi.waitFor(() => expect(settled).toBe(true), { timeout: 500, interval: 5 });
         expect(complete).not.toHaveBeenCalled();
         release?.();

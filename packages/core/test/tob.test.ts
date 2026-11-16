@@ -648,6 +648,57 @@ describe('authenticated model-free Tob CLI DM admission', () => {
       await f.close();
     }
   });
+  it.each(['session', 'all'] as const)(
+    'stops a running model-free CLI lease through %s Session Stop',
+    async (scope) => {
+      let entered!: (run: OrchestratorAgentRun) => void;
+      const running = new Promise<OrchestratorAgentRun>((resolve) => {
+        entered = resolve;
+      });
+      const f = fixture(async (run) => {
+        const cli = run.tobCliTurn;
+        if (!cli) throw new Error('Unexpected model turn');
+        entered(run);
+        await new Promise<void>((resolve) =>
+          cli.signal.addEventListener('abort', () => resolve(), { once: true }),
+        );
+        cli.signal.throwIfAborted();
+      });
+      const bridge = createBridgeMethods(OWNER_HUMAN_CONTEXT, { ...f.core });
+      try {
+        const started = await bridge.tobCli({
+          action: 'start',
+          command: { argv: ['approval-templates'] },
+        });
+        if (!started.ok) throw new Error(started.error.message);
+        const run = await running;
+        if (!f.core.runtime.stopSession || !f.core.runtime.stopAllSessions)
+          throw new Error('Session Stop is unavailable');
+        expect(await f.core.runtime.stopSession(run.bot.slug, 'unrelated-session')).toMatchObject({
+          outcome: 'refused',
+          code: 'unknown-session',
+        });
+        expect(run.tobCliTurn?.signal.aborted).toBe(false);
+        const outcome =
+          scope === 'session'
+            ? await f.core.runtime.stopSession(run.bot.slug, run.sessionId)
+            : await f.core.runtime.stopAllSessions(run.bot.slug);
+        expect(outcome).toMatchObject({
+          stopped: [{ botSlug: run.bot.slug, sessionId: run.sessionId, role: 'orchestrator' }],
+          alreadyIdle: [],
+        });
+        expect(run.tobCliTurn?.signal.aborted).toBe(true);
+        await f.core.runtime.whenIdle();
+        expect(await bridge.tobCli({ action: 'status', id: started.value.id })).toMatchObject({
+          ok: true,
+          value: { state: 'cancelled', cancelRequested: true },
+        });
+      } finally {
+        await f.close();
+      }
+    },
+  );
+
   it('rejects a second lease, cancels the active turn, and refuses supplied authority', async () => {
     let ready!: () => void;
     const entered = new Promise<void>((resolve) => {

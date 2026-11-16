@@ -621,3 +621,38 @@ it('keeps the inherited global-template selection behind explicit management app
   );
   expect(toolEffects('deepseekbot_cli', { argv })).toEqual(expected);
 });
+
+it.each([false, true])(
+  'keeps voice provider creation management authority (key stdin: %s)',
+  (keyStdin) => {
+    const argv = ['voice-provider-add', 'qa-provider', ...(keyStdin ? ['--key-stdin'] : [])];
+    const expected = {
+      changes: 'reversible',
+      reach: 'local',
+      personalData: true,
+      authority: 'management',
+      ...(keyStdin ? { secrets: true } : {}),
+    };
+    expect(cliEffects(argv)).toEqual(expected);
+    expect(brokerCliEffects('deepseekbot voice-provider-add', { patch: { argv } })).toEqual(
+      expected,
+    );
+    expect(toolEffects('deepseekbot_cli', { argv })).toEqual(expected);
+    expect(toolApprovalRequired('deepseekbot voice-provider-add', { patch: { argv } }, true)).toBe(
+      true,
+    );
+  },
+);
+
+it('treats stdin-driven conversation changes conservatively on both CLI paths', () => {
+  const argv = ['messaging-conversation', 'qa-bot', '--input-stdin', '--confirm'];
+  const expected = { changes: 'irreversible', reach: 'external', personalData: true };
+  expect(cliEffects(argv)).toEqual(expected);
+  expect(brokerCliEffects('deepseekbot messaging-conversation', { patch: { argv } })).toEqual(
+    expected,
+  );
+  expect(toolEffects('deepseekbot_cli', { argv, stdin: '{"kind":"block"}' })).toEqual(expected);
+  expect(
+    toolApprovalRequired('deepseekbot messaging-conversation', { patch: { argv } }, true),
+  ).toBe(true);
+});

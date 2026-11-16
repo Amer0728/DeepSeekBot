@@ -2,7 +2,7 @@ import { readBoundedFileSync } from './bounded-file.mjs';
 import { execFile } from 'node:child_process';
 import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { zstdDecompressSync } from 'node:zlib';
+import * as zlib from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
@@ -59,6 +59,10 @@ const run = (argv, stdin = '') =>
     child.stdin.end(stdin);
   });
 const nativeAudit = async () => {
+  if (typeof zlib.zstdDecompressSync !== 'function')
+    throw Object.assign(new Error('Native audit decoder unavailable'), {
+      code: 'unsupported-audit-decoder',
+    });
   const home = await run(['tob-home']);
   const slug = home.value.botSlug;
   if (home.code !== 0 || typeof slug !== 'string') throw new Error('Owned Tob unavailable');
@@ -76,7 +80,7 @@ const nativeAudit = async () => {
     outputBytes = 0,
     frames = 0;
   while (offset < bytes.length) {
-    const decoded = zstdDecompressSync(bytes.subarray(offset), {
+    const decoded = zlib.zstdDecompressSync(bytes.subarray(offset), {
       info: true,
       maxOutputLength: 16 * 1024 * 1024,
     });
@@ -101,10 +105,20 @@ const nativeAudit = async () => {
     sha256: hash(bytes),
   };
 };
-const auditBefore = await nativeAudit();
 const samples = [],
   failures = [];
-for (let round = 0; round < rounds; round++) {
+const captureAudit = async (phase) => {
+  try {
+    return { valid: true, ...(await nativeAudit()) };
+  } catch (error) {
+    const code =
+      error?.code === 'unsupported-audit-decoder' ? error.code : 'native-audit-unavailable';
+    failures.push('native-audit-' + phase + '-failed:' + code);
+    return { valid: false, error: code };
+  }
+};
+const auditBefore = await captureAudit('before');
+for (let round = 0; auditBefore.valid && round < rounds; round++) {
   let id;
   try {
     const direct = await run(fixture.argv);
@@ -160,23 +174,27 @@ for (let round = 0; round < rounds; round++) {
   }
   if (failures.length) break;
 }
-const auditAfter = await nativeAudit();
-if (auditBefore.sessionId && auditBefore.sessionId !== auditAfter.sessionId)
-  failures.push('native-session-changed');
-if (
-  (auditAfter.counts['turn/start'] ?? 0) - (auditBefore.counts['turn/start'] ?? 0) !==
-  samples.filter((sample) => sample.correct).length
-)
-  failures.push('native-turn-count');
-for (const kind of [
-  'step/start',
-  'request/header',
-  'request/context',
-  'assistant/message',
-  'assistant/attempt',
-]) {
-  if ((auditAfter.counts[kind] ?? 0) !== (auditBefore.counts[kind] ?? 0))
-    failures.push('unexpected-model-step:' + kind);
+const auditAfter = auditBefore.valid
+  ? await captureAudit('after')
+  : { valid: false, error: 'native-audit-not-started' };
+if (auditBefore.valid && auditAfter.valid) {
+  if (auditBefore.sessionId && auditBefore.sessionId !== auditAfter.sessionId)
+    failures.push('native-session-changed');
+  if (
+    (auditAfter.counts['turn/start'] ?? 0) - (auditBefore.counts['turn/start'] ?? 0) !==
+    samples.filter((sample) => sample.correct).length
+  )
+    failures.push('native-turn-count');
+  for (const kind of [
+    'step/start',
+    'request/header',
+    'request/context',
+    'assistant/message',
+    'assistant/attempt',
+  ]) {
+    if ((auditAfter.counts[kind] ?? 0) !== (auditBefore.counts[kind] ?? 0))
+      failures.push('unexpected-model-step:' + kind);
+  }
 }
 const result = {
   source,

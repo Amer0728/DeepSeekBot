@@ -730,7 +730,6 @@ class DshBotAgentAdapter implements BotAgentAdapter {
     const entry: ActiveRun = {
       role: 'orchestrator',
       run,
-      ...(run.tobCliTurn === undefined ? {} : { direct: true as const }),
     };
     this.#runs.set(run.sessionId, entry);
     this.#stopSeqs.delete(run.sessionId);
@@ -1004,7 +1003,12 @@ class DshBotAgentAdapter implements BotAgentAdapter {
   steerOrchestrator(botSlug: string, text: string): boolean {
     this.#assertOpen();
     for (const [sessionId, active] of this.#runs) {
-      if (active.role !== 'orchestrator' || active.direct || active.run.bot.slug !== botSlug)
+      if (
+        active.role !== 'orchestrator' ||
+        active.direct ||
+        active.run.tobCliTurn !== undefined ||
+        active.run.bot.slug !== botSlug
+      )
         continue;
       const handle = this.#handles.get(sessionId);
       if (handle === undefined) return false;

@@ -1,3 +1,4 @@
+import { HarnessError } from '@deepseek-ai/dsh-llm';
 import { hasIrreversibleExternalEffect, toolEffects } from '../workspaces/tool-effects.js';
 
 import type { TobCliRequest, TobCliStatus, TobCliTurn } from '../tob/cli-request.js';
@@ -733,12 +734,9 @@ export interface DirectBotToolCall {
 
 const DIRECT_TOOL_CALL_LIMIT = 50;
 
-export class DirectBotToolError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
+export class DirectBotToolError extends HarnessError {
+  constructor(code: string, message: string) {
+    super(message, code);
     this.name = 'DirectBotToolError';
   }
 }
@@ -5753,10 +5751,24 @@ class BotRuntimeImplementation implements BotRuntime {
     }
   }
 
+  #cancelTobCli(botSlug: string): boolean {
+    let cancelled = false;
+    for (const request of this.#tobCliRequests.values()) {
+      if (
+        request.botSlug !== botSlug ||
+        request.status.state !== 'running' ||
+        request.controller.signal.aborted
+      )
+        continue;
+      request.status = { ...request.status, cancelRequested: true };
+      request.controller.abort();
+      cancelled = true;
+    }
+    return cancelled;
+  }
+
   async stopBot(botSlug: string): Promise<void> {
-    for (const request of this.#tobCliRequests.values())
-      if (request.botSlug === botSlug && request.status.state === 'running')
-        request.controller.abort();
+    this.#cancelTobCli(botSlug);
     const owned = () =>
       this.#ownership
         .rootsFor(botSlug)
@@ -5815,6 +5827,7 @@ class BotRuntimeImplementation implements BotRuntime {
         };
       const ref: StoppedSessionRef = { botSlug, sessionId, role: 'orchestrator' };
       const current = this.currentOrchestratorSessionId(botSlug);
+      const cliStopped = current === sessionId && this.#cancelTobCli(botSlug);
       const stopped =
         (current === undefined || current === sessionId) &&
         (await this.#humanStopOrchestrator(
@@ -5828,10 +5841,10 @@ class BotRuntimeImplementation implements BotRuntime {
           role: 'orchestrator',
           botSlug,
           sessionId,
-          stopped,
+          stopped: stopped || cliStopped,
         }),
       );
-      return stopped
+      return stopped || cliStopped
         ? { outcome: 'settled', stopped: [ref], alreadyIdle: [] }
         : { outcome: 'settled', stopped: [], alreadyIdle: [ref] };
     }
@@ -5869,9 +5882,7 @@ class BotRuntimeImplementation implements BotRuntime {
   }
 
   async stopAllSessions(botSlug: string): Promise<BotStopOutcome> {
-    for (const request of this.#tobCliRequests.values())
-      if (request.botSlug === botSlug && request.status.state === 'running')
-        request.controller.abort();
+    const cliStopped = this.#cancelTobCli(botSlug);
     const bot = this.#registry.get(botSlug);
     if (bot === undefined) return { stopped: [], alreadyIdle: [] };
     const orchestratorId = this.currentOrchestratorSessionId(botSlug);
@@ -5884,7 +5895,7 @@ class BotRuntimeImplementation implements BotRuntime {
     const alreadyIdle: StoppedSessionRef[] = [];
     const orchestratorSession = turn?.sessionId ?? orchestratorId;
     if (orchestratorSession !== undefined)
-      (turn !== undefined ? stopped : alreadyIdle).push({
+      (turn !== undefined || cliStopped ? stopped : alreadyIdle).push({
         botSlug,
         sessionId: orchestratorSession,
         role: 'orchestrator',

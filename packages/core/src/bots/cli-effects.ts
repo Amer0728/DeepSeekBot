@@ -1,4 +1,5 @@
 import { parseBotCliArgs } from './cli-options.js';
+import { canonicalCliCommandName } from './cli-command-names.js';
 import type { ToolEffects } from '../workspaces/tool-effects.js';
 
 const opaque = undefined;
@@ -315,7 +316,7 @@ export const CLI_EFFECTS = {
   'message-search': { effects: read, brokerRead: true },
   'messaging-authorize': { effects: management, brokerRead: false },
   'messaging-channel-target': { effects: write, brokerRead: false },
-  'messaging-conversation': { effects: externalRead, brokerRead: false },
+  'messaging-conversation': { effects: external, brokerRead: false },
   'messaging-defaults': { effects: read, brokerRead: true },
   'messaging-defaults-set': { effects: write, brokerRead: false },
   'messaging-grants': { effects: read, brokerRead: true },
@@ -501,7 +502,7 @@ const declarations: Readonly<
 > = CLI_EFFECTS;
 
 export function hasCliDeclaration(command: string): boolean {
-  return Object.hasOwn(declarations, command);
+  return Object.hasOwn(declarations, canonicalCliCommandName(command));
 }
 
 function familyEffects(
@@ -628,7 +629,7 @@ function familyEffects(
     case 'marketplace-install':
       return values.review === undefined ? externalRead : externalWrite;
     case 'voice-provider-add':
-      return { ...write, ...(values['key-stdin'] ? { secrets: true } : {}) };
+      return values['key-stdin'] ? secretManagement : management;
     case 'tob-cli':
       return action === 'status' ? read : action === 'cancel' ? write : undefined;
     case 'bot-tool':
@@ -649,8 +650,10 @@ export function cliEffects(argv: readonly string[]): ToolEffects | undefined {
   } catch {
     return undefined;
   }
-  const [command, action] = parsed.positionals;
-  if (!command || !hasCliDeclaration(command)) return undefined;
+  const [requestedCommand, action] = parsed.positionals;
+  if (!requestedCommand) return undefined;
+  const command = canonicalCliCommandName(requestedCommand);
+  if (!hasCliDeclaration(command)) return undefined;
   const effects = familyEffects(
     command,
     action,

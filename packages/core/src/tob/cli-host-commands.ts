@@ -1,4 +1,5 @@
 import { BROKER_CLI_READS, cliEffects } from '../bots/cli-effects.js';
+import { canonicalCliCommandName } from '../bots/cli-command-names.js';
 export { BROKER_CLI_READS as TOB_HOST_CLI_READS } from '../bots/cli-effects.js';
 import { parseBotCliArgs } from '../bots/cli-options.js';
 import { ownsBot } from '../team/bot-access.js';
@@ -128,7 +129,7 @@ export function classifyTobHostCli(argv: readonly string[]): { command: string; 
   return {
     command,
     write:
-      !BROKER_CLI_READS.has(command) ||
+      !BROKER_CLI_READS.has(canonicalCliCommandName(command)) ||
       cliEffects(argv)?.changes !== 'none' ||
       hasOption(argv, '--out'),
   };

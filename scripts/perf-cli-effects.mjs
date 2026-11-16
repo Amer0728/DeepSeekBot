@@ -27,6 +27,16 @@ const budget = JSON.parse(
   readFileSync(argument('--budget') ?? new URL('./perf-budgets/cli-effects.json', import.meta.url)),
 );
 const quantile = (values, q) => [...values].sort((a, b) => a - b)[Math.ceil(values.length * q) - 1];
+const expectedSelection = (choice) =>
+  choice === 'off' ? null : choice === 'inherit' ? '@global' : choice;
+const validTiming = (row) =>
+  row.correct === true &&
+  row.code === 0 &&
+  row.processCode === 0 &&
+  Number.isFinite(row.wallMs) &&
+  row.wallMs >= 0 &&
+  Number.isFinite(row.maxRssKiB) &&
+  row.maxRssKiB > 0;
 
 if (worker) {
   const started = performance.now();
@@ -104,7 +114,8 @@ if (worker) {
       code === 0 &&
       (operation === 'list'
         ? response.bots.some((bot) => (bot.id ?? bot.slug) === fixture.bot)
-        : selected === (operation === 'restore' ? fixture.from : fixture.to));
+        : (selected ?? null) ===
+          expectedSelection(operation === 'restore' ? fixture.from : fixture.to));
     process.stdout.write(
       JSON.stringify({
         code,
@@ -161,16 +172,59 @@ if (worker) {
         },
       );
     });
-  const samples = [];
-  for (let round = 0; round < 3; round++) {
-    for (const operation of ['list', 'set', 'read'])
-      samples.push({ round, ...(await run(operation)) });
-    const restore = await run('restore');
-    if (!restore.correct) throw new Error('Fixture restore failed.');
+  const samples = [],
+    restorations = [],
+    failures = [];
+  let baseline;
+  const baselinePath = argument('--baseline');
+  if (baselinePath) {
+    try {
+      baseline = JSON.parse(readFileSync(baselinePath));
+      if (baseline?.fixtureSha256 !== hash(fixtureBytes) || baseline?.node !== process.version)
+        failures.push('baseline:unmatched-fixture-or-node');
+      if (!Array.isArray(baseline?.budget?.failures) || baseline.budget.failures.length)
+        failures.push('baseline:failed');
+      for (const operation of ['list', 'set', 'read']) {
+        const rows = Array.isArray(baseline?.samples)
+          ? baseline.samples.filter((row) => row?.operation === operation)
+          : [];
+        if (rows.length !== 3 || !rows.every(validTiming))
+          failures.push('baseline:invalid-samples:' + operation);
+      }
+    } catch {
+      failures.push('baseline:unavailable');
+    }
   }
-  const classification = process.argv.includes('--classification')
-    ? await run('classification')
-    : undefined;
+  if (!failures.length) {
+    for (let round = 0; round < 3; round++) {
+      try {
+        for (const operation of ['list', 'set', 'read']) {
+          const row = { round, ...(await run(operation)) };
+          samples.push(row);
+          if (!validTiming(row)) {
+            failures.push(operation + ':incorrect');
+            break;
+          }
+        }
+      } catch {
+        failures.push('worker-failed');
+      } finally {
+        let restore;
+        try {
+          restore = await run('restore');
+        } catch {
+          restore = { operation: 'restore', correct: false, error: 'worker-failed' };
+        }
+        restorations.push({ round, ...restore });
+        if (!restore.correct || restore.processCode !== 0) failures.push('fixture-restore-failed');
+      }
+      if (failures.length) break;
+    }
+  }
+  const classification =
+    !failures.length && process.argv.includes('--classification')
+      ? await run('classification')
+      : undefined;
   const result = {
     source: argument('--source-sha'),
     node: process.version,
@@ -180,9 +234,9 @@ if (worker) {
       sha256: hash(readFileSync(new URL('../' + file, import.meta.url))),
     })),
     samples,
+    restorations,
     classification,
   };
-  const failures = [];
   for (const row of samples) {
     if (!row.correct || row.processCode !== 0) failures.push(row.operation + ':incorrect');
     if (row.wallMs > budget.maxColdCliMs) failures.push(row.operation + ':latency');
@@ -202,18 +256,20 @@ if (worker) {
         failures.push(row.name + ':classification-latency');
     }
   }
-  const baselinePath = argument('--baseline');
-  if (baselinePath) {
-    const baseline = JSON.parse(readFileSync(baselinePath));
-    if (baseline.fixtureSha256 !== result.fixtureSha256 || baseline.node !== result.node)
-      failures.push('unmatched-fixture-or-node');
+  if (baseline && !failures.some((failure) => failure.startsWith('baseline:'))) {
     for (const operation of ['list', 'set', 'read']) {
+      const beforeRows = baseline.samples.filter((row) => row.operation === operation);
+      const afterRows = samples.filter((row) => row.operation === operation);
+      if (afterRows.length !== 3 || !afterRows.every(validTiming)) {
+        failures.push(operation + ':comparison-incomplete');
+        continue;
+      }
       const before = quantile(
-        baseline.samples.filter((x) => x.operation === operation).map((x) => x.wallMs),
+        beforeRows.map((row) => row.wallMs),
         0.5,
       );
       const after = quantile(
-        samples.filter((x) => x.operation === operation).map((x) => x.wallMs),
+        afterRows.map((row) => row.wallMs),
         0.5,
       );
       if (after > before + budget.maxAddedMedianCliMs) failures.push(operation + ':added-latency');

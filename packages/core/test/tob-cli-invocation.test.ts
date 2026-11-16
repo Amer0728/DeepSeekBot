@@ -6,7 +6,7 @@ import { createScope, scopeTarget } from '@deepseek-ai/dsh-scope';
 import { ShellExecutor, type ShellExecSpec, type ShellExecution } from '@deepseek-ai/dsh-shell';
 import { ToolRuntime, defineTool, type ToolExecution } from '@deepseek-ai/dsh-tools';
 import type { ApprovalService } from '@deepseek-ai/dsh-user-approval';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { apply, type BotHarnessCore } from '../src/index.js';
 import { OWNER_HUMAN_CONTEXT } from '../src/humans/context.js';
 import { executeNativeTool, installAgentNativeTools } from '../src/runtime/native-agent-compat.js';
@@ -17,6 +17,16 @@ import { installTobCliShell } from '../src/tob/cli-shell.js';
 import { TobError } from '../src/tob/service.js';
 import { ChannelToolApproval } from '../src/workspaces/tool-approval.js';
 import { createTempRoot } from './helpers.js';
+import { buildManagedCliFixture } from './fixtures/managed-cli.js';
+
+let cli: Awaited<ReturnType<typeof buildManagedCliFixture>>;
+beforeAll(async () => {
+  cli = await buildManagedCliFixture();
+  console.info(JSON.stringify({ event: 'managed_cli_fixture.built', ...cli.provenance }));
+});
+afterAll(async () => {
+  await cli?.close();
+});
 
 const cleanup: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -126,6 +136,7 @@ async function fixture() {
   cleanup.push(() => shellCtx.fiber.dispose());
   const registerTool = vi.spyOn(actor.ctx.tools, 'register');
   installTobCliShell(actor.ctx, new NoShell(shellCtx), {
+    cliPath: cli.path,
     nativeCli: {
       available: () => true,
       register: (definition) => authority.register(actor, definition, () => authorize),
@@ -248,7 +259,7 @@ describe('owned model-free Tob CLI invocation', () => {
     const result = await f.authority.run(f.input, () => f.native());
     expect(result).toMatchObject({ isError: false });
     expect(f.channelApproval.requests('ada')).toEqual([]);
-    expect(f.runHost).toHaveBeenCalledOnce();
+    expect(f.runHost, JSON.stringify(result)).toHaveBeenCalledOnce();
   });
 
   it.each(['reject', 'cancel', 'source-revoked'] as const)(
