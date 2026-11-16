@@ -244,6 +244,9 @@ describe('Approval Reviewer input', () => {
       call: { toolName: 'read_file', input: '{}', cwd: '/', role: 'orchestrator', channelId },
       excerpt: { humanMessages: [], toolCalls: [] },
     });
+    expect(prompt).toContain('Never send without asking');
+    expect(prompt).toContain('Read local files');
+    expect(prompt).toContain('# Legacy');
     expect(prompt.indexOf('Never send without asking')).toBeLessThan(
       prompt.indexOf('Read local files'),
     );
