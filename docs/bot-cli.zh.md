@@ -1281,6 +1281,10 @@ deepseekbot folder-browse 'D:\code' --offset 500
 
 ## Memory
 
+选择在线 Host（`--host` 或 `DEEPSEEKBOT_HOST`）后，`--as <member>` 可管理该成员自己的 Bot Memory，包括读写、Git 历史、检查点、恢复、版本、修复、文件目标和图片导出。Host 每次都检查已认证 Human 的所有权；访问其他主体的 Bot 返回 `bot-not-found`。离线 `--home` Memory 命令不能与 `--as` 合用（`as-online-required`）。关闭再开启团队模式会保留 `spaces/<humanId>/bots/<slug>/memory`，成员需要重新登录。移动 Memory 仍受账号空间路径规则限制。
+
+`memory-image --as <member>` 通过检查所有权的 `memoryImage` 桥接方法读取图片，保留版本检查及 25 MiB 大小上限；Owner 命令继续使用 HTTP。自己的 Bot 提示词、审批模板、访问和来源设置及 Session 历史适配器使用同一成员方法目录。全局配置和 DSH 原生 Session API 仍执行现有权限规则。
+
 `memory-snapshot`、`memory-file --path`、`memory-history [--limit]`、`memory-diff --sha` 读取 Bot 记忆库；`memory-save --path (--body | --body-stdin)` 写一个文件并提交。`--expected-head` 默认取当前 HEAD（要做 compare-and-swap 请显式传）；`--edit-id` 默认生成新的 UUID，重复提交幂等。HEAD 过期或无变化的写入报 `memory-conflict`，不存在的文件读回 `null`，非法 sha 报 `invalid-input`。
 
 选定在线 Host 时，上述命令改为通过 Host 的 Memory 模块执行，而不是读写本地存储，此时 `memory-save` 必须带 `--expected-head`。在线 Host 还提供 Memory 面板的其余功能：

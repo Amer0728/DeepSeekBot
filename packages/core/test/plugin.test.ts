@@ -1018,6 +1018,7 @@ describe('plugin entry', () => {
       'sessionOwner',
       'botSessionIds',
       'memoryFileTarget',
+      'memoryImage',
       'memorySnapshot',
       'memoryFile',
       'memoryHistory',
