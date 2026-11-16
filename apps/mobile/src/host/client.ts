@@ -1,3 +1,4 @@
+import type { HostMemberIdentity } from './member-identity';
 import { readComputerAvailability } from './computer-availability';
 import {
   encryptedCarrier,
@@ -210,6 +211,7 @@ export interface HostApiAnswer {
 }
 
 export interface HostClientOptions {
+  member?: HostMemberIdentity;
   routePreference?: string;
   onRoutePreferenceChanged?: (route: string | undefined) => Promise<void>;
   onRoutesChanged?: (routes: string[]) => Promise<void>;
@@ -379,6 +381,7 @@ export function arrangementOf(value: unknown): RosterArrangement | undefined {
 export function createHostClient(options: HostClientOptions): HostClient {
   const carrier = encryptedCarrier({
     raw: options.carrier,
+    ...(options.member ? { trustedHttpsOrigins: options.routes } : {}),
     hostId: options.hostId ?? '',
     credential: options.credential,
     ...(options.encryption === undefined ? {} : { encryption: options.encryption }),
@@ -981,7 +984,10 @@ export function createHostClient(options: HostClientOptions): HostClient {
   const readSorting = (): Promise<RosterSorting | undefined> => {
     fetchedSorting = undefined;
     return call<unknown>('settings/describe')
-      .then(rosterSortingOf)
+      .then(rosterSortingOf, (error: unknown) => {
+        if (error instanceof MethodRefused || hostLacksMethod(error)) return undefined;
+        throw error;
+      })
       .then((value) => {
         fetchedSorting = { value, at: Date.now() };
         return value;
