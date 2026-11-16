@@ -1696,6 +1696,7 @@ const en = {
     `${author} in ${place}, ${time}: ${snippet}`,
   pinnedSection: 'Pinned',
   loading: 'Loading',
+  selectedChoice: 'Selected',
   rowActions: {
     pin: 'Pin',
     unpin: 'Unpin',
@@ -4157,6 +4158,7 @@ const zh: typeof en = {
     `${author}在${place}，${time}：${snippet}`,
   pinnedSection: '已置顶',
   loading: '正在加载',
+  selectedChoice: '已选择',
   rowActions: {
     pin: '置顶',
     unpin: '取消置顶',
