@@ -2955,7 +2955,10 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
       }
       const denial = permissionDenial(agent.session);
       if (denial !== undefined) return { kind: 'deny', reason: denial };
-      if (tobCliInvocation.delegate(execution)) return next();
+      const cliAdmission = tobCliInvocation.delegate(execution);
+      if (cliAdmission === 'delegated') return next();
+      if (cliAdmission === 'refused')
+        return { kind: 'deny', reason: 'The owned CLI invocation authority is unavailable' };
       if (!requiresHumanToolApproval(execution.name, execution.arguments, templateInUse))
         return next();
       const eachUse = execution.name === 'secret_cli' || execution.name === 'secret_mcp_connect';

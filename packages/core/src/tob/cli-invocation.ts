@@ -69,15 +69,29 @@ export class ModelFreeTobCliInvocation {
       this.#active.delete(input.agent);
     }
   }
-  delegate(execution: ToolExecution): boolean {
-    if (this.#invocation.getStore() === undefined) return false;
+  delegate(execution: ToolExecution): 'unrelated' | 'delegated' | 'refused' {
+    if (execution.name !== 'deepseekbot_cli') return 'unrelated';
+    const active = this.#invocation.getStore();
+    const owned = active !== undefined && execution.callId === active.callId;
+    if (!owned) {
+      const registration = execution.agent && this.#registrations.get(execution.agent);
+      if (registration === undefined) return 'unrelated';
+      if (!execution.agent || !execution.toolSet) return 'refused';
+      try {
+        const definition = execution.toolSet.view(execution.agent).get(execution.name);
+        if (definition === undefined) return 'refused';
+        if (definition !== registration.definition) return 'unrelated';
+      } catch {
+        return 'refused';
+      }
+    }
     try {
       const lease = this.#matching(execution);
-      if (lease.token !== undefined && lease.token !== execution.token) return false;
+      if (lease.token !== undefined && lease.token !== execution.token) return 'refused';
       lease.token = execution.token;
-      return true;
+      return 'delegated';
     } catch {
-      return false;
+      return 'refused';
     }
   }
 

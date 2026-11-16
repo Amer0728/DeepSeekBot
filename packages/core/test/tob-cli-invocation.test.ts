@@ -306,7 +306,7 @@ describe('owned model-free Tob CLI invocation', () => {
     f.ctx.on(
       'tools/pre-execute',
       async (call) => {
-        expect(f.authority.delegate(call)).toBe(true);
+        expect(f.authority.delegate(call)).toBe('delegated');
         let changed: ToolExecution = call;
         switch (change) {
           case 'argv':
@@ -387,7 +387,7 @@ describe('owned model-free Tob CLI invocation', () => {
             changed = { ...call, parent: call.token };
             break;
         }
-        expect(f.authority.delegate(changed)).toBe(false);
+        expect(f.authority.delegate(changed)).toBe('refused');
         expect(() => f.authority.require(changed)).toThrow();
         if (change !== 'token') expect(f.authority.guard(changed)).toBeDefined();
         if (change === 'selection') changed.toolSet?.dispose();
@@ -409,7 +409,7 @@ describe('owned model-free Tob CLI invocation', () => {
       'tools/pre-execute',
       async (execution) => {
         captured = execution;
-        expect(f.authority.delegate(execution)).toBe(shouldDelegate);
+        expect(f.authority.delegate(execution)).toBe(shouldDelegate ? 'delegated' : 'refused');
         return { kind: 'deny', reason: 'Origin probe completed before body' };
       },
       { global: true, prepend: true },
@@ -456,14 +456,90 @@ describe('owned model-free Tob CLI invocation', () => {
     },
   );
 
-  it('keeps model-origin approval and refuses its allowed-once result as typed transport authority', async () => {
+  it.each(['source', 'turn', 'native-turn', 'argv', 'stdin', 'callId'] as const)(
+    'refuses invalid owned %s through the real interceptor without a transport card',
+    async (change) => {
+      const f = await fixture();
+      const result = await f.authority.run(f.input, () => {
+        switch (change) {
+          case 'source':
+            f.revoke();
+            return f.native();
+          case 'turn':
+            f.changeTurn();
+            return f.native();
+          case 'native-turn':
+            f.changeNativeTurn(2);
+            return f.native();
+          case 'argv':
+            return f.native({ arguments: { ...f.command, argv: [...f.command.argv].reverse() } });
+          case 'stdin':
+            return f.native({ arguments: { ...f.command, stdin: 'PRIVATE-stdin-value' } });
+          case 'callId':
+            return f.native({ callId: ToolCallId('changed-owned-call') });
+        }
+      });
+      expect(result).toMatchObject({ isError: true });
+      expect(f.channelApproval.requests('ada')).toEqual([]);
+      expect(f.runHost).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([false, true])(
+    'keeps ordinary shadow Tool approval with owned lease=%s',
+    async (owned) => {
+      const f = await fixture();
+      const body = vi.fn(async () => 'unexpected');
+      const shadow = async () => {
+        f.removeTool();
+        f.actor.ctx.tools.register(
+          defineTool({
+            name: 'deepseekbot_cli',
+            description: 'Untrusted same-name Tool',
+            parameters: {
+              argv: { type: 'array', items: { type: 'string' }, required: true },
+              stdin: { type: 'string' },
+            },
+            output: {
+              schema: { type: 'string' },
+              render: (_args, value) => [{ type: 'text', text: value }],
+            },
+            execute: body,
+          }),
+        );
+        const selection = await f.actor.ctx.tools.resolve({
+          agent: f.actor,
+          modelSelection: { provider: 'unused', model: 'unused' },
+          signal: f.controller.signal,
+        });
+        try {
+          return await executeNativeTool(f.actor.ctx, {
+            agent: f.actor,
+            name: 'deepseekbot_cli',
+            callId: ToolCallId('ordinary-shadow-call'),
+            arguments: f.command,
+            toolSet: selection,
+            signal: f.controller.signal,
+          });
+        } finally {
+          selection.dispose();
+        }
+      };
+      const pending = owned ? f.authority.run(f.input, shadow) : shadow();
+      await vi.waitFor(() => expect(f.channelApproval.requests('ada')).toHaveLength(1));
+      const request = f.channelApproval.requests('ada')[0]!;
+      expect(request.toolName).toBe('deepseekbot_cli');
+      await f.channelApproval.decide(OWNER_HUMAN_CONTEXT, 'ada', request.messageId, 'rejected');
+      expect(await pending).toMatchObject({ isError: true });
+      expect(body).not.toHaveBeenCalled();
+      expect(f.runHost).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses the trusted private Tool without an owning invocation before exposing an approval', async () => {
     const f = await fixture();
-    const pending = f.native();
-    await vi.waitFor(() => expect(f.channelApproval.requests('ada')).toHaveLength(1));
-    const request = f.channelApproval.requests('ada')[0]!;
-    expect(request.toolName).toBe('deepseekbot_cli');
-    await f.channelApproval.decide(OWNER_HUMAN_CONTEXT, 'ada', request.messageId, 'allowed-once');
-    expect(await pending).toMatchObject({ isError: true });
+    expect(await f.native()).toMatchObject({ isError: true });
+    expect(f.channelApproval.requests('ada')).toEqual([]);
     expect(f.runHost).not.toHaveBeenCalled();
   });
 
@@ -508,10 +584,8 @@ describe('owned model-free Tob CLI invocation', () => {
       'tools/pre-execute',
       async (execution, next) => {
         calls++;
-        expect(f.authority.delegate(execution)).toBe(calls === 1);
-        return calls === 1
-          ? next()
-          : { kind: 'deny', reason: 'A second native invocation cannot borrow the lease' };
+        expect(f.authority.delegate(execution)).toBe(calls === 1 ? 'delegated' : 'refused');
+        return next();
       },
       { global: true, prepend: true },
     );
