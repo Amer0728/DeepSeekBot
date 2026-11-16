@@ -85,6 +85,10 @@ describe('Approval Template library', () => {
     expect(library.create('invalid', input)).toEqual({ ok: false, reason: 'invalid-text' });
     writeFileSync(join(dir, 'external.md'), input);
     expect(library.get('external')).toBeUndefined();
+    expect(library.update('external', input)).toEqual({ ok: false, reason: 'invalid-text' });
+    expect(readFileSync(join(dir, 'external.md'), 'utf8')).toBe(input);
+    expect(library.update('external', MINE)).toMatchObject({ ok: true });
+    expect(library.get('external')?.text).toBe(MINE);
   });
 
   it('round-trips three-part guidance and preserves every byte of legacy Markdown on conversion', () => {

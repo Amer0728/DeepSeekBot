@@ -437,8 +437,14 @@ export function ApprovalTemplateLibrarySettings({
         onCancel={close}
         onSubmit={() =>
           run(async () => {
-            if (editor.text !== template.text)
-              await updateApprovalTemplate(call, template.name, editor.text);
+            if (editor.text !== template.text) {
+              const saved = await updateApprovalTemplate(call, template.name, editor.text);
+              setEditor((current) =>
+                current?.mode === 'edit' && current.template.name === saved.name
+                  ? { ...current, template: saved }
+                  : current,
+              );
+            }
             await apply(template.name);
           })
         }

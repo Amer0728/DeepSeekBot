@@ -283,7 +283,7 @@ export function createApprovalTemplateLibrary(dir?: string): ApprovalTemplateLib
     update(name, text) {
       const problem = check(name, text);
       if (problem !== undefined) return problem;
-      if (readCustom(name) === undefined) return { ok: false, reason: 'not-found' };
+      if (!existsSync(file(name))) return { ok: false, reason: 'not-found' };
       return { ok: true, template: write(name, text) };
     },
     delete(name) {

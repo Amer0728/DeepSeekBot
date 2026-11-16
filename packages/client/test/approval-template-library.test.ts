@@ -319,3 +319,79 @@ it('edits and removes independent guidance cards without changing neighbouring r
   });
   expect(calls).toEqual(['approvalTemplates', 'approvalTemplateUpdate', 'approvalTemplates']);
 });
+
+it('resaves the visible original text after save succeeds but applying fails', async () => {
+  const originalText = encodeApprovalTemplateGuidance({
+    alwaysAsk: [],
+    alwaysAllow: [],
+    freeText: 'Original guidance',
+  });
+  let template = {
+    name: 'retry-qa',
+    title: 'Retry QA',
+    description: '',
+    builtIn: false,
+    usedBy: [],
+    text: originalText,
+  };
+  const store = createStore();
+  store.setRoster(
+    [
+      {
+        slug: 'qa',
+        displayName: 'QA',
+        roles: [],
+        aggregateState: 'idle',
+        workspaces: [],
+        createdAt: '2026-11-16',
+      },
+    ],
+    [],
+  );
+  store.select({ kind: 'bot', slug: 'qa' });
+  const updates: string[] = [];
+  const applied: string[] = [];
+  let attempts = 0;
+  const call: BridgeCall = async (endpoint, payload) => {
+    if (endpoint === 'approvalTemplates')
+      return { ok: true, value: { templates: [template], globalDefault: null } };
+    if (endpoint === 'approvalTemplateUpdate') {
+      if (typeof payload.text !== 'string') throw new Error('Missing saved text');
+      updates.push(payload.text);
+      template = { ...template, text: payload.text };
+      return { ok: true, value: { template } };
+    }
+    if (endpoint === 'botApprovalTemplateSet') {
+      if (++attempts === 1) throw new Error('apply failed');
+      applied.push(template.text);
+      return { ok: true, value: { bot: { slug: 'qa' } } };
+    }
+    throw new Error('Unexpected endpoint ' + endpoint);
+  };
+  const fillText = async (value: string): Promise<void> => {
+    const field = document.querySelector('textarea');
+    if (!field) throw new Error('Missing free text field');
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    if (!setter) throw new Error('Missing textarea value setter');
+    await act(async () => {
+      setter.call(field, value);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+  await render(call, store);
+  const edit = host.querySelector<HTMLButtonElement>('[data-approval-template="retry-qa"] button');
+  if (!edit) throw new Error('Missing retry template');
+  await act(async () => edit.click());
+  await clickText(t('autoApproval.library.saveOnly'));
+  await clickText(t('autoApproval.library.saveApply', { name: 'QA' }));
+  await fillText('Changed guidance');
+  await clickText(t('autoApproval.library.save'));
+  expect(document.body.textContent).toContain('apply failed');
+  expect(decodeApprovalTemplateGuidance(template.text).freeText).toBe('Changed guidance');
+  await fillText('Original guidance');
+  await clickText(t('autoApproval.library.save'));
+  expect(updates).toHaveLength(2);
+  expect(applied).toEqual([originalText]);
+  expect(template.text).toBe(originalText);
+  expect(document.querySelector('textarea')).toBeNull();
+});
