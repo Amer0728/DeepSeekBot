@@ -854,6 +854,8 @@ deepseekbot approval-template-global-set off
 deepseekbot approval-template-set <bot-id> inherit
 deepseekbot approval-template-set <bot-id> cautious
 deepseekbot approval-template-set <bot-id> off
+deepseekbot approval-template-global-set off --literal-template
+deepseekbot approval-template-set <bot-id> inherit --literal-template
 deepseekbot approval-template show cautious
 deepseekbot approval-template create night-shift --file night-shift.md
 deepseekbot approval-template create my-cautious --from cautious
@@ -865,6 +867,8 @@ deepseekbot approval-template delete night-shift --confirm --delete-revision <re
 Deletion first returns a read-only `preview`: its `revision` binds the template contents, current global choice and all references. It includes `globalDefaultBefore`, `globalDefaultAfter`, `globalDefaultAvailable`, visible `affectedBots` (`slug` and `source`) and `hiddenBotCount` for references whose private identity you cannot view. Confirm with `--confirm --delete-revision`; no confirmation means no deletion or choice change. Changed contents, references or global policy return `approval-template-delete-changed` and require a fresh preview.
 
 Confirmed deletion switches specific references to `@global`. Deleting the global default clears it; existing inheritors remain inherited with Reviewer off. A different remaining global default becomes effective; unavailable defaults remain visible as unavailable and unresolved calls go to the Human. Other specific choices, Off, Full Access and saved deterministic rules remain unchanged. Started Reviews retain their captured version. The result includes `inheritedBots` and `globalDefault`; legacy `clearedBots` names the visible specific references that were removed. A failed deletion returns `approval-template-delete-unavailable` (or `approval-template-delete-incomplete` if restoring choices also failed); reload current state before retrying. Read failures never trigger deletion fallback.
+
+Names such as `off` and `inherit` remain valid custom template names. Add `--literal-template` to a selection command to select that literal name; without it the existing Off and inheritance aliases keep their meaning.
 
 `list` returns `templates` and `globalDefault` (a template name or `null`). With `--bot`, it also returns `selected` (`@global`, a specific template name, or `null`), `source` (`global`, `specific`, or `off`) and `effective` (a name or `null`). The global setter returns `{template}`; the Bot setter returns `{bot}`. The authenticated Host owns these writes; missing templates refuse selection, and an unreadable global selection returns `approval-selection-unavailable` rather than an empty default.
 

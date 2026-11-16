@@ -1,6 +1,5 @@
 import { OWNER_HUMAN_CONTEXT } from '../humans/context.js';
-import { createApprovalTemplateLibrary } from './approval-templates.js';
-import { join } from 'node:path';
+import type { ApprovalTemplateLibrary } from './approval-templates.js';
 import { toolApprovalRequired } from './tool-effects.js';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { setSandboxMode, type SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy';
@@ -415,15 +414,11 @@ export function requiresHumanToolApproval(
 }
 
 export function approvalTemplateInUse(
-  registry: Pick<BotHarnessCore['registry'], 'list'> &
-    Partial<Pick<BotHarnessCore['registry'], 'rootDir'>>,
+  registry: Pick<BotHarnessCore['registry'], 'list'>,
+  library: Pick<ApprovalTemplateLibrary, 'global'>,
 ): (template: string) => boolean {
-  const library =
-    registry.rootDir === undefined
-      ? undefined
-      : createApprovalTemplateLibrary(join(registry.rootDir, '..', 'approval-templates'));
   return (template) => {
-    const global = library?.global();
+    const global = library.global();
     return (
       global?.kind === 'invalid' ||
       (global?.kind === 'selected' && global.name === template) ||
@@ -449,6 +444,7 @@ export function grantToolExecutionDenial(
   name: string,
   args: unknown,
   allowedOnce = false,
+  templateInUse?: (template: string) => boolean,
 ): string | undefined {
   const denial = grantExecutionDenial(core, session, policy, approval);
   if (denial !== undefined) return denial;
@@ -484,7 +480,7 @@ export function grantToolExecutionDenial(
       ? nativeFileSpaceDenial(core, session, name, args)
       : undefined;
   if (NATIVE_FILE_TOOL_NAMES.has(name)) return nativeFileToolDenial(core, session, name, args);
-  if (requiresHumanToolApproval(name, args, approvalTemplateInUse(core.registry)) && !allowedOnce)
+  if (requiresHumanToolApproval(name, args, templateInUse) && !allowedOnce)
     return name + ' requires Human approval';
   return undefined;
 }

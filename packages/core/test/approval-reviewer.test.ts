@@ -870,6 +870,9 @@ describe('Reviewer handoff records', () => {
       template: 'private-policy',
       reason: 'Human should confirm this command.',
     });
+    expect(JSON.stringify(state.log.mock.calls)).not.toContain(
+      'Human should confirm this command.',
+    );
     const snapshot = request.toolApprovalRequest?.approvalReview;
     if (snapshot?.kind !== 'review') throw new Error('Missing Review snapshot');
     expect(record.toolAutoApproval?.templateVersion).toBe(snapshot.version);

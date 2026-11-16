@@ -9,6 +9,7 @@ export const APPROVAL_TEMPLATE_OPTIONS = {
   'parts-file': { type: 'string' },
   'apply-to': { type: 'string' },
   'text-stdin': { type: 'boolean' },
+  'literal-template': { type: 'boolean' },
 } as const;
 
 export const BROWSER_COMPUTER_OPTIONS = {

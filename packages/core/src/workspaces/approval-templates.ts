@@ -142,7 +142,7 @@ export interface ApprovalTemplateLibrary {
   get(name: string): ApprovalTemplate | undefined;
   create(name: string, text: string): ApprovalTemplateWriteResult;
   update(name: string, text: string): ApprovalTemplateWriteResult;
-  delete(name: string): ApprovalTemplateWriteResult;
+  delete(name: string): Exclude<ApprovalTemplateWriteResult, { ok: true }> | { ok: true };
 }
 
 function summaryOf(name: string, text: string): ApprovalTemplate {
@@ -289,10 +289,9 @@ export function createApprovalTemplateLibrary(dir?: string): ApprovalTemplateLib
     delete(name) {
       const problem = check(name);
       if (problem !== undefined) return problem;
-      const template = readCustom(name);
-      if (template === undefined) return { ok: false, reason: 'not-found' };
+      if (!existsSync(file(name))) return { ok: false, reason: 'not-found' };
       rmSync(file(name), { force: true });
-      return { ok: true, template };
+      return { ok: true };
     },
   };
 }

@@ -91,7 +91,6 @@ export interface ToolAutoApproval {
     model?: string;
     reviewSession?: string;
     fallback?: string;
-    detail?: string;
   }): void;
 }
 
@@ -918,7 +917,7 @@ export class ChannelToolApproval {
     const started = Date.now();
     let model: string | undefined;
     let reviewSession: string | undefined;
-    const log = (outcome: ApprovalReview['outcome'], fallback?: string, detail?: string) => {
+    const log = (outcome: ApprovalReview['outcome'], fallback?: string) => {
       try {
         auto.log({
           botSlug: tracked.botSlug,
@@ -930,7 +929,6 @@ export class ChannelToolApproval {
           ...(model === undefined ? {} : { model }),
           ...(reviewSession === undefined ? {} : { reviewSession }),
           ...(fallback === undefined ? {} : { fallback }),
-          ...(detail === undefined ? {} : { detail }),
         });
       } catch {
         try {
@@ -1044,7 +1042,7 @@ export class ChannelToolApproval {
         reason: review.reason,
       };
       await recordReview('ask-human', review.reason);
-      log('ask-human', undefined, review.reason);
+      log('ask-human');
       return undefined;
     }
     if (!(await recordReview('allowed', review.reason))) {

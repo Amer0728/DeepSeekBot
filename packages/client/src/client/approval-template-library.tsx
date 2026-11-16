@@ -662,7 +662,7 @@ export function ApprovalTemplateLibrarySettings({
               <>
                 <Select
                   label={t('autoApproval.globalDefault')}
-                  value={globalDefault === undefined ? '@unknown' : (globalDefault ?? 'off')}
+                  value={globalDefault === undefined ? '@unknown' : (globalDefault ?? '@off')}
                   disabled={busy || globalDefault === undefined}
                   options={[
                     ...(globalDefault === undefined
@@ -676,14 +676,14 @@ export function ApprovalTemplateLibrarySettings({
                             },
                           ]
                         : []),
-                    { value: 'off', label: t('autoApproval.off') },
+                    { value: '@off', label: t('autoApproval.off') },
                     ...list.map((template) => ({
                       value: template.name,
                       label: templateTitle(t, template.name, template.title),
                     })),
                   ]}
                   onChange={(value) =>
-                    updateGlobal({ kind: 'select', name: value === 'off' ? null : value })
+                    updateGlobal({ kind: 'select', name: value === '@off' ? null : value })
                   }
                 />
                 {globalError ? (

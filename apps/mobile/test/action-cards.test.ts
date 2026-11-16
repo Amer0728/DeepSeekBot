@@ -166,6 +166,32 @@ describe('Tool approval card in the DM', () => {
       ...extra,
     });
 
+  it.each([false, true])(
+    'exposes a stable retry target after load failure with cached content %s',
+    async (cached) => {
+      const load = vi.fn(async () => {
+        throw new Error('unavailable');
+      });
+      const content = cached
+        ? approvalContent(
+            inboxWire.rpc['channelTimeline.approvalPending'].result.value.page.entries[0]!
+              .toolApprovalRequest,
+          )
+        : undefined;
+      const view = await render(
+        card(connect(host()), {
+          port: { load, decide: vi.fn() },
+          ...(content === undefined ? {} : { content }),
+        }),
+      );
+      const retry = view.querySelector<HTMLButtonElement>('[data-testid="approval-retry"]');
+      expect(retry).not.toBeNull();
+      expect(retry?.textContent).toContain(t.tryAgain);
+      await press(retry!);
+      expect(load).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it('shows the key action first and keeps the folder in collapsed details', async () => {
     const view = await render(card(connect(host())));
     expect(view.textContent).toContain(t.toolCategory('bash'));
