@@ -1,3 +1,4 @@
+import { collapseRepeatedFailures } from '@botharness/host-client/session-failure';
 import { useTeamMember, useTeamMode } from './team-state.js';
 import { AnnouncementGate } from './announcement-gate.js';
 import { ReadFailure } from './ds/read-failure.js';
@@ -1569,8 +1570,18 @@ function ConversationView({
     conversation.timeline.hasNewer || !streamReplies ? undefined : conversation.drafts;
   const visibleMessages = useMemo(
     () =>
-      visibleDmMessages(messages, hiddenActions).filter(
-        (message) => message.takeoverResolution === undefined,
+      collapseRepeatedFailures(
+        visibleDmMessages(messages, hiddenActions).filter(
+          (message) => message.takeoverResolution === undefined,
+        ),
+        (message) => ({
+          bot: message.author.kind === 'bot' ? message.author.slug : undefined,
+          failure: message.sessionFailure,
+        }),
+        (message, repeated) => ({
+          ...message,
+          sessionFailure: { ...message.sessionFailure!, repeated },
+        }),
       ),
     [messages, hiddenActions],
   );
