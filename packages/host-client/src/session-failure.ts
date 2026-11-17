@@ -127,27 +127,34 @@ export function collapseRepeatedFailures<T>(
   items: readonly T[],
   read: (item: T) => { bot: string | undefined; failure: RepeatableFailure | undefined },
   annotate: (item: T, repeated: number) => T,
+  pinned: (item: T) => boolean = () => false,
 ): readonly T[] {
   const shown: T[] = [];
   let collapsed = false;
-  let previous: { bot: string | undefined; failure: RepeatableFailure; count: number } | undefined;
+  let previous:
+    | { bot: string | undefined; failure: RepeatableFailure; count: number; pinned: boolean }
+    | undefined;
   for (const item of items) {
     const { bot, failure } = read(item);
     if (
       failure !== undefined &&
       previous !== undefined &&
+      !previous.pinned &&
       bot !== undefined &&
       bot === previous.bot &&
       sameFailure(previous.failure, failure)
     ) {
       const count = previous.count + (failure.repeated ?? 1);
       shown[shown.length - 1] = annotate(item, count);
-      previous = { bot, failure, count };
+      previous = { bot, failure, count, pinned: pinned(item) };
       collapsed = true;
       continue;
     }
     shown.push(item);
-    previous = failure === undefined ? undefined : { bot, failure, count: failure.repeated ?? 1 };
+    previous =
+      failure === undefined
+        ? undefined
+        : { bot, failure, count: failure.repeated ?? 1, pinned: pinned(item) };
   }
   return collapsed ? shown : items;
 }

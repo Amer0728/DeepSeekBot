@@ -1582,8 +1582,11 @@ function ConversationView({
           ...message,
           sessionFailure: { ...message.sessionFailure!, repeated },
         }),
+        (message) =>
+          message.id === conversation.focusMessageId ||
+          message.id === conversation.unreadAfterMessageId,
       ),
-    [messages, hiddenActions],
+    [messages, hiddenActions, conversation.focusMessageId, conversation.unreadAfterMessageId],
   );
   const takeoverTimeline = useMemo(
     () => ({

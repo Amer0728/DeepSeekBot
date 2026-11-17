@@ -708,8 +708,9 @@ function ChatConversation({
         ...message,
         sessionFailure: { ...message.sessionFailure!, repeated },
       }),
+      (message) => message.id === focus,
     );
-  }, [snapshot.messages, dm, hiddenActivity]);
+  }, [snapshot.messages, dm, hiddenActivity, focus]);
   const latestMessageId = latestTurnMessageId(snapshot.messages);
   const chronological = useMemo(
     () =>

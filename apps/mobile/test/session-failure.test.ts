@@ -127,6 +127,15 @@ it('collapses back-to-back identical failures into the newest card with a count'
     },
   ];
   expect(collapse(progressed)).toBe(progressed);
+
+  const linked = collapseRepeatedFailures(
+    [quota('a'), quota('b'), quota('c')],
+    (item) => ({ bot: item.bot, failure: item.sessionFailure }),
+    (item, repeated) => ({ ...item, sessionFailure: { ...item.sessionFailure, repeated } }),
+    (item) => item.id === 'a',
+  );
+  expect(linked.map((item) => item.id)).toEqual(['a', 'c']);
+  expect(linked[1]!.sessionFailure.repeated).toBe(2);
 });
 
 it('titles the collapsed failure card with the reason instead of a generic label', () => {
