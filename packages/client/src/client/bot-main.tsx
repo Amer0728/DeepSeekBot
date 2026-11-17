@@ -1048,7 +1048,7 @@ function MessageActionMenu({
   onClose,
   t,
 }: {
-  onReply(message: ChannelMessage): void;
+  onReply?(message: ChannelMessage): void;
   onFeedback?(message: ChannelMessage): void;
   onSelect?(message: ChannelMessage): void;
   onReact?(request: MessageMenuRequest): void;
@@ -1080,7 +1080,9 @@ function MessageActionMenu({
           ...(bubbleStamp(request.message) === undefined
             ? []
             : [{ type: 'label' as const, id: 'time', text: fullTime(request.message.at, t) }]),
-          ...(request.message.pending === true || request.message.streaming === true
+          ...(onReply === undefined ||
+          request.message.pending === true ||
+          request.message.streaming === true
             ? []
             : [{ id: 'reply', label: t('message.reply'), icon: <ReplyIcon /> }]),
           ...(onReact === undefined
@@ -1101,7 +1103,7 @@ function MessageActionMenu({
             : [{ id: 'feedback', label: t('feedback.title'), icon: <ReactionIcon /> }]),
         ]}
         onSelect={(id) => {
-          if (id === 'reply') onReply(request.message);
+          if (id === 'reply') onReply?.(request.message);
           else if (id === 'react') onReact?.(request);
           else if (id === 'feedback') onFeedback?.(request.message);
           else if (id === 'copy') {
@@ -2227,12 +2229,14 @@ function ConversationView({
       run: sidebar.toggle,
     },
   ];
+  const contextInHeader = docked && workspaceEnabled && channel !== undefined;
   const composerContext =
     baseComposerContext === undefined
       ? undefined
       : {
           ...baseComposerContext,
           shortcuts: [...baseComposerContext.shortcuts, ...conversationShortcuts],
+          ...(contextInHeader ? { content: undefined } : {}),
         };
 
   const loadOlderAtTop = (retry = false): void => {
@@ -3772,15 +3776,21 @@ function ConversationView({
               </div>
             </div>
           )}
-          {activeMemoryView !== undefined || messageMenu === undefined || readOnlyDm ? null : (
+          {activeMemoryView !== undefined || messageMenu === undefined ? null : (
             <MessageActionMenu
               request={messageMenu}
               t={t}
-              {...(reactToMessage === undefined || !reactableMessage(messageMenu.message)
+              {...(readOnlyDm ||
+              reactToMessage === undefined ||
+              !reactableMessage(messageMenu.message)
                 ? {}
                 : { onReact: setReactionMenu })}
-              onReply={quoteMessage}
-              onFeedback={(message) => setFeedbackMessage(message.id)}
+              {...(readOnlyDm
+                ? {}
+                : {
+                    onReply: quoteMessage,
+                    onFeedback: (message: ChannelMessage) => setFeedbackMessage(message.id),
+                  })}
               {...(messageSelection === undefined ? {} : { onSelect: messageSelection.begin })}
               onClose={() => {
                 setMessageMenu(undefined);
@@ -3889,6 +3899,9 @@ function ConversationView({
                   ? {
                       title,
                       ...(dmWorking ? { label: <WorkingSummary rows={workingRows} t={t} /> } : {}),
+                      ...(baseComposerContext === undefined
+                        ? {}
+                        : { info: baseComposerContext.content }),
                       status: (
                         <ConversationSessionStop
                           channel={channel}
