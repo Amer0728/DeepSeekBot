@@ -2180,6 +2180,8 @@ export const zh = {
   'market.direct.uploading': '上传中…',
   'market.mine.open': '我上传的',
   'market.mine.title': '我上传的 Bot',
+  'market.mine.settingsHint': '更新或删除你上传到市场的 Bot。',
+  'market.mine.manage': '管理',
   'market.mine.loading': '正在读取…',
   'market.mine.empty': '还没有上传过 Bot',
   'market.mine.meta': '{count} 个文件 · {size} · {date}',
@@ -2191,6 +2193,15 @@ export const zh = {
   'market.mine.updateTitle': '更新 {name}',
   'market.mine.replace': '替换全部文件',
   'market.mine.replacing': '替换中…',
+  'market.mine.original': '当初上传的 Bot',
+  'market.mine.pickHint': '选一个本地 Bot，用它的文件替换市场上的「{listing}」。',
+  'market.mine.sourceMissing':
+    '这台电脑上没有当初上传「{listing}」的 Bot。可以先从市场安装它再改，或换一个 Bot。',
+  'market.mine.replaceSummary': '用「{bot}」替换市场上的「{listing}」',
+  'market.mine.otherBot':
+    '「{bot}」不是当初上传的「{original}」。替换后，市场上的内容会全部变成「{bot}」的文件。',
+  'market.mine.unknownSource':
+    '无法确认「{bot}」就是当初上传的 Bot。替换后，市场上的内容会全部变成「{bot}」的文件。',
   'market.mine.deleteTitle': '删除 {name}？',
   'market.mine.deleteBody': '文件和安装数一起删除，无法恢复。已安装的副本不受影响。',
   'market.mine.deleteConfirm': '删除',
@@ -8206,6 +8217,8 @@ export const en = {
   'market.direct.uploading': 'Uploading…',
   'market.mine.open': 'My uploads',
   'market.mine.title': 'My uploaded Bots',
+  'market.mine.settingsHint': 'Update or delete the Bots you uploaded to the Marketplace.',
+  'market.mine.manage': 'Manage',
   'market.mine.loading': 'Loading…',
   'market.mine.empty': 'No uploaded Bots yet',
   'market.mine.meta': '{count} files · {size} · {date}',
@@ -8217,6 +8230,15 @@ export const en = {
   'market.mine.updateTitle': 'Update {name}',
   'market.mine.replace': 'Replace all files',
   'market.mine.replacing': 'Replacing…',
+  'market.mine.original': 'Bot you uploaded',
+  'market.mine.pickHint': 'Pick a local Bot whose files replace “{listing}” on the Marketplace.',
+  'market.mine.sourceMissing':
+    'The Bot you uploaded as “{listing}” is not on this computer. Install it from the Marketplace and edit it, or pick another Bot.',
+  'market.mine.replaceSummary': 'Replace “{listing}” on the Marketplace with “{bot}”',
+  'market.mine.otherBot':
+    '“{bot}” is not “{original}”, the Bot you uploaded. After replacing, the listing holds only “{bot}”’s files.',
+  'market.mine.unknownSource':
+    'We can’t confirm “{bot}” is the Bot you uploaded. After replacing, the listing holds only “{bot}”’s files.',
   'market.mine.deleteTitle': 'Delete {name}?',
   'market.mine.deleteBody':
     'Its files and install count are erased for good. Installed copies stay.',
