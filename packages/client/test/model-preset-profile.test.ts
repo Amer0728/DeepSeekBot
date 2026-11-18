@@ -114,6 +114,7 @@ import type { BridgeActions } from '../src/client/actions.js';
 import type { ModelPlanView, ModelPresetView } from '../src/client/bridge.js';
 import { en } from '../src/client/locale.js';
 import { invalidateModelPlan, modelPlanOf } from '../src/client/model-plan-store.js';
+import { draftOf, planParts } from '../src/client/model-preset-draft.js';
 import { OnboardingController } from '../src/client/onboarding.js';
 import { ModelPresetProfile } from '../src/client/model-preset-profile.js';
 import { OnboardingModelDialog, OnboardingWelcome } from '../src/client/onboarding-view.js';
@@ -904,6 +905,202 @@ describe('Model entry', () => {
     expect(cards(host)).not.toContain('Deep');
   });
 
+  it('puts Routing Groups in every slot and saves them in a new preset (#4501)', async () => {
+    const route = { provider: 'deepseek', model: 'pro' };
+    const plan: ModelPlanView = {
+      revision: 3,
+      sourcePresetId: '',
+      sourcePresetName: '',
+      orchestrator: route,
+      assignmentDefault: route,
+      appliedAt: '',
+    };
+    const groups = [
+      {
+        id: 'main',
+        name: 'Main',
+        revision: 1,
+        routes: [
+          { provider: 'deepseek', model: 'flash' },
+          { provider: 'kimi', model: 'k2' },
+        ],
+      },
+      { id: 'side', name: 'Side', revision: 1, routes: [{ provider: 'deepseek', model: 'flash' }] },
+    ];
+    const createModelPreset = vi.fn(async () => ({ id: 'mine' }) as ModelPresetView);
+    const applyModelPreset = vi.fn(async () => plan);
+    const host = await render({
+      modelPlanState: vi.fn(async () => ({ plan })),
+      modelPresets: vi.fn(async () => []),
+      modelCatalog: vi.fn(async () => ({ models: catalog, groups })),
+      createModelPreset,
+      applyModelPreset,
+    } as unknown as BridgeActions);
+    await openEditor(host);
+    await choose(translate('modelPreset.orchestrator'), 'Main', 'Main');
+    await act(async () => button('Advanced').click());
+    await choose('Add an allowed model', 'Side', 'Side');
+    const card = document.querySelector<HTMLElement>('li[data-model-group]')!;
+    expect(card.textContent).toContain('Side');
+    expect(card.textContent).toContain('1 models');
+    expect(card.textContent).toContain('Now: Flash · DeepSeek');
+    const high = [...card.querySelectorAll('label')].find((item) => item.textContent === 'High')!;
+    await act(async () => high.querySelector('input')!.click());
+    const input = card.querySelector<HTMLInputElement>('input[aria-label="When to use Side"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        input,
+        ' Quick checks ',
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () =>
+      [...card.querySelectorAll('button')]
+        .find((item) => item.textContent === 'Make default')!
+        .click(),
+    );
+    await act(async () => button('Save as preset').click());
+    const name = document.querySelector<HTMLInputElement>('input[aria-label="Preset name"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        name,
+        'Grouped',
+      );
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => button('Save preset').click());
+    expect(createModelPreset).toHaveBeenCalledExactlyOnceWith(
+      'Grouped',
+      { provider: 'deepseek', model: 'flash' },
+      route,
+      [{ ...route, allowedEfforts: [''], defaultEffort: '' }],
+      undefined,
+      {
+        orchestratorGroupId: 'main',
+        assignmentGroups: ['side'],
+        assignmentDefaultGroupId: 'side',
+        assignmentGroupOptions: [
+          { group: 'side', allowedEfforts: ['high'], defaultEffort: 'high', note: 'Quick checks' },
+        ],
+      },
+    );
+    expect(applyModelPreset).toHaveBeenCalledExactlyOnceWith('ada', 'mine');
+  });
+
+  it('opens a grouped plan and saves it back with its groups (#4501)', async () => {
+    const route = { provider: 'deepseek', model: 'pro' };
+    const plan: ModelPlanView = {
+      revision: 5,
+      sourcePresetId: '',
+      sourcePresetName: '',
+      orchestrator: { provider: 'deepseek', model: 'flash' },
+      orchestratorGroupId: 'main',
+      assignmentDefault: route,
+      assignmentModels: [{ ...route, allowedEfforts: [''], defaultEffort: '' }],
+      assignmentGroups: ['side', 'main'],
+      assignmentDefaultGroupId: 'side',
+      assignmentGroupOptions: [{ group: 'main', note: 'Long work' }],
+      appliedAt: '',
+    };
+    const groups = [
+      { id: 'main', name: 'Main', revision: 1, routes: [{ provider: 'kimi', model: 'k2' }] },
+      { id: 'side', name: 'Side', revision: 1, routes: [{ provider: 'deepseek', model: 'flash' }] },
+    ];
+    const setModelPlan = vi.fn(async () => ({ ...plan, revision: 6 }));
+    const host = await render({
+      modelPlanState: vi.fn(async () => ({ revision: 5, plan })),
+      modelPresets: vi.fn(async () => []),
+      modelCatalog: vi.fn(async () => ({ models: catalog, groups })),
+      setModelPlan,
+    } as unknown as BridgeActions);
+    await openEditor(host);
+    expect(picked(translate('modelPreset.orchestrator'))).toContain('Main');
+    expect(
+      [...document.querySelectorAll('li[data-model-group] strong')].map((item) => item.textContent),
+    ).toEqual(['Side', 'Main']);
+    await choose(translate('modelPreset.orchestrator'), 'Flash', 'Flash');
+    await act(async () => button(translate('modelPreset.save')).click());
+    expect(setModelPlan).toHaveBeenCalledExactlyOnceWith(
+      'ada',
+      5,
+      { provider: 'deepseek', model: 'flash' },
+      route,
+      [{ ...route, allowedEfforts: [''], defaultEffort: '' }],
+      undefined,
+      {
+        assignmentGroups: ['side', 'main'],
+        assignmentDefaultGroupId: 'side',
+        assignmentGroupOptions: [{ group: 'main', note: 'Long work' }],
+      },
+    );
+  });
+
+  it('clears a group effort limit its members no longer share (#4501)', async () => {
+    const route = { provider: 'deepseek', model: 'pro' };
+    const plan: ModelPlanView = {
+      revision: 5,
+      sourcePresetId: '',
+      sourcePresetName: '',
+      orchestrator: route,
+      assignmentDefault: route,
+      assignmentModels: [{ ...route, allowedEfforts: [''], defaultEffort: '' }],
+      assignmentGroups: ['main'],
+      assignmentGroupOptions: [{ group: 'main', allowedEfforts: ['high'], defaultEffort: 'high' }],
+      appliedAt: '',
+    };
+    const groups = [
+      { id: 'main', name: 'Main', revision: 1, routes: [{ provider: 'kimi', model: 'k2' }] },
+    ];
+    const setModelPlan = vi.fn(async () => ({ ...plan, revision: 6 }));
+    const host = await render({
+      modelPlanState: vi.fn(async () => ({ revision: 5, plan })),
+      modelPresets: vi.fn(async () => []),
+      modelCatalog: vi.fn(async () => ({ models: catalog, groups })),
+      setModelPlan,
+    } as unknown as BridgeActions);
+    await openEditor(host);
+    expect(host.textContent).toContain(translate('modelPreset.groupEffortsStale'));
+    await act(async () => button(translate('modelPreset.groupEffortsClear')).click());
+    await act(async () => button(translate('modelPreset.save')).click());
+    expect(setModelPlan).toHaveBeenCalledExactlyOnceWith(
+      'ada',
+      5,
+      route,
+      route,
+      [{ ...route, allowedEfforts: [''], defaultEffort: '' }],
+      undefined,
+      { assignmentGroups: ['main'], assignmentGroupOptions: [] },
+    );
+  });
+
+  it('flags a group effort its members dropped while keeping the shared ones (#4501)', async () => {
+    const route = { provider: 'deepseek', model: 'pro' };
+    const plan: ModelPlanView = {
+      revision: 5,
+      sourcePresetId: '',
+      sourcePresetName: '',
+      orchestrator: route,
+      assignmentDefault: route,
+      assignmentModels: [{ ...route, allowedEfforts: [''], defaultEffort: '' }],
+      assignmentGroups: ['main'],
+      assignmentGroupOptions: [
+        { group: 'main', allowedEfforts: ['high', 'max'], defaultEffort: 'high' },
+      ],
+      appliedAt: '',
+    };
+    const groups = [
+      { id: 'main', name: 'Main', revision: 1, routes: [{ provider: 'deepseek', model: 'flash' }] },
+    ];
+    const host = await render({
+      modelPlanState: vi.fn(async () => ({ revision: 5, plan })),
+      modelPresets: vi.fn(async () => []),
+      modelCatalog: vi.fn(async () => ({ models: catalog, groups })),
+    } as unknown as BridgeActions);
+    await openEditor(host);
+    expect(host.textContent).toContain(translate('modelPreset.groupEffortsStale'));
+    expect(host.textContent).toContain(translate('modelPreset.allowedEfforts'));
+  });
+
   it('saves the current settings as a new preset and links the Bot to it', async () => {
     const route = { provider: 'deepseek', model: 'pro' };
     let plan: ModelPlanView = {
@@ -1399,4 +1596,79 @@ it('keeps inherited Assignment settings when editing an Orchestrator-only plan',
     7,
   );
   expect(setModelPlan).not.toHaveBeenCalled();
+});
+
+const draftA = { provider: 'p', model: 'a' };
+const draftB = { provider: 'p', model: 'b' };
+const draftDaily = { id: 'daily', name: 'Daily', revision: 1, routes: [draftA, draftB] };
+
+describe('planParts under an Assignment Routing Group', () => {
+  it('keeps the stored Assignment default and allowed models under a Routing Group', () => {
+    const draft = draftOf(
+      {
+        orchestrator: draftA,
+        assignmentDefault: { ...draftB, reasoningEffort: 'high' },
+        assignmentModels: [draftB].map((route) => ({
+          ...route,
+          allowedEfforts: ['high'],
+          defaultEffort: 'high',
+        })),
+        assignmentGroups: ['daily'],
+        assignmentDefaultGroupId: 'daily',
+      },
+      '',
+    );
+    expect(draft.advanced).toBe(false);
+    const parts = planParts(draft, [draftDaily]);
+    expect(parts?.assignmentDefault).toEqual({ ...draftB, reasoningEffort: 'high' });
+    expect(parts?.assignmentModels).toEqual([
+      { ...draftB, allowedEfforts: ['high'], defaultEffort: 'high' },
+    ]);
+    expect(parts?.groups?.assignmentDefaultGroupId).toBe('daily');
+  });
+
+  it('keeps a later stored default in advanced mode', () => {
+    const options = [draftA, draftB].map((route) => ({
+      ...route,
+      allowedEfforts: [''],
+      defaultEffort: '',
+    }));
+    const draft = draftOf(
+      {
+        orchestrator: draftA,
+        assignmentDefault: draftB,
+        assignmentModels: options,
+        assignmentGroups: ['daily'],
+        assignmentDefaultGroupId: 'daily',
+      },
+      '',
+    );
+    expect(draft.advanced).toBe(true);
+    expect(planParts(draft, [draftDaily])?.assignmentDefault).toEqual(draftB);
+  });
+
+  it('starts an Assignment group with no listed models on a route that has a key', () => {
+    const draft = {
+      ...draftOf(
+        {
+          orchestrator: draftA,
+          assignmentDefault: draftA,
+          assignmentModels: [],
+          assignmentGroups: ['daily'],
+          assignmentDefaultGroupId: 'daily',
+        },
+        '',
+      ),
+      allowed: [],
+    };
+    const catalog = [
+      { ...draftA, providerName: 'P', modelName: 'A', efforts: [], credential: 'missing' as const },
+      { ...draftB, providerName: 'P', modelName: 'B', efforts: [] },
+    ];
+    const parts = planParts(draft, [draftDaily], catalog);
+    expect(parts?.assignmentDefault).toEqual(draftB);
+    expect(parts?.assignmentModels).toEqual([
+      { ...draftB, allowedEfforts: [''], defaultEffort: '' },
+    ]);
+  });
 });

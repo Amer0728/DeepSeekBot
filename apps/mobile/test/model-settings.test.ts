@@ -9,6 +9,7 @@ import {
   searchModels,
   setModelGroup,
   setModelRoute,
+  toggleAssignmentGroup,
   toggleAssignmentModel,
   type ModelSettingsState,
 } from '@botharness/host-client/model-settings';
@@ -140,6 +141,10 @@ describe('native Model Plans and Presets', () => {
       slug: 'qa',
       expectedRevision: 4,
       orchestrator: plan.orchestrator,
+      orchestratorGroupId: null,
+      assignmentGroups: [],
+      assignmentDefaultGroupId: null,
+      assignmentGroupOptions: [],
       assignmentDefault: { ...pro, reasoningEffort: 'high' },
       assignmentModels: [...allowed, { ...pro, allowedEfforts: ['high'], defaultEffort: 'high' }],
     });
@@ -170,6 +175,10 @@ describe('native Model Plans and Presets', () => {
       expectedRevision: 2,
       name: 'Fast',
       orchestrator: flash,
+      orchestratorGroupId: null,
+      assignmentGroups: [],
+      assignmentDefaultGroupId: null,
+      assignmentGroupOptions: [],
       assignmentDefault: flash,
       assignmentModels: allowed,
     });
@@ -211,6 +220,10 @@ describe('native Model Plans and Presets', () => {
     expect(fake.calls[0]?.args).toEqual({
       name: 'New',
       orchestrator: flash,
+      orchestratorGroupId: null,
+      assignmentGroups: [],
+      assignmentDefaultGroupId: null,
+      assignmentGroupOptions: [],
       assignmentDefault: flash,
       assignmentModels: [{ ...flash, allowedEfforts: [''], defaultEffort: '' }],
     });
@@ -287,9 +300,93 @@ describe('native Model Plans and Presets', () => {
     await expect(
       setModelGroup(client, { kind: 'bot', slug: 'qa' }, loaded, 'tired'),
     ).rejects.toThrow();
-    await expect(
-      setModelGroup(client, { kind: 'preset', id: 'p' }, loaded, 'daily'),
-    ).rejects.toThrow();
+  });
+
+  it('puts Routing Groups in every Preset slot and keeps them on later edits (#4501)', async () => {
+    const { fake, client } = setup();
+    const daily = { id: 'daily', name: 'Daily', revision: 1, routes: [flash, pro] };
+    const side = { id: 'side', name: 'Side', revision: 1, routes: [pro] };
+    const scope = { kind: 'preset' as const, id: 'fast' };
+    let saved: Record<string, unknown> = { ...preset };
+    fake.methods.set('modelPresetUpdate', (args) => {
+      saved = { ...saved, ...args, revision: Number(args['expectedRevision']) + 1 };
+      return { preset: saved };
+    });
+    const current = () => ({ ...state, groups: [daily, side], preset: saved as typeof preset });
+    await setModelGroup(client, scope, current(), 'daily');
+    expect(fake.calls.at(-1)?.args).toMatchObject({ orchestratorGroupId: 'daily' });
+    expect(fake.calls.at(-1)?.args).not.toHaveProperty('orchestrator');
+    await setModelGroup(client, scope, current(), 'side', 'assignment');
+    expect(fake.calls.at(-1)?.args).toMatchObject({
+      orchestratorGroupId: 'daily',
+      assignmentGroups: ['side'],
+      assignmentDefaultGroupId: 'side',
+    });
+    await toggleAssignmentGroup(client, scope, current(), 'daily');
+    expect(fake.calls.at(-1)?.args).toMatchObject({ assignmentGroups: ['side', 'daily'] });
+    await expect(toggleAssignmentGroup(client, scope, current(), 'side')).rejects.toThrow(
+      'ASSIGNMENT_DEFAULT_REQUIRED',
+    );
+    await setModelRoute(client, scope, current(), 'assignment', flash);
+    expect(fake.calls.at(-1)?.args).toMatchObject({
+      orchestratorGroupId: 'daily',
+      assignmentGroups: ['side', 'daily'],
+      assignmentDefaultGroupId: null,
+      assignmentDefault: flash,
+    });
+    await setModelRoute(client, scope, current(), 'orchestrator', pro);
+    expect(fake.calls.at(-1)?.args).toMatchObject({ orchestrator: pro, orchestratorGroupId: null });
+  });
+
+  it('keeps open Assignments, starts a group on a ready model, and copies the default group into a new Preset (#4501)', async () => {
+    const { fake, client } = setup();
+    const daily = { id: 'daily', name: 'Daily', revision: 1, routes: [flash, pro] };
+    const keyless = [{ ...models[0]!, credential: 'missing' as const }, models[1]!];
+    const scope = { kind: 'bot' as const, slug: 'qa' };
+    fake.methods.set('modelPlanSet', () => ({ plan }));
+    const open = { ...plan, openAssignmentModels: true as const };
+    await toggleAssignmentGroup(client, scope, { ...state, plan: open, groups: [daily] }, 'daily');
+    expect(fake.calls.at(-1)?.args).toMatchObject({ openAssignmentModels: true });
+    const { assignmentDefault: _default, assignmentModels: _models, ...bare } = plan;
+    await setModelGroup(
+      client,
+      scope,
+      { ...state, models: keyless, plan: bare, groups: [daily] },
+      'daily',
+      'assignment',
+    );
+    expect(fake.calls.at(-1)?.args).toMatchObject({
+      assignmentDefault: pro,
+      assignmentDefaultGroupId: 'daily',
+    });
+    fake.methods.set('modelPresetCreate', () => ({ preset }));
+    await saveModelPreset(
+      client,
+      {
+        revision: 0,
+        models,
+        presets: [],
+        fallback: flash,
+        groups: [daily],
+        defaultGroupId: 'daily',
+      },
+      'Grouped',
+    );
+    expect(fake.calls.at(-1)?.args).toMatchObject({ orchestratorGroupId: 'daily' });
+    expect(fake.calls.at(-1)?.args).not.toHaveProperty('orchestrator');
+    const side = { id: 'side', name: 'Side', revision: 1, routes: [pro] };
+    const { plan: _plan, ...following } = state;
+    await setModelGroup(
+      client,
+      scope,
+      { ...following, groups: [daily, side], defaultGroupId: 'daily' },
+      'side',
+      'assignment',
+    );
+    expect(fake.calls.at(-1)?.args).toMatchObject({
+      orchestratorGroupId: 'daily',
+      assignmentDefaultGroupId: 'side',
+    });
   });
 
   it('sets the global default to a Routing Group and shows it for Bots that follow it (#4500)', async () => {

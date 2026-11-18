@@ -323,6 +323,7 @@ import {
   setStandingLimits,
   type ModelCatalogView,
   type ModelChoice,
+  type ModelPlanGroupsView,
   type ModelPresetView,
   type ModelPlanView,
   type ModelRouteView,
@@ -679,6 +680,7 @@ export interface BridgeActions {
     assignmentDefault: ModelRouteView,
     assignmentModels?: AssignmentModelOptionView[],
     openAssignmentModels?: boolean,
+    groups?: ModelPlanGroupsView,
   ): Promise<ModelPresetView>;
   updateModelPreset(
     id: string,
@@ -712,6 +714,7 @@ export interface BridgeActions {
     assignmentDefault: ModelRouteView,
     assignmentModels: AssignmentModelOptionView[],
     openAssignmentModels?: boolean,
+    groups?: ModelPlanGroupsView,
   ): Promise<ModelPlanView>;
   listHostFolders(
     path?: string,
@@ -2196,8 +2199,16 @@ export function createActions(
     deleteRoutingGroup: (id, expectedRevision) => deleteRoutingGroup(call, id, expectedRevision),
     modelPlan: (slug) => loadModelPlan(call, slug),
     modelPlanState: (slug) => loadModelPlanState(call, slug),
-    createModelPreset: (name, orchestrator, assignmentDefault, assignmentModels, open) =>
-      createModelPreset(call, name, orchestrator, assignmentDefault, assignmentModels, open),
+    createModelPreset: (name, orchestrator, assignmentDefault, assignmentModels, open, groups) =>
+      createModelPreset(
+        call,
+        name,
+        orchestrator,
+        assignmentDefault,
+        assignmentModels,
+        open,
+        groups,
+      ),
     updateModelPreset: (id, expectedRevision, name, orchestrator, assignmentDefault) =>
       updateModelPreset(call, id, expectedRevision, name, orchestrator, assignmentDefault),
     applyModelPreset: (slug, presetId) =>
@@ -2225,6 +2236,7 @@ export function createActions(
       assignmentDefault,
       assignmentModels,
       openAssignmentModels,
+      groups,
     ) =>
       recorded(
         setModelPlan(
@@ -2235,6 +2247,7 @@ export function createActions(
           assignmentDefault,
           assignmentModels,
           openAssignmentModels,
+          groups,
         ),
         () => actions.telemetryEvent('model:plan_update', { via: 'plan' }),
       ),

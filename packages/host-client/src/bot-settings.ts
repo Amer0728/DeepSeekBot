@@ -18,7 +18,14 @@ import {
 } from './model-plans';
 
 export type { ModelCatalogEntry, ModelCatalogGroup, ModelChoice };
-export type { AssignmentModelOption, ModelPlan, ModelPreset, ModelRoute } from './model-plans';
+export type {
+  AssignmentGroupOption,
+  AssignmentModelOption,
+  ModelPlan,
+  ModelPlanGroups,
+  ModelPreset,
+  ModelRoute,
+} from './model-plans';
 export { applyModelPreset, HostAnswerInvalid };
 
 export type Loadable<T> =

@@ -75,8 +75,10 @@ import {
   loadModelPresets as loadHostModelPresets,
   setModelPlan as setHostModelPlan,
   updateModelPreset as updateHostModelPreset,
+  type AssignmentGroupOption,
   type AssignmentModelOption,
   type ModelPlan,
+  type ModelPlanGroups,
   type ModelPlanState,
   type ModelPreset,
   type ModelRoute,
@@ -322,6 +324,26 @@ export async function setModelFavorite(
   return setHostModelFavorite(bridgeHost(call), choice, favorite);
 }
 
+export type AssignmentGroupOptionView = AssignmentGroupOption;
+export type ModelPlanGroupsView = Omit<ModelPlanGroups, 'openAssignmentModels'>;
+
+function groupPayload(orchestrator: ModelRouteView, groups: ModelPlanGroupsView | undefined) {
+  if (groups === undefined) return { orchestrator };
+  const ids = groups.assignmentGroups ?? [];
+  return {
+    ...(groups.orchestratorGroupId === undefined ? { orchestrator } : {}),
+    orchestratorGroupId: groups.orchestratorGroupId ?? null,
+    assignmentGroups: ids,
+    assignmentDefaultGroupId:
+      groups.assignmentDefaultGroupId !== undefined && ids.includes(groups.assignmentDefaultGroupId)
+        ? groups.assignmentDefaultGroupId
+        : null,
+    assignmentGroupOptions: (groups.assignmentGroupOptions ?? []).filter((option) =>
+      ids.includes(option.group),
+    ),
+  };
+}
+
 export type ModelPresetView = ModelPreset;
 export type ModelPlanView = ModelPlan;
 
@@ -446,10 +468,11 @@ export async function createModelPreset(
   assignmentDefault: ModelRouteView,
   assignmentModels?: AssignmentModelOptionView[],
   openAssignmentModels?: boolean,
+  groups?: ModelPlanGroupsView,
 ): Promise<ModelPresetView> {
   return createHostModelPreset(bridgeHost(call), {
     name,
-    orchestrator,
+    ...groupPayload(orchestrator, groups),
     assignmentDefault,
     ...(assignmentModels === undefined ? {} : { assignmentModels }),
     ...(openAssignmentModels === undefined ? {} : { openAssignmentModels }),
@@ -7453,9 +7476,10 @@ export async function setModelPlan(
   assignmentDefault: ModelRouteView,
   assignmentModels: AssignmentModelOptionView[],
   openAssignmentModels?: boolean,
+  groups?: ModelPlanGroupsView,
 ): Promise<ModelPlanView> {
   return setHostModelPlan(bridgeHost(call), slug, expectedRevision, {
-    orchestrator,
+    ...groupPayload(orchestrator, groups),
     assignmentDefault,
     assignmentModels,
     ...(openAssignmentModels === undefined ? {} : { openAssignmentModels }),
