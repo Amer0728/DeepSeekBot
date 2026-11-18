@@ -1,4 +1,11 @@
 import { HarnessError } from '@deepseek-ai/dsh-llm';
+import {
+  assertQuoteTargets,
+  ChannelQuoteError,
+  quotePromptBlock,
+  sameQuoteIntent,
+  type ChannelQuote,
+} from '../channels/quotes.js';
 import { hasIrreversibleExternalEffect, toolEffects } from '../workspaces/tool-effects.js';
 
 import type { TobCliRequest, TobCliStatus, TobCliTurn } from '../tob/cli-request.js';
@@ -702,6 +709,7 @@ export interface OrchestratorChannelAccess {
     body: string;
     channelId?: string;
     replyTo?: string;
+    quotes?: ChannelQuote[];
     attachments?: ChannelAttachmentRef[];
     mentionBotIds?: string[];
     mentionHumanIds?: string[];
@@ -1762,6 +1770,7 @@ class BotRuntimeImplementation implements BotRuntime {
   readonly #approvalCapacity: AssignmentApprovalCapacity;
   readonly #warn: ((message: string) => void) | undefined;
   readonly #triageContinuation: boolean;
+  readonly #quoteBlocks = new Map<string, { channelId: string; message: ChannelMessage }>();
   readonly #tails = new Map<string, Promise<unknown>>();
   readonly #activeTurns = new Map<string, Promise<void>>();
   readonly #nativeStepReady = new Map<string, (accepted: boolean) => void>();
@@ -3268,7 +3277,10 @@ class BotRuntimeImplementation implements BotRuntime {
     const rows: DigestRow[] = [];
     let characters = 0;
     for (const row of candidates) {
-      const cost = Math.min(row.body.length, bodyLimit) + 80;
+      const cost =
+        Math.min(row.body.length, bodyLimit) +
+        80 +
+        this.#rowQuotes(channelId, row.message_id).length;
       if (
         rows.length >= GROUP_PROMPT_CHANNEL_LIMIT ||
         characters + cost > limits['dm-context-chars']
@@ -3309,7 +3321,7 @@ class BotRuntimeImplementation implements BotRuntime {
             row.body.length > context.bodyLimit
               ? ` [excerpt; ${row.body.length - context.bodyLimit} more characters available with channel_read]`
               : ''
-          }`
+          }${this.#rowQuotes(context.channelId, row.message_id)}`
         );
       }),
       context.omittedCount > 0
@@ -3345,7 +3357,10 @@ class BotRuntimeImplementation implements BotRuntime {
           )
         : `Source Event ID: ${sourceEventId}\n` +
           this.#groupMentionPrompt(botSlug, channelId, messageId, source.body) +
-          (steered?.author.kind === 'human' ? skillInvocationPrompt(steered.skillInvocations) : '');
+          (steered?.author.kind === 'human'
+            ? skillInvocationPrompt(steered.skillInvocations)
+            : '') +
+          this.#quotePrompt(channelId, steered);
     const claimed = this.#database.transaction(
       (database) => {
         const mention =
@@ -4311,7 +4326,7 @@ class BotRuntimeImplementation implements BotRuntime {
       `Channel: ${channel?.name ?? context.channelId} (${context.channelId})`,
       ...context.rows.map(
         (row) =>
-          `- Message ${row.message_id} [Source Event ${row.source_event_id}] from ${groupMessageAuthor(row, humanName)} at ${row.created_at}${this.#trustedExternalSender(row)}: ${groupMessageBody(row).slice(0, context.bodyLimit)}${groupMessageBody(row).length > context.bodyLimit ? ` [excerpt; ${groupMessageBody(row).length - context.bodyLimit} more characters available with channel_read]` : ''}${groupSkillInvocationPrompt(row, context.channelId)}`,
+          `- Message ${row.message_id} [Source Event ${row.source_event_id}] from ${groupMessageAuthor(row, humanName)} at ${row.created_at}${this.#trustedExternalSender(row)}: ${groupMessageBody(row).slice(0, context.bodyLimit)}${groupMessageBody(row).length > context.bodyLimit ? ` [excerpt; ${groupMessageBody(row).length - context.bodyLimit} more characters available with channel_read]` : ''}${groupSkillInvocationPrompt(row, context.channelId)}${this.#rowQuotes(context.channelId, row.message_id)}`,
       ),
       context.omittedCount > 0
         ? `${context.omittedCount} earlier or intervening messages remain pending for later turns. Use channel_read if more history is needed.`
@@ -4336,7 +4351,7 @@ class BotRuntimeImplementation implements BotRuntime {
       `${rows.length} ordinary messages are due. ${this.#promptText(botSlug)('digest-hint')}`,
       ...rows.map(
         (row) =>
-          `- Message ${row.message_id} [Source Event ${row.source_event_id}] from ${groupMessageAuthor(row, humanName)} at ${row.created_at}${this.#trustedExternalSender(row)}: ${groupMessageBody(row).slice(0, 1000)}${groupSkillInvocationPrompt(row, channelId)}`,
+          `- Message ${row.message_id} [Source Event ${row.source_event_id}] from ${groupMessageAuthor(row, humanName)} at ${row.created_at}${this.#trustedExternalSender(row)}: ${groupMessageBody(row).slice(0, 1000)}${groupSkillInvocationPrompt(row, channelId)}${this.#rowQuotes(channelId, row.message_id)}`,
       ),
       ...(omittedCount > 0
         ? [
@@ -4473,6 +4488,57 @@ class BotRuntimeImplementation implements BotRuntime {
     return `[Last voice call with the Human in this DM: ${record.callId}, from ${record.startedAt} to ${record.endedAt} (${formatCallDuration(record.durationMs)}, ${record.heard} spoken message${record.heard === 1 ? '' : 's'} heard). The Human is typing again now. Read what was said and shown on it with channel_read call=${record.callId}; add from_ms/to_ms (milliseconds from the call's start) for part of it. channel_read text "voice call" with author_kind system lists earlier calls, each read the same way by its callId.]`;
   }
 
+  #rowQuotes(channelId: string, messageId: string): string {
+    return this.#quotePrompt(channelId, this.#channels.message(channelId, messageId));
+  }
+
+  #quotePrompt(channelId: string, message: ChannelMessage | undefined): string {
+    const block = this.#renderQuotePrompt(channelId, message);
+    if (block.length > 0 && message !== undefined) {
+      this.#quoteBlocks.delete(block);
+      this.#quoteBlocks.set(block, { channelId, message });
+      if (this.#quoteBlocks.size > 256)
+        this.#quoteBlocks.delete(this.#quoteBlocks.keys().next().value!);
+    }
+    return block;
+  }
+
+  #turnQuoteBlocks(
+    body: string,
+  ): ReadonlyArray<readonly [string, { channelId: string; message: ChannelMessage }]> {
+    return [...this.#quoteBlocks].filter(([block]) => body.includes(block));
+  }
+
+  #refreshQuoteBlocks(
+    body: string,
+    sources: ReadonlyArray<readonly [string, { channelId: string; message: ChannelMessage }]>,
+  ): string {
+    let refreshed = body;
+    for (const [block, source] of sources) {
+      if (!refreshed.includes(block)) continue;
+      const current = this.#renderQuotePrompt(source.channelId, source.message);
+      if (current !== block) refreshed = refreshed.split(block).join(current);
+    }
+    return refreshed;
+  }
+
+  #renderQuotePrompt(channelId: string, message: ChannelMessage | undefined): string {
+    return quotePromptBlock(message?.quotes, (messageId) => {
+      const target = this.#channels.message(channelId, messageId);
+      if (target === undefined || Reflect.get(target, 'contentPurge') !== undefined)
+        return undefined;
+      const author =
+        target.author.kind === 'bot' || target.author.kind === 'remote-bot'
+          ? `PersonaBot ${target.author.slug}`
+          : target.author.kind === 'human'
+            ? `Human${target.author.displayName === undefined ? '' : ` ${JSON.stringify(target.author.displayName)}`}`
+            : target.author.kind === 'bridged'
+              ? `${JSON.stringify(target.bridgeOrigin?.senderName ?? target.bridgeOrigin?.senderId ?? 'unknown')} (${target.bridgeOrigin?.platform ?? target.author.source}, external)`
+              : 'Channel system';
+      return { author, body: target.body };
+    });
+  }
+
   #groupMentionPrompt(botSlug: string, channelId: string, messageId: string, body: string): string {
     const message = this.#channels.message(channelId, messageId);
     const sender = message?.author.kind === 'bot' ? `PersonaBot ${message.author.slug}` : 'Human';
@@ -4504,7 +4570,7 @@ class BotRuntimeImplementation implements BotRuntime {
       isBotDmChannel(channel) &&
       (message?.author.kind === 'bot' || message?.author.kind === 'remote-bot')
     )
-      return `[Bot Inbox: direct message from PersonaBot ${message.author.slug}${message.author.kind === 'remote-bot' ? ` on Host ${message.author.hostId}` : ''}]\nSource Event ID: ${sourceEventId}\nChannel: ${channelId}\nMessage ID: ${messageId}\n${body}\n${this.#promptText(botSlug)('bot-dm-hint')}`;
+      return `[Bot Inbox: direct message from PersonaBot ${message.author.slug}${message.author.kind === 'remote-bot' ? ` on Host ${message.author.hostId}` : ''}]\nSource Event ID: ${sourceEventId}\nChannel: ${channelId}\nMessage ID: ${messageId}\n${body}${this.#quotePrompt(channelId, message)}\n${this.#promptText(botSlug)('bot-dm-hint')}`;
     if (message?.takeoverResolution !== undefined)
       return takeoverResolutionPrompt(
         sourceEventId,
@@ -4519,7 +4585,8 @@ class BotRuntimeImplementation implements BotRuntime {
       return `[Bot Inbox: Human allowed an auto-rejected call once]\nChannel: ${channelId}\nMessage ID: ${messageId}\nTool: ${target.toolName}\nSession: ${target.sessionId}\nInput:\n${input}\nThe Approval Reviewer rejected this call earlier, and the Human allowed it once anyway. You may retry it in that Session with exactly this input, every argument unchanged; that one retry runs without review. Later calls are still reviewed under your Approval Template. If the call came from an Assignment Session, relay this with send_assignment_request.`;
     }
     const skills =
-      message?.author.kind === 'human' ? skillInvocationPrompt(message.skillInvocations) : '';
+      (message?.author.kind === 'human' ? skillInvocationPrompt(message.skillInvocations) : '') +
+      this.#quotePrompt(channelId, message);
     if (channel?.type === 'group' && message?.mentions?.length)
       return (
         `Source Event ID: ${sourceEventId}\n` +
@@ -6893,6 +6960,7 @@ class BotRuntimeImplementation implements BotRuntime {
           ['bot-inbox'],
         );
       if (observeMemory) this.#memoryTurnOperations.add(bot.slug);
+      const quoteSources = this.#turnQuoteBlocks(body);
       const change = observeMemory
         ? await (this.#memory?.prepareTurnAsync ?? this.#memory?.prepareTurn)?.(
             bot.slug,
@@ -6904,6 +6972,7 @@ class BotRuntimeImplementation implements BotRuntime {
         : undefined;
       if (this.#closed || this.#stoppedTurns.has(bot.slug))
         throw new Error(SESSION_STOPPED_REFUSAL);
+      body = this.#refreshQuoteBlocks(body, quoteSources);
       const observation = observeMemory
         ? this.#memory?.preparedObservation?.(bot.slug, orchestrator.sessionId)
         : undefined;
@@ -9258,6 +9327,11 @@ class BotRuntimeImplementation implements BotRuntime {
           throw new Error('Human mentions require a Group Channel');
         if (isBotDmChannel(channel)) {
           if (channel.remoteBot !== undefined) {
+            if (input.quotes?.length)
+              throw new ChannelQuoteError(
+                'unsupported-quotes',
+                'Quotes are not supported in remote Bot DMs',
+              );
             if (
               input.attachments?.length ||
               (input.replyTo !== undefined && input.replySourceEventId === undefined)
@@ -9294,6 +9368,7 @@ class BotRuntimeImplementation implements BotRuntime {
             ...(input.deliveryKey === undefined ? {} : { afterSend: beforeSend }),
             body: input.body,
             replyTo: input.replyTo,
+            quotes: input.quotes,
             attachments: input.attachments,
             deliveryKey: input.deliveryKey,
           });
@@ -9318,6 +9393,7 @@ class BotRuntimeImplementation implements BotRuntime {
             ...(input.deliveryKey === undefined ? {} : { afterSend: beforeSend }),
             body: input.body,
             replyTo: input.replyTo,
+            quotes: input.quotes,
             attachments: input.attachments,
             mentionBotIds: input.mentionBotIds,
             mentionHumanIds: input.mentionHumanIds,
@@ -9382,14 +9458,17 @@ class BotRuntimeImplementation implements BotRuntime {
         if (input.replyTo !== undefined && !this.#channels.hasMessage(channel.id, input.replyTo)) {
           throw new ChannelReplyTargetError();
         }
+        const messageId = this.#deliveryMessageId(sessionId, input.deliveryKey);
+        this.#assertQuoteTargets(channel.id, messageId, input.quotes);
         beforeSend();
         const message: ChannelMessage = {
-          id: this.#deliveryMessageId(sessionId, input.deliveryKey),
+          id: messageId,
           at: this.#now().toISOString(),
           author: { kind: 'bot', slug: botSlug },
           body,
           ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
           ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
+          ...(input.quotes?.length ? { quotes: input.quotes } : {}),
           ...this.#perf(sessionId, body),
           ...(input.genui === undefined ? {} : { genui: input.genui }),
           ...(input.sessionLinks === undefined ? {} : { sessionLinks: input.sessionLinks }),
@@ -9451,6 +9530,7 @@ class BotRuntimeImplementation implements BotRuntime {
     afterSend?: () => void;
     body: string;
     replyTo?: string | undefined;
+    quotes?: ChannelQuote[] | undefined;
     attachments?: ChannelAttachmentRef[] | undefined;
     mentionBotIds?: string[] | undefined;
     mentionHumanIds?: string[] | undefined;
@@ -9532,8 +9612,9 @@ class BotRuntimeImplementation implements BotRuntime {
     this.#channels.assertAttachmentRefs(input.attachments ?? []);
     if (input.replyTo !== undefined && !this.#channels.hasMessage(channel.id, input.replyTo))
       throw new ChannelReplyTargetError();
+    const messageId = this.#deliveryMessageId(input.sessionId, input.deliveryKey);
     const message: ChannelMessage = {
-      id: this.#deliveryMessageId(input.sessionId, input.deliveryKey),
+      id: messageId,
       at: this.#now().toISOString(),
       author: { kind: 'bot', slug: botSlug },
       body,
@@ -9545,6 +9626,7 @@ class BotRuntimeImplementation implements BotRuntime {
       ...(mentions.length === 0 ? {} : { mentions }),
       ...(humanMentions.length === 0 ? {} : { humanMentions }),
       ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
+      ...(input.quotes?.length ? { quotes: input.quotes } : {}),
       ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
       ...this.#perf(input.sessionId, body),
     };
@@ -9571,6 +9653,7 @@ class BotRuntimeImplementation implements BotRuntime {
         return committed;
       }
     }
+    this.#assertQuoteTargets(channel.id, messageId, input.quotes);
     let reviewOutcome: import('../channels/send-review.js').SendReviewOutcome | undefined;
     const originId = input.sourceEventId ?? message.botCausation!.parentSourceEventId;
     const result = await this.#channels.appendMessageOnce(
@@ -9719,6 +9802,19 @@ class BotRuntimeImplementation implements BotRuntime {
       parentSourceEventId: sourceEventId,
       hop: inheritedHop + 1,
     };
+  }
+
+  #assertQuoteTargets(
+    channelId: string,
+    messageId: string,
+    quotes: readonly ChannelQuote[] | undefined,
+  ): void {
+    if (
+      quotes?.length &&
+      sameQuoteIntent(this.#channels.storedQuotes(channelId, messageId), quotes)
+    )
+      return;
+    assertQuoteTargets(quotes, (id) => this.#channels.message(channelId, id));
   }
 
   #deliveryMessageId(sessionId: string, deliveryKey?: string): string {
@@ -9951,6 +10047,7 @@ class BotRuntimeImplementation implements BotRuntime {
     afterSend?: () => void;
     body: string;
     replyTo?: string | undefined;
+    quotes?: ChannelQuote[] | undefined;
     attachments?: ChannelAttachmentRef[] | undefined;
     deliveryKey?: string | undefined;
   }): Promise<{ channelId: string; message: ChannelMessage }> {
@@ -9970,6 +10067,8 @@ class BotRuntimeImplementation implements BotRuntime {
     this.#channels.assertAttachmentRefs(input.attachments ?? []);
     if (input.replyTo !== undefined && !this.#channels.hasMessage(channel.id, input.replyTo))
       throw new ChannelReplyTargetError();
+    const messageId = this.#deliveryMessageId(input.sessionId, input.deliveryKey);
+    this.#assertQuoteTargets(channel.id, messageId, input.quotes);
     const sender = this.#registry.get(botSlug);
     if (this.#team) this.#team.bots.requireChannel(botSlug, channel, true);
     else if (sender && botOwner(sender) !== botOwner(recipient))
@@ -9990,7 +10089,6 @@ class BotRuntimeImplementation implements BotRuntime {
         input.sourceEventId,
     );
     this.#requireBotHop(botCausation);
-    const messageId = this.#deliveryMessageId(input.sessionId, input.deliveryKey);
     const message: ChannelMessage = {
       id: messageId,
       at: this.#now().toISOString(),
@@ -9998,6 +10096,7 @@ class BotRuntimeImplementation implements BotRuntime {
       body: input.body,
       botCausation,
       ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
+      ...(input.quotes?.length ? { quotes: input.quotes } : {}),
       ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
       ...this.#perf(input.sessionId, input.body),
     };
