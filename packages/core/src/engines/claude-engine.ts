@@ -298,6 +298,12 @@ export class ClaudeEngineSession implements EngineSession {
     return this.#exited !== undefined || this.#closed;
   }
 
+  #model: string | undefined;
+
+  get model(): string | undefined {
+    return this.#model;
+  }
+
   async account(): Promise<EngineAccount> {
     const open = await this.#ensure(this.#options.resume);
     const info = await Promise.race([
@@ -512,6 +518,8 @@ export class ClaudeEngineSession implements EngineSession {
     switch (message['type']) {
       case 'system': {
         if (message['subtype'] !== 'init') return;
+        const model = text(message['model']);
+        if (model !== '') this.#model = model;
         const keySource = text(message['apiKeySource']);
         if (keySource !== '' && keySource !== 'none') {
           this.#metered = `Claude Code is signed in with an API key (${keySource})`;

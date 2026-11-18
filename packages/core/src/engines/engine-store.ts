@@ -7,7 +7,15 @@ export type EngineRole = 'orchestrator';
 
 interface EngineFile {
   version: 1;
-  bots: Record<string, { orchestrator?: EngineId; fallback?: true }>;
+  bots: Record<
+    string,
+    {
+      orchestrator?: EngineId;
+      fallback?: true;
+      accounts?: Partial<Record<EngineId, string>>;
+      models?: Partial<Record<EngineId, string>>;
+    }
+  >;
   sessions: Record<string, { engine: EngineId; nativeId: string; account?: string }>;
   quota?: Partial<Record<EngineId, EngineQuota>>;
 }
@@ -21,6 +29,10 @@ export interface EngineStore {
     options?: { fallback?: boolean },
   ): void;
   fallback(botSlug: string, role: EngineRole): boolean;
+  account(botSlug: string, engine: EngineId): string | undefined;
+  rememberAccount(botSlug: string, engine: EngineId, account: string): void;
+  model(botSlug: string, engine: EngineId): string | undefined;
+  rememberModel(botSlug: string, engine: EngineId, model: string): void;
   selections(): Array<{ botSlug: string; role: EngineRole; engine: EngineId; fallback: boolean }>;
   quota(engine: EngineId): EngineQuota | undefined;
   rememberQuota(engine: EngineId, quota: EngineQuota): void;
@@ -55,11 +67,21 @@ function parse(text: string, path: string): EngineFile {
   const file = empty();
   for (const [slug, roles] of Object.entries(fields(value['bots']) ?? {})) {
     const orchestrator = fields(roles)?.['orchestrator'];
-    if (isEngineId(orchestrator))
-      file.bots[slug] = {
-        orchestrator,
-        ...(fields(roles)?.['fallback'] === true ? { fallback: true as const } : {}),
-      };
+    const accounts: Partial<Record<EngineId, string>> = {};
+    for (const [engine, account] of Object.entries(fields(fields(roles)?.['accounts']) ?? {}))
+      if (isEngineId(engine) && typeof account === 'string' && account.trim())
+        accounts[engine] = account;
+    const models: Partial<Record<EngineId, string>> = {};
+    for (const [engine, model] of Object.entries(fields(fields(roles)?.['models']) ?? {}))
+      if (isEngineId(engine) && typeof model === 'string' && model.trim()) models[engine] = model;
+    file.bots[slug] = {
+      ...(isEngineId(orchestrator) ? { orchestrator } : {}),
+      ...(isEngineId(orchestrator) && fields(roles)?.['fallback'] === true
+        ? { fallback: true as const }
+        : {}),
+      accounts,
+      models,
+    };
   }
   for (const [engine, raw] of Object.entries(fields(value['quota']) ?? {})) {
     const quota = parseQuota(raw);
@@ -108,12 +130,30 @@ export function createEngineStore(path: string): EngineStore {
     selection: (botSlug) => read().bots[botSlug]?.orchestrator,
     select: (botSlug, _role, engine, options) => {
       const file = structuredClone(read());
-      if (engine === undefined) delete file.bots[botSlug];
-      else
-        file.bots[botSlug] = {
-          orchestrator: engine,
-          ...(options?.fallback === true ? { fallback: true as const } : {}),
-        };
+      const entry = file.bots[botSlug] ?? {};
+      if (engine === undefined) {
+        delete entry.orchestrator;
+        delete entry.fallback;
+      } else {
+        entry.orchestrator = engine;
+        if (options?.fallback === true) entry.fallback = true;
+        else delete entry.fallback;
+      }
+      file.bots[botSlug] = entry;
+      write(file);
+    },
+    account: (botSlug, engine) => read().bots[botSlug]?.accounts?.[engine],
+    rememberAccount: (botSlug, engine, account) => {
+      const file = structuredClone(read());
+      const entry = (file.bots[botSlug] ??= {});
+      (entry.accounts ??= {})[engine] = account;
+      write(file);
+    },
+    model: (botSlug, engine) => read().bots[botSlug]?.models?.[engine],
+    rememberModel: (botSlug, engine, model) => {
+      const file = structuredClone(read());
+      const entry = (file.bots[botSlug] ??= {});
+      (entry.models ??= {})[engine] = model;
       write(file);
     },
     fallback: (botSlug) => read().bots[botSlug]?.fallback === true,
