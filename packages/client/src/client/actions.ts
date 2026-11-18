@@ -1,3 +1,4 @@
+import { botModeActions, type BotModeActions } from './bot-mode-actions.js';
 import { retryChannelMessage } from '@botharness/host-client/channel-messages';
 import { subscribeSkillCatalog } from './messaging-defaults-live.js';
 import { replyPreviewOf } from '../../../core/src/channels/reply-preview.js';
@@ -466,7 +467,7 @@ export interface HostDirectoryListing {
   nativePicker?: boolean;
 }
 
-export interface BridgeActions {
+export interface BridgeActions extends BotModeActions {
   readonly teamCall?: BridgeCall;
   genuiDocumentView(
     channelId: string,
@@ -2019,6 +2020,7 @@ export function createActions(
     avatars: await loadHumanAvatars(call, humanIds),
   }));
   const actions: BridgeActions = {
+    ...botModeActions(call),
     teamCall: call,
     genuiDocumentView: (channelId, messageId, document) =>
       loadGenuiDocumentView(call, channelId, messageId, document),

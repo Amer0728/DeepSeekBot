@@ -362,6 +362,12 @@ import {
   type CompactCommandRunner,
 } from './runtime/idle-compaction.js';
 import { createIdleCompactionSettings } from './runtime/idle-compaction-settings.js';
+import {
+  createBotModeSettings,
+  isBotModeId,
+  resolveBotMode,
+  type BotModeOption,
+} from './runtime/bot-mode-settings.js';
 import { ChannelUserQuestions, registerChannelUserQuestions } from './channels/user-questions.js';
 import { mountPrivateInputs } from './credentials/mount.js';
 import { installMemberConfinement, MemberConfinement } from './execution/member-confinement.js';
@@ -1658,6 +1664,41 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     log: (message) => ctx.logger.info(message),
   });
   mountClientDiagnostics(ctx, dshHome);
+  const botModeSettings = createBotModeSettings(join(dshHome, 'botharness'));
+  const productBotMode = config.agentPreset ?? DEFAULT_AGENT_PRESET;
+  let reconcileBotModeSkills: (() => void) | undefined;
+  let installedBotModeIds: ReadonlySet<string> | undefined;
+  const globalBotMode = (): string => {
+    const saved = botModeSettings.defaultMode();
+    return saved !== undefined &&
+      (installedBotModeIds === undefined || installedBotModeIds.has(saved))
+      ? saved
+      : productBotMode;
+  };
+  const botModeOf = (slug: string | undefined): string =>
+    slug === undefined
+      ? globalBotMode()
+      : resolveBotMode({
+          own: core.registry.get(slug)?.preset,
+          inherited: globalBotMode(),
+          allowed: botModeSettings.allowedModes(slug),
+          installed: installedBotModeIds,
+        });
+  const installedBotModes = async (): Promise<BotModeOption[]> => {
+    const presets = ctx.get('agentPresets') as { list(): Promise<BotModeOption[]> } | undefined;
+    if (presets === undefined) return [];
+    const listed = (await presets.list()).filter((preset) => isBotModeId(preset.id));
+    installedBotModeIds = new Set(
+      listed.filter((preset) => preset.broken === undefined).map((preset) => preset.id),
+    );
+    return listed.map((preset) => ({
+      id: preset.id,
+      ...(preset.name === undefined ? {} : { name: preset.name }),
+      ...(preset.description === undefined ? {} : { description: preset.description }),
+      ...(preset.order === undefined ? {} : { order: preset.order }),
+      ...(preset.broken === undefined ? {} : { broken: preset.broken }),
+    }));
+  };
   const hostDiagnosticEnvironment = () => {
     const dshVersion = installedDshVersion();
     return {
@@ -1894,7 +1935,37 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
         'orchestrator',
       );
     },
-    defaultAgentPreset: config.agentPreset ?? DEFAULT_AGENT_PRESET,
+    defaultAgentPreset: globalBotMode,
+    botModeOf,
+    recordSessionMode: (sessionId, mode) => {
+      try {
+        core.ownership.recordAgentPreset(sessionId, mode);
+      } catch (error) {
+        ctx.logger.warn(`Could not record the mode of Session ${sessionId}: ${String(error)}`);
+      }
+    },
+    ensureBotModes: async () => {
+      await installedBotModes().catch(() => {
+        installedBotModeIds ??= new Set();
+      });
+    },
+    assignmentModes: async (slug) => {
+      const installed = await installedBotModes();
+      const allowed =
+        botModeSettings.readError() === undefined ? botModeSettings.allowedModes(slug) : [];
+      return {
+        default: botModeOf(slug),
+        restricted: allowed !== undefined,
+        allowed: installed
+          .filter((mode) => mode.broken === undefined)
+          .filter((mode) => allowed === undefined || allowed.includes(mode.id))
+          .map((mode) => ({
+            id: mode.id,
+            ...(mode.name === undefined ? {} : { name: mode.name }),
+            ...(mode.description === undefined ? {} : { description: mode.description }),
+          })),
+      };
+    },
     resolveAgentPresets: () => ctx.get('agentPresets') as DshAgentPresetHost | undefined,
     publishDraft: (event) => publishDraft(event),
     onAgentSetup: (agentCtx, agent, info) => core.runBotAgentSetups(agentCtx, agent, info),
@@ -3519,8 +3590,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
       core.registry.get(slug) === undefined ? undefined : core.registry.memoryDirFor(slug),
     viewFor: createSkillViewPort({
       agentFor: skillAgentFor,
-      presetFor: (slug) =>
-        core.registry.get(slug)?.preset ?? config.agentPreset ?? DEFAULT_AGENT_PRESET,
+      presetFor: botModeOf,
       agentPresets: () => hostAgentPresets<SkillAgentPresetsPort<Agent>>(ctx),
     }),
   });
@@ -3539,7 +3609,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
                   slug: bot.slug,
                   memoryDir,
                   agent: skillAgentFor(bot.slug),
-                  ...(bot.preset === undefined ? {} : { preset: bot.preset }),
+                  preset: botModeOf(bot.slug),
                 },
               ];
         }),
@@ -3569,7 +3639,9 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     });
     const offHost = onHostSkillsChange(ctx, () => void refresh.hostChanged());
     const offAgents = onHostSkillAgentsChange(ctx, () => refresh.reconcile());
+    reconcileBotModeSkills = () => refresh.reconcile();
     return () => {
+      reconcileBotModeSkills = undefined;
       offAgents();
       offHost();
       offRegistry();
@@ -3672,6 +3744,12 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     cloudConnections,
     cloudWork,
     approvalReviewer,
+    botModes: {
+      settings: botModeSettings,
+      productDefault: productBotMode,
+      roster: installedBotModes,
+      changed: () => reconcileBotModeSkills?.(),
+    },
     idleCompaction: {
       settings: idleCompactionSettings,
       scheduler: idleCompaction,
@@ -3720,13 +3798,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     zipImports: core.zipImports,
     channelManagement: core.channelManagement,
     partLibrary: core.partLibrary,
-    onboardingNews: (slug) =>
-      onboardingNewsAvailable(
-        ctx,
-        (slug === undefined ? undefined : core.registry.get(slug)?.preset) ??
-          config.agentPreset ??
-          DEFAULT_AGENT_PRESET,
-      ),
+    onboardingNews: (slug) => onboardingNewsAvailable(ctx, botModeOf(slug)),
     defaultModel: defaultModel as DshDefaultModelHost & {
       saveSelection(route: import('./models/presets.js').ModelRoute): Promise<void>;
     },

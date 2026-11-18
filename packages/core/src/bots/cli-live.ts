@@ -143,6 +143,7 @@ import {
   isIdleCompactionCommand,
   runIdleCompactionCommand,
 } from './cli-idle-compaction.js';
+import { BOT_MODE_COMMANDS, isBotModeCommand, runBotModeCommand } from './cli-bot-modes.js';
 import { CONNECT_COMMANDS, isConnectCommand, runConnectCommand } from './cli-connect.js';
 import {
   isShareDraftCommand,
@@ -249,6 +250,7 @@ export const LIVE_COMMANDS = [
   ...CALL_COMMANDS,
   ...CALL_TIMELINE_COMMANDS,
   ...IDLE_COMPACTION_COMMANDS,
+  ...BOT_MODE_COMMANDS,
   ...STORAGE_COMMANDS,
   ...SKILL_COMMANDS,
   {
@@ -514,6 +516,7 @@ interface LiveValues
     ApprovalTemplateValues,
     ApprovalReviewerValues,
     VoiceValues {
+  id?: string;
   skill?: string[];
   as?: string;
   username?: string;
@@ -1158,6 +1161,16 @@ export async function runLiveCli(
       const signal = AbortSignal.timeout(timeoutMs(values.timeout));
       return (await connectLiveHost(values, io, signal)).rpc;
     });
+  if (isBotModeCommand(command))
+    return runBotModeCommand(
+      command,
+      rest,
+      async () => {
+        const signal = AbortSignal.timeout(timeoutMs(values.timeout));
+        return (await connectLiveHost(values, io, signal)).rpc;
+      },
+      values.id === undefined ? {} : { id: values.id },
+    );
   if (isPromptPresetCommand(command))
     return runPromptPresetCommand(command, rest, values, io, async () => {
       const signal = AbortSignal.timeout(timeoutMs(values.timeout));

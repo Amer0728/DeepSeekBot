@@ -23,6 +23,11 @@ import type { TeamService } from '../team/service.js';
 import { OWNER_HUMAN_CONTEXT } from '../humans/context.js';
 import { type HumanContext, type HumanId } from '../humans/context.js';
 import { createVoiceBridgeMethods, type VoiceBridgeMethods } from '../voice/bridge.js';
+import {
+  createBotModeBridgeMethods,
+  type BotModeBridgeMethods,
+  type BotModesDeps,
+} from './bot-modes.js';
 import type { VoiceProviders } from '../voice/providers.js';
 import { networkBotId, type BotContact } from '../runtime/bot-contact-discovery.js';
 import { BotNetworkDeliveryError } from '../runtime/bot-network.js';
@@ -743,6 +748,7 @@ export interface OwnedSessionSummary {
   assignmentDescription?: string;
   assignmentModelRoute?: ModelRoute;
   modelRoute?: ModelRoute;
+  agentPreset?: string;
   currentOrchestrator?: boolean;
   triageOpenCount?: number;
   subagentCount?: number;
@@ -1229,6 +1235,12 @@ export interface BridgeMethods extends TeamBridgeMethods {
   voiceTranscribe: VoiceBridgeMethods['voiceTranscribe'];
   botAsrSet: VoiceBridgeMethods['botAsrSet'];
   voiceDefaultSet: VoiceBridgeMethods['voiceDefaultSet'];
+  botModes: BotModeBridgeMethods['botModes'];
+  botModeDefaultSet: BotModeBridgeMethods['botModeDefaultSet'];
+  botModeSet: BotModeBridgeMethods['botModeSet'];
+  botModeTemplateSave: BotModeBridgeMethods['botModeTemplateSave'];
+  botModeTemplateDelete: BotModeBridgeMethods['botModeTemplateDelete'];
+  botModeTemplateSet: BotModeBridgeMethods['botModeTemplateSet'];
   voiceSpeechThresholdSet: VoiceBridgeMethods['voiceSpeechThresholdSet'];
   voiceDictation: VoiceBridgeMethods['voiceDictation'];
   approvalReviewerModel(payload?: unknown): Promise<BridgeResult<ApprovalReviewerModelView>>;
@@ -1412,6 +1424,7 @@ export interface BridgeMethodsDeps {
   cloudConnections?: CloudConnections;
   cloudWork?: CloudWork;
   approvalReviewer?: ApprovalReviewerSettings;
+  botModes?: BotModesDeps;
   composerIdentity?: (human: HumanContext) => ComposerRecoveryIdentity;
   warn?: (message: string) => void;
   registry: PersonaBotRegistry;
@@ -3089,6 +3102,11 @@ function buildBridgeMethods(
       providers: deps.voiceProviders,
       registry: deps.registry,
       log: deps.voiceLog,
+    }),
+    ...createBotModeBridgeMethods({
+      modes: deps.botModes,
+      registry: deps.registry,
+      everyone: globalRegistry,
     }),
     channelBridges(payload) {
       const input = z
@@ -5861,6 +5879,29 @@ function buildBridgeMethods(
         ...(workspaces.value === undefined ? {} : { workspaces: workspaces.value }),
         ...(avatar.value === undefined ? {} : { avatar: avatar.value }),
       };
+      const presetSettingsError =
+        preset.value !== undefined && preset.value.trim().length > 0
+          ? deps.botModes?.settings.readError()
+          : undefined;
+      if (presetSettingsError !== undefined)
+        return {
+          ok: false,
+          error: { code: 'settings-unreadable', message: presetSettingsError },
+        };
+      const allowedModes = deps.botModes?.settings.allowedModes(slug);
+      if (
+        preset.value !== undefined &&
+        preset.value.trim().length > 0 &&
+        allowedModes !== undefined &&
+        !allowedModes.includes(preset.value.trim())
+      )
+        return {
+          ok: false,
+          error: {
+            code: 'mode-not-allowed',
+            message: `Mode ${preset.value.trim()} is not in this Bot's mode template; choose one of ${allowedModes.join(', ')} or change the template.`,
+          },
+        };
       const expectedProfile = asObject(payload)['expectedProfile'];
       if (expectedProfile !== undefined) {
         if (typeof expectedProfile !== 'string' || !/^[a-f0-9]{64}$/u.test(expectedProfile))
@@ -10599,6 +10640,7 @@ function buildBridgeMethods(
             ? {}
             : { assignmentModelRoute: assignment.modelRoute }),
           ...(modelRoute === undefined ? {} : { modelRoute }),
+          ...(root.agentPreset === undefined ? {} : { agentPreset: root.agentPreset }),
           ...(subagentCount === undefined ? {} : { subagentCount }),
         };
       });

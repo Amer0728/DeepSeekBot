@@ -1720,6 +1720,60 @@ export const zh = {
   'models.section.default': '默认模型',
   'models.section.context': '上下文',
   'models.section.run': '运行',
+  'models.section.mode': '模式',
+  'botMode.default.title': '默认 Bot 模式',
+  'botMode.default.description': '没有单独设定模式的 Bot 都用这个模式，从下一次新会话开始生效。',
+  'botMode.productLabel': '{name}（推荐）',
+  'botMode.notTobs':
+    '在非 Tobs 模式下，提问卡没被回答前 Bot 不会处理其他消息。不给 Bot 提供 Harness 工具的模式（例如通过 ACP 接入的模式）无法在频道回复，也无法汇报任务。',
+  'botMode.follow': '跟随默认',
+  'botMode.followHint': '当前为 {name}',
+  'botMode.nextSession': '改动从下一次新会话开始生效。',
+  'botMode.broken': '加载失败',
+  'botMode.missing': '{id}（未安装）',
+  'botMode.selected': '已选',
+  'botMode.retry': '重试',
+  'botMode.builtIn.standard.name': '标准模式',
+  'botMode.builtIn.standard.description':
+    '处理代码、文件和资料，适合大多数任务。Agent 会按需使用检索、编辑和终端等工具。',
+  'botMode.builtIn.ptc.name': 'PTC 模式',
+  'botMode.builtIn.ptc.description':
+    '包含标准模式的所有能力，更适合批量调用工具，并对结果进行筛选、整理、去重、统计或汇总的任务。',
+  'botMode.builtIn.minimal.name': '极简模式',
+  'botMode.builtIn.minimal.description':
+    'Agent 使用终端和图片读取工具，并支持上下文压缩，适合测试和对比其基础表现。',
+  'botMode.builtIn.cordis.name': '创造模式',
+  'botMode.builtIn.cordis.description':
+    '用对话定制 DSH：让 Agent 编写插件，添加新功能或界面；也能组合工具和提示词，创建自己的模式。',
+  'botMode.builtIn.deepseekbot.name': 'Tobs',
+  'botMode.builtIn.deepseekbot.description':
+    '标准模式，但提问卡 45 秒没人回答时 Bot 会继续处理其他消息。',
+  'botMode.builtIn.tobs-research.name': 'Tobs 调研',
+  'botMode.builtIn.tobs-research.description':
+    '上网搜索和抓取网页、读写文件，没有终端。适合查资料、核对事实和写报告。',
+  'botMode.builtIn.tobs-code.name': 'Tobs 编程',
+  'botMode.builtIn.tobs-code.description':
+    '终端、文件、后台任务、技能和上网查文档。适合写代码、跑测试和构建。',
+  'botMode.builtIn.tobs-script.name': 'Tobs 脚本',
+  'botMode.builtIn.tobs-script.description':
+    '只有终端和文件，不能上网。适合处理本地数据、算统计、跑小脚本。',
+  'botMode.template.all': '全部模式',
+  'botMode.template.bot.title': '可选模式',
+  'botMode.template.bot.all': '这个 Bot 和它的 Orchestrator 可以用任何已安装的模式。',
+  'botMode.template.bot.limited': '这个 Bot 和它的 Orchestrator 只能用模板里的模式。',
+  'botMode.templates.title': '模式模板',
+  'botMode.templates.description':
+    '模板限定一个 Bot 可以选哪些模式，Orchestrator 创建 Assignment 时也只能从中选。没用模板的 Bot 可以用全部模式。',
+  'botMode.templates.new': '新建模板',
+  'botMode.templates.empty': '还没有模式模板',
+  'botMode.templates.edit': '编辑',
+  'botMode.templates.createTitle': '新建模式模板',
+  'botMode.templates.editTitle': '编辑模式模板',
+  'botMode.templates.save': '保存',
+  'botMode.templates.delete': '删除模板',
+  'botMode.templates.name': '名称',
+  'botMode.templates.pick': '打开这个模板允许的模式。',
+  'entry.mode': '模式',
   'botSettings.section.computerBrowser': '电脑与浏览器',
   'account.section.hostLook': '主机名称和图标',
   'botSettings.section.computer': '电脑',
@@ -3958,6 +4012,7 @@ export const zh = {
   'sessions.role.orchestrator': 'Orchestrator',
   'sessions.role.assignment': 'Assignment',
   'sessions.access.danger': '完整文件访问',
+  'sessions.mode': '模式：{name}。会话开始后不能更换。',
   'sessions.access.dangerDetails':
     '此事项会话可访问授权工作区之外的文件；关闭 Bot 默认设置不会降低此会话的权限。',
   'sessions.status.running': '运行中',
@@ -7998,6 +8053,62 @@ export const en = {
   'models.section.default': 'Default model',
   'models.section.context': 'Context',
   'models.section.run': 'Running',
+  'models.section.mode': 'Mode',
+  'botMode.default.title': 'Default Bot mode',
+  'botMode.default.description':
+    'Bots without their own mode use this one, from their next new Session.',
+  'botMode.productLabel': '{name} (recommended)',
+  'botMode.notTobs':
+    'Outside Tobs mode, a Bot waits on an unanswered question card before it handles other messages. A mode that gives the Bot no Harness tools (for example an ACP mode) cannot reply in a Channel or report an Assignment.',
+  'botMode.follow': 'Follow default',
+  'botMode.followHint': 'Now {name}',
+  'botMode.nextSession': 'Changes apply from the next new Session.',
+  'botMode.broken': 'Failed to load',
+  'botMode.missing': '{id} (not installed)',
+  'botMode.selected': 'Selected',
+  'botMode.retry': 'Retry',
+  'botMode.template.all': 'All modes',
+  'botMode.template.bot.title': 'Allowed modes',
+  'botMode.template.bot.all': 'This Bot and its Orchestrator can use any installed mode.',
+  'botMode.template.bot.limited':
+    'This Bot and its Orchestrator can use only the modes in the template.',
+  'botMode.templates.title': 'Mode templates',
+  'botMode.templates.description':
+    'A template limits which modes a Bot can pick, and which modes its Orchestrator can give an Assignment. A Bot without a template can use every mode.',
+  'botMode.templates.new': 'New template',
+  'botMode.templates.empty': 'No mode templates yet',
+  'botMode.templates.edit': 'Edit',
+  'botMode.templates.createTitle': 'New mode template',
+  'botMode.templates.editTitle': 'Edit mode template',
+  'botMode.templates.save': 'Save',
+  'botMode.templates.delete': 'Delete template',
+  'botMode.templates.name': 'Name',
+  'botMode.templates.pick': 'Turn on the modes this template allows.',
+  'botMode.builtIn.standard.name': 'Standard mode',
+  'botMode.builtIn.standard.description':
+    'Work with code, files, and information. Suitable for most tasks, with search, editing, terminal commands, and other tools available as needed.',
+  'botMode.builtIn.ptc.name': 'PTC mode',
+  'botMode.builtIn.ptc.description':
+    'Includes all Standard mode capabilities. Better suited to tasks that call tools in batches and then filter, organize, deduplicate, count, or summarize the results.',
+  'botMode.builtIn.minimal.name': 'Minimal mode',
+  'botMode.builtIn.minimal.description':
+    'The agent uses a terminal and image reading, with context compaction. Useful for testing and comparing its basic performance.',
+  'botMode.builtIn.cordis.name': 'Creator mode',
+  'botMode.builtIn.cordis.description':
+    'Customize DSH through conversation. Let the agent write plugins that add features or UI, or combine tools and prompts to create your own mode.',
+  'botMode.builtIn.deepseekbot.name': 'Tobs',
+  'botMode.builtIn.deepseekbot.description':
+    'Standard mode, except that a question card left unanswered for 45 seconds no longer holds the Bot.',
+  'botMode.builtIn.tobs-research.name': 'Tobs Research',
+  'botMode.builtIn.tobs-research.description':
+    'Web search and fetch plus files, no terminal. For looking things up, checking facts and writing reports.',
+  'botMode.builtIn.tobs-code.name': 'Tobs Coding',
+  'botMode.builtIn.tobs-code.description':
+    'Terminal, files, background jobs, skills and web lookups. For writing code and running tests and builds.',
+  'botMode.builtIn.tobs-script.name': 'Tobs Script',
+  'botMode.builtIn.tobs-script.description':
+    'Terminal and files only, no web. For processing local data, computing statistics and running small scripts.',
+  'entry.mode': 'Mode',
   'botSettings.section.computerBrowser': 'Computer and browser',
   'account.section.hostLook': 'Host name and icon',
   'botSettings.section.computer': 'Computer',
@@ -10372,6 +10483,7 @@ My relationship with you, established lore and topics to avoid: [fill in].
   'sessions.role.orchestrator': 'Orchestrator',
   'sessions.role.assignment': 'Assignment',
   'sessions.access.danger': 'Full file access',
+  'sessions.mode': 'Mode: {name}. It stays fixed once the Session starts.',
   'sessions.access.dangerDetails':
     'This Assignment Session can access files outside its workspace. Turning off the Bot default does not downgrade this Session.',
   'sessions.status.running': 'Running',
