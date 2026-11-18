@@ -1,4 +1,4 @@
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { FlatList, Keyboard, ScrollView, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
@@ -21,7 +21,6 @@ import {
   type ModelFavoriteChange,
 } from '@botharness/host-client/model-catalog';
 import type { HostClient } from '@botharness/host-client/client';
-import { useHostSession } from '../../host/host-session';
 import {
   inheritModel,
   modelRoutes,
@@ -29,11 +28,13 @@ import {
   modelSettingsResource,
   saveModelPreset,
   searchModels,
+  setAssignmentEfforts,
   setAssignmentGroupNote,
   setModelGroup,
   setModelRoute,
   toggleAssignmentGroup,
   toggleAssignmentModel,
+  type AssignmentEffortTarget,
   type ModelField,
   type ModelScope,
   type ModelSettingsState,
@@ -44,6 +45,7 @@ import { space } from '../design/tokens';
 import { Chip } from '../primitives/chip';
 import { FavoriteButton } from '../primitives/favorite-button';
 import { modelEntryLabel, modelFamilyKey, restingLabel, restingNotice } from './composer-labels';
+import { AllowedEffortLinks, AllowedEffortPage } from './allowed-efforts';
 import { GroupNotes } from './group-notes';
 import { PickerLink, RouteIcon } from './model-route-label';
 import { EffortBar, GroupEffortBar, GroupEffortLink, GroupEfforts } from './model-effort';
@@ -162,14 +164,16 @@ function useModels(client: HostClient, scope: ModelScope) {
   return { value, error, busy, refresh, run, favorites, favorite };
 }
 
-function ModelsView({
+export function ModelsView({
   client,
   scope,
   picker,
+  effortTarget,
 }: {
   client: HostClient;
   scope: ModelScope;
   picker?: ModelField | undefined;
+  effortTarget?: AssignmentEffortTarget | undefined;
 }) {
   const t = useStrings();
   const router = useRouter();
@@ -187,13 +191,22 @@ function ModelsView({
   const [name, setName] = useState<string>();
   const [saved, setSaved] = useState(false);
   const value = models.value;
-  const openPicker = (field: ModelField) => {
+  const openPicker = (field: ModelField, target?: AssignmentEffortTarget) => {
+    const extra =
+      target === undefined
+        ? {}
+        : target.kind === 'group'
+          ? { group: target.id }
+          : { provider: target.provider, model: target.model };
     if (scope.kind === 'bot')
-      router.push({ pathname: '/bot/[slug]/model-picker', params: { slug: scope.slug, field } });
+      router.push({
+        pathname: '/bot/[slug]/model-picker',
+        params: { slug: scope.slug, field, ...extra },
+      });
     else
       router.push({
         pathname: '/settings/model-picker',
-        params: { field, ...(scope.kind === 'preset' ? { id: scope.id } : {}) },
+        params: { field, ...extra, ...(scope.kind === 'preset' ? { id: scope.id } : {}) },
       });
   };
   const title =
@@ -292,6 +305,24 @@ function ModelsView({
           busy={models.busy}
           onChange={(effort) => pickGroup(group, effort, true)}
         />
+      );
+    if (picker === 'allowed-effort')
+      return frame(
+        effortTarget === undefined ? (
+          <SheetNote>{t.modelSettings.noResults}</SheetNote>
+        ) : (
+          <AllowedEffortPage
+            value={value}
+            target={effortTarget}
+            busy={models.busy}
+            header={banner}
+            onSave={(allowed, effort) =>
+              models.run(() =>
+                setAssignmentEfforts(client, scope, value, effortTarget, allowed, effort),
+              )
+            }
+          />
+        ),
       );
     if (picker.endsWith('-effort'))
       return frame(
@@ -882,6 +913,12 @@ function ModelsView({
           ) : null}
         </SettingsSection>
       </View>
+      {scope.kind === 'global' || routes.assignmentDefault === undefined ? null : (
+        <AllowedEffortLinks
+          value={value}
+          onOpen={models.busy ? undefined : (target) => openPicker('allowed-effort', target)}
+        />
+      )}
       <View style={{ paddingHorizontal: space.x5, gap: space.x3 }}>
         <TextField
           value={name ?? value.preset?.name ?? ''}
@@ -953,41 +990,5 @@ function ModelsView({
         </SettingsGroupItem>
       )}
     />,
-  );
-}
-
-export function ModelSettingsScreen({
-  kind,
-  pick = false,
-}: {
-  kind: ModelScope['kind'];
-  pick?: boolean;
-}) {
-  const t = useStrings();
-  const {
-    slug = '',
-    id = '',
-    field = 'orchestrator',
-  } = useLocalSearchParams<{ slug: string; id: string; field: string }>();
-  const { client, saved } = useHostSession();
-  const scope: ModelScope =
-    kind === 'bot'
-      ? { kind, slug }
-      : kind === 'preset' || (pick && id !== '')
-        ? { kind: 'preset', id }
-        : { kind: 'global' };
-  const picker: ModelField | undefined = pick
-    ? ['assignment', 'allowed', 'orchestrator-effort', 'assignment-effort'].includes(field)
-      ? (field as ModelField)
-      : 'orchestrator'
-    : undefined;
-  if (client === undefined) return <SheetNote>{t.unreachable}</SheetNote>;
-  return (
-    <ModelsView
-      key={`${saved?.hostId}:${modelScopeKey(scope)}:${picker ?? ''}`}
-      client={client}
-      scope={scope}
-      picker={picker}
-    />
   );
 }
