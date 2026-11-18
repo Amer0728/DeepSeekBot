@@ -11,7 +11,9 @@ export function shortTime(at: string): string {
 }
 
 export function engineName(engine: string): string {
-  return engine === 'codex' ? 'Codex' : engine === 'claude' ? 'Claude' : engine;
+  if (engine === 'codex') return 'Codex';
+  if (engine === 'claude') return 'Claude Code';
+  return engine;
 }
 
 export function engineQuotaText(
