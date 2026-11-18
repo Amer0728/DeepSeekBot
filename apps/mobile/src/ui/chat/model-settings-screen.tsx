@@ -29,6 +29,7 @@ import {
   modelSettingsResource,
   saveModelPreset,
   searchModels,
+  setAssignmentGroupNote,
   setModelGroup,
   setModelRoute,
   toggleAssignmentGroup,
@@ -43,6 +44,7 @@ import { space } from '../design/tokens';
 import { Chip } from '../primitives/chip';
 import { FavoriteButton } from '../primitives/favorite-button';
 import { modelEntryLabel, modelFamilyKey, restingLabel, restingNotice } from './composer-labels';
+import { GroupNotes } from './group-notes';
 import { ModelBrandIcon } from './model-brand-icon';
 import { Button } from '../primitives/button';
 import { renderKeyboardFormScroll } from '../primitives/keyboard-form';
@@ -506,6 +508,19 @@ function ModelsView({
             picker === 'allowed' ? <SheetNote>{t.modelSettings.allowedHint}</SheetNote> : undefined
           }
           ListEmptyComponent={<SheetNote>{t.modelSettings.noResults}</SheetNote>}
+          ListFooterComponent={
+            picker === 'allowed' ? (
+              <GroupNotes
+                listed={listedGroups}
+                groups={value.groups ?? []}
+                options={routes.groups.assignmentGroupOptions ?? []}
+                busy={models.busy}
+                onSave={(id, note) =>
+                  models.run(() => setAssignmentGroupNote(client, scope, value, id, note))
+                }
+              />
+            ) : undefined
+          }
           renderItem={({ item: row, index }) => {
             if (row.kind === 'preset') {
               const { preset } = row;
