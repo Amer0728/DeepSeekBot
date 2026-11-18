@@ -239,6 +239,7 @@ export const MEMBER_BOT_METHODS = [
   'sessionSubagents',
   'sessionProgress',
   'sessionTranscript',
+  'sessionSkillCatalog',
   'sessionLive',
   'sessionToolDetail',
   'sessionArchiveSet',

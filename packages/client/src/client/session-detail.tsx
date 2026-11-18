@@ -1,5 +1,6 @@
 import { createContext, useContext, useRef, useState, type ReactElement } from 'react';
 
+import { createPortal } from 'react-dom';
 import * as stylex from '@stylexjs/stylex';
 
 import {
@@ -29,12 +30,15 @@ import { color, radius, space, text } from './ds/tokens.stylex.js';
 import type { BotHarnessTranslate } from './locale.js';
 import { useMountedResource } from './mounted-resource.js';
 import { cachedSessionDetail, rememberSessionDetail } from './session-detail-cache.js';
+import type { SkillCatalogEntry } from '../../../core/src/skills/entries.js';
+import { SessionHeaderSlot } from './session-header-slot.js';
 import { SessionJump } from './session-jump.js';
 import { quotedRequest, quoteSourceId, SessionQuoteToolbar } from './session-quotes.js';
 import { ChangedFiles } from './session-changed-files.js';
+import type { SelectedSkill } from './skill-refs.js';
 import { DiffStat, ToolDetailView } from './session-tool-detail-view.js';
 import { TurnNav } from './session-turn-nav.js';
-import { todoCount, TodoRing } from './session-progress-view.js';
+import { SessionProgressChips } from './session-progress-view.js';
 import {
   clockText,
   detailDefaults,
@@ -543,12 +547,17 @@ function InputBlock({
       </div>
     );
   const trigger = item.trigger ?? 'request';
+  const skill = /^<skill_content name="([^"]+)">/u.exec(item.text)?.[1];
   return (
-    <div data-transcript="system" data-trigger={trigger}>
+    <div data-transcript="system" data-trigger={skill === undefined ? trigger : 'skill'}>
       <WorkRow
-        icon={TRIGGER_ICONS[trigger]}
-        label={t(`sessions.detail.trigger.${trigger}`)}
-        detail={open ? undefined : item.text.split('\n', 1)[0]}
+        icon={skill === undefined ? TRIGGER_ICONS[trigger] : 'slash'}
+        label={
+          skill === undefined
+            ? t(`sessions.detail.trigger.${trigger}`)
+            : t('sessions.detail.trigger.skill', { name: skill })
+        }
+        detail={open || skill !== undefined ? undefined : item.text.split('\n', 1)[0]}
         trailing={<span {...stylex.props(styles.meta)}>{clockText(item.at)}</span>}
         expanded={open}
         onToggle={() => setOpen((value) => !value)}
@@ -591,6 +600,9 @@ export function SessionDetail({
   const [sendError, setSendError] = useState<string | undefined>();
   const [revision, setRevision] = useState(0);
   const [away, setAway] = useState(false);
+  const chipSlot = useContext(SessionHeaderSlot);
+  const [skillOptions, setSkillOptions] = useState<readonly SkillCatalogEntry[]>([]);
+  const [skills, setSkills] = useState<SelectedSkill[]>([]);
   const running = transcript?.running === true || live.length > 0;
   const mount = useMountedResource<HTMLDivElement>(
     (node) => {
@@ -717,31 +729,46 @@ export function SessionDetail({
     },
     [actions, botSlug, sessionId, revision],
   );
-  const composerMount = useMountedResource<HTMLDivElement>((composer) => {
-    const root = composer.parentElement;
-    const timeline = root?.querySelector<HTMLElement>('[data-session-transcript]') ?? null;
-    if (root == null || timeline === null || typeof ResizeObserver === 'undefined') return;
-    let applied: number | undefined;
-    const sync = (): void => {
-      const overlay = Math.max(
-        0,
-        Math.round(root.getBoundingClientRect().bottom - composer.getBoundingClientRect().top),
+  const composerMount = useMountedResource<HTMLDivElement>(
+    (composer) => {
+      let live = true;
+      void actions.sessionSkillCatalog?.(botSlug, sessionId).then(
+        (next) => {
+          if (live) setSkillOptions(next);
+        },
+        () => {},
       );
-      if (overlay === applied) return;
-      applied = overlay;
-      const atLatest = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight <= 2;
-      timeline.style.setProperty('--session-composer-overlay', `${overlay}px`);
-      if (atLatest) timeline.scrollTop = timeline.scrollHeight;
-    };
-    sync();
-    const observer = new ResizeObserver(sync);
-    observer.observe(composer);
-    observer.observe(root);
-    return () => {
-      observer.disconnect();
-      timeline.style.removeProperty('--session-composer-overlay');
-    };
-  }, []);
+      const stopSkills = (): void => {
+        live = false;
+      };
+      const root = composer.parentElement;
+      const timeline = root?.querySelector<HTMLElement>('[data-session-transcript]') ?? null;
+      if (root == null || timeline === null || typeof ResizeObserver === 'undefined')
+        return stopSkills;
+      let applied: number | undefined;
+      const sync = (): void => {
+        const overlay = Math.max(
+          0,
+          Math.round(root.getBoundingClientRect().bottom - composer.getBoundingClientRect().top),
+        );
+        if (overlay === applied) return;
+        applied = overlay;
+        const atLatest = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight <= 2;
+        timeline.style.setProperty('--session-composer-overlay', `${overlay}px`);
+        if (atLatest) timeline.scrollTop = timeline.scrollHeight;
+      };
+      sync();
+      const observer = new ResizeObserver(sync);
+      observer.observe(composer);
+      observer.observe(root);
+      return () => {
+        stopSkills();
+        observer.disconnect();
+        timeline.style.removeProperty('--session-composer-overlay');
+      };
+    },
+    [actions, botSlug, sessionId],
+  );
   const send = async (): Promise<void> => {
     const message = quotedRequest(quotes, draft.trim());
     const deliver =
@@ -758,6 +785,7 @@ export function SessionDetail({
       await deliver(botSlug, sessionId, message, running);
       setDraft('');
       setQuotes([]);
+      setSkills([]);
       setRevision((value) => value + 1);
     } catch (error) {
       setSendError(
@@ -794,34 +822,16 @@ export function SessionDetail({
     transcript === undefined ? [] : transcriptBlocks(mergeLive(transcript.items, live), running);
   const toggle = (key: 'goal' | 'todos') =>
     setOpen((current) => (current === key ? undefined : key));
+  const chips =
+    goal === undefined && todos === undefined ? null : (
+      <SessionProgressChips goal={goal} todos={todos} open={open} toggle={toggle} t={t} />
+    );
   return (
     <div data-session-detail={sessionId} {...stylex.props(styles.root)}>
-      {goal === undefined && todos === undefined ? null : (
-        <div {...stylex.props(styles.chips)}>
-          {goal === undefined ? null : (
-            <ChipButton
-              data-session-chip="goal"
-              aria-expanded={open === 'goal'}
-              title={t('sessions.progress.goal', {
-                objective: goal.objective,
-                phase: t(`sessions.goal.${goal.phase}`),
-              })}
-              icon={<ChannelSidebarIcon name="target" size={12} />}
-              label={goal.objective}
-              onClick={() => toggle('goal')}
-            />
-          )}
-          {todos === undefined ? null : (
-            <ChipButton
-              data-session-chip="todos"
-              aria-expanded={open === 'todos'}
-              title={t('sessions.progress.todos', todoCount(todos))}
-              icon={<TodoRing {...todoCount(todos)} />}
-              label={`${todoCount(todos).done}/${todoCount(todos).total}`}
-              onClick={() => toggle('todos')}
-            />
-          )}
-        </div>
+      {chips === null ? null : chipSlot === null ? (
+        <div {...stylex.props(styles.chips)}>{chips}</div>
+      ) : (
+        createPortal(chips, chipSlot)
       )}
       {open === 'goal' && goal !== undefined ? (
         <div data-session-panel="goal" {...stylex.props(styles.panel)}>
@@ -935,7 +945,13 @@ export function SessionDetail({
                 current.map((item) => (item === quote ? { ...item, note } : item)),
               )
             }
-            onChange={(value) => setDraft(value)}
+            skillOptions={skillOptions}
+            skills={skills}
+            readSkill={actions.skillDetail}
+            onChange={(value, _mentions, _channels, nextSkills) => {
+              setDraft(value);
+              if (nextSkills !== undefined) setSkills(nextSkills);
+            }}
             onSubmit={send}
             onStop={running ? stop : undefined}
           />

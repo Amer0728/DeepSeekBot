@@ -372,6 +372,7 @@ import {
   type SkillCatalogEntry,
   type SkillOwner,
   type ResolvedSkill,
+  sessionSkills,
 } from '../skills/catalog.js';
 import {
   BotSkillIgnoredFilesError,
@@ -981,6 +982,7 @@ export interface BridgeMethods extends TeamBridgeMethods {
   channelAllBotPreview(payload: unknown): BridgeResult<AllBotPreview>;
   tobCli(payload: unknown): Promise<BridgeResult<TobCliStatus>>;
   channelSkillCatalog(payload: unknown): Promise<BridgeResult<{ skills: SkillCatalogEntry[] }>>;
+  sessionSkillCatalog(payload: unknown): Promise<BridgeResult<{ skills: SkillCatalogEntry[] }>>;
   botSkills(payload: unknown): Promise<BridgeResult<{ skills: BotSkill[] }>>;
   skillShow(payload: unknown): Promise<BridgeResult<{ skill: SkillDetail }>>;
   botSkillRemove(payload: unknown): Promise<BridgeResult<{ name: string; removed: string }>>;
@@ -7572,6 +7574,39 @@ function buildBridgeMethods(
       const bots = channelSkillBots(channel);
       try {
         return { ok: true, value: { skills: await deps.skills.list(bots) } };
+      } catch (error) {
+        return {
+          ok: false,
+          error: { code: 'skills-unavailable', message: (error as Error).message },
+        };
+      }
+    },
+    async sessionSkillCatalog(payload) {
+      const source = asObject(payload);
+      const slug = asNonBlank(source, 'slug');
+      const sessionId = asNonBlank(source, 'sessionId');
+      if (slug === undefined) return invalidInput('slug is required');
+      if (sessionId === undefined) return invalidInput('sessionId is required');
+      if (deps.registry.get(slug) === undefined) return unknownBot(slug);
+      const owner = deps.ownership.resolve(sessionId);
+      if (owner?.botSlug !== slug || owner.parentSessionId !== undefined)
+        return {
+          ok: false,
+          error: { code: 'not-found', message: `unknown root Session: ${sessionId}` },
+        };
+      if (deps.skills === undefined) return { ok: true, value: { skills: [] } };
+      const cwd = owner.cwdReference;
+      const workspaceIds = new Set(
+        deps.skills
+          .workspaces([slug])
+          .filter((workspace) => cwd !== undefined && workspace.path === cwd)
+          .map((workspace) => workspace.workspaceId),
+      );
+      try {
+        return {
+          ok: true,
+          value: { skills: sessionSkills(await deps.skills.list([slug]), slug, workspaceIds) },
+        };
       } catch (error) {
         return {
           ok: false,

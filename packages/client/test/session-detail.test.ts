@@ -30,6 +30,7 @@ import {
   SessionDetailPrefsContext,
   type SessionDetailPrefs,
 } from '../src/client/session-detail.js';
+import { SessionHeaderSlot } from '../src/client/session-header-slot.js';
 import {
   cachedSessionDetail,
   clearSessionDetailCache,
@@ -750,4 +751,89 @@ it('quotes selected Session text with a reply and sends it ahead of the request'
     window.requestAnimationFrame = frame;
     Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect');
   }
+});
+
+it("loads the Session's own Skill menu for its composer", async () => {
+  const { loadSessionSkillCatalog } = await import('../src/client/bridge.js');
+  const call = vi.fn(async () => ({
+    ok: true as const,
+    value: {
+      skills: [
+        { name: 'review', description: 'Review', owner: { kind: 'host' } },
+        { name: 'broken', owner: { kind: 'host' } },
+      ],
+    },
+  }));
+  expect(await loadSessionSkillCatalog(call, 'tobs', 'asg-1')).toEqual([
+    { name: 'review', description: 'Review', owner: { kind: 'host' } },
+  ]);
+  expect((call.mock.calls[0] as unknown[]).slice(0, 2)).toEqual([
+    'sessionSkillCatalog',
+    { slug: 'tobs', sessionId: 'asg-1' },
+  ]);
+  const sessionSkillCatalog = vi.fn(async () => []);
+  await render({
+    sessionTranscript: vi.fn(async () => transcript('assignment')),
+    sendSessionRequest: vi.fn(async () => {}),
+    sessionSkillCatalog,
+  });
+  expect(sessionSkillCatalog).toHaveBeenCalledWith('tobs', 'asg-1');
+  const orchestrator = vi.fn(async () => []);
+  await render({
+    sessionTranscript: vi.fn(async () => transcript('orchestrator')),
+    sessionSkillCatalog: orchestrator,
+  });
+  expect(orchestrator).not.toHaveBeenCalled();
+});
+
+it('names the Skill DSH loaded for a /name request', async () => {
+  const loaded = transcript('assignment');
+  loaded.items.splice(1, 0, {
+    kind: 'input',
+    text: '<skill_content name="qa-check">\nRun node --test.\n</skill_content>',
+    at: '2026-11-17T00:00:01.500Z',
+    source: 'system',
+    trigger: 'request',
+  } as (typeof loaded.items)[number]);
+  const host = await render({ sessionTranscript: vi.fn(async () => loaded) });
+  const row = host.querySelector('[data-trigger="skill"]')!;
+  expect(label(row as HTMLElement)).toContain('使用了 skill qa-check');
+  expect(row.textContent).not.toContain('<skill_content');
+});
+
+it('puts the goal and to-do chips in the panel header when it offers a slot', async () => {
+  const panel = document.createElement('aside');
+  const slot = document.createElement('span');
+  const body = document.createElement('div');
+  panel.append(slot, body);
+  document.body.append(panel);
+  const root = createRoot(body);
+  mounted.push(() => {
+    act(() => root.unmount());
+    panel.remove();
+  });
+  await act(async () => {
+    root.render(
+      createElement(
+        SessionHeaderSlot.Provider,
+        { value: slot },
+        createElement(SessionDetail, {
+          actions: {
+            sessionTranscript: vi.fn(async () => transcript('assignment')),
+            sessionProgress: vi.fn(async () => ({
+              'asg-1': { todos: [{ content: 'Fix', status: 'completed' as const }] },
+            })),
+          } as unknown as BridgeActions,
+          botSlug: 'tobs',
+          sessionId: 'asg-1',
+          t: zhTranslate,
+        }),
+      ),
+    );
+  });
+  await act(async () => {});
+  expect(slot.querySelector('[data-session-chip="todos"]')?.textContent).toContain('1/1');
+  expect(body.querySelector('[data-session-chip]')).toBeNull();
+  act(() => slot.querySelector<HTMLButtonElement>('[data-session-chip="todos"]')!.click());
+  expect(body.querySelector('[data-session-panel="todos"]')).not.toBeNull();
 });

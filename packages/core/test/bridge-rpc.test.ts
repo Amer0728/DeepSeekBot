@@ -922,6 +922,7 @@ describe('bridge typert service', () => {
       'channelAllBotPreview',
       'tobCli',
       'channelSkillCatalog',
+      'sessionSkillCatalog',
       'botSkills',
       'skillShow',
       'botSkillRemove',
