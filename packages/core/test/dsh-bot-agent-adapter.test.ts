@@ -2931,6 +2931,7 @@ describe('DSH Bot Agent adapter', () => {
       'unarchive_assignment',
       'inspect_assignment',
       'send_assignment_request',
+      'link_message_sessions',
       'wait_for_assignment',
       'stop_assignment',
       'channel_list',
@@ -5125,8 +5126,9 @@ it.each(['create', 'resume'] as const)(
   },
 );
 
-it('links the Assignments a turn created or sent to on its Human DM message', async () => {
+it('links a sent receipt to the Assignments the turn created or sent to', async () => {
   const sent: Record<string, unknown>[] = [];
+  const linked: Record<string, unknown>[] = [];
   const outcomes: Promise<unknown>[] = [];
   const summary = (sessionId: string, title: string) => ({ sessionId, title }) as never;
   const host = new FakeAgentHost(
@@ -5143,6 +5145,7 @@ it('links the Assignments a turn created or sent to on its Human DM message', as
             } as ToolRunContext);
         outcomes.push(
           (async () => {
+            await run('bot_send_message', { channel_id: 'dm-test', body: 'Starting both.' }, 'r');
             await run('send_assignment_request', { session_id: 'asg-old', text: 'Go on' }, 'a');
             await run(
               'create_assignment',
@@ -5151,12 +5154,8 @@ it('links the Assignments a turn created or sent to on its Human DM message', as
             );
             await run('send_assignment_request', { session_id: 'asg-new', text: 'Also' }, 'c');
             return run(
-              'bot_send_message',
-              {
-                channel_id: 'dm-test',
-                body: 'Both underway.',
-                session_ids: ['asg-new', 'asg-old'],
-              },
+              'link_message_sessions',
+              { message_id: 'm1', session_ids: ['asg-new', 'asg-old', 'asg-new'] },
               'd',
             );
           })(),
@@ -5183,6 +5182,18 @@ it('links the Assignments a turn created or sent to on its Human DM message', as
         sent.push(input);
         return { id: 'm1', at: '', author: { kind: 'bot', slug: 'ada' }, body: input['body'] };
       },
+      linkSessions: (input: Record<string, unknown>) => {
+        linked.push(input);
+        return {
+          id: 'm1',
+          at: '',
+          author: { kind: 'bot', slug: 'ada' },
+          body: 'Starting both.',
+          sessionLinks: (input['links'] as { sessionId: string; kind: string }[]).map(
+            ({ sessionId, kind }) => ({ sessionId, kind, title: sessionId }),
+          ),
+        };
+      },
     } as never,
     assignments: {
       create: () => ({ outcome: 'created', assignment: summary('asg-new', 'New') }),
@@ -5190,12 +5201,36 @@ it('links the Assignments a turn created or sent to on its Human DM message', as
         assignment: summary(input.sessionId, input.sessionId === 'asg-new' ? 'New' : 'Old'),
         delivery: 'followup',
       }),
-      inspect: (sessionId: string) => summary(sessionId, sessionId === 'asg-new' ? 'New' : 'Old'),
+      inspect: (sessionId: string) =>
+        ({
+          sessionId,
+          title: sessionId === 'asg-new' ? 'New' : 'Old',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        }) as never,
     } as never,
   } as never);
-  await Promise.all(outcomes);
-  expect(sent[0]?.['sessionLinks']).toEqual([
-    { sessionId: 'asg-new', kind: 'created', title: 'New' },
-    { sessionId: 'asg-old', kind: 'sent', title: 'Old' },
+  const [result] = (await Promise.all(outcomes)) as string[];
+  expect(sent[0]?.['sessionLinks']).toBeUndefined();
+  expect(linked).toEqual([
+    {
+      messageId: 'm1',
+      links: [
+        {
+          sessionId: 'asg-new',
+          kind: 'created',
+          title: 'New',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+        { sessionId: 'asg-old', kind: 'sent', title: 'Old', createdAt: '2026-01-01T00:00:00.000Z' },
+      ],
+    },
   ]);
+  expect(JSON.parse(result!)).toEqual({
+    outcome: 'linked',
+    messageId: 'm1',
+    sessions: [
+      { sessionId: 'asg-new', kind: 'created' },
+      { sessionId: 'asg-old', kind: 'sent' },
+    ],
+  });
 });

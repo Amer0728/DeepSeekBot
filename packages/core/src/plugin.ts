@@ -1094,6 +1094,8 @@ function initializeCore(
       live?.publishVoice(channelId, messageId, message),
     onAttachmentsChanged: (channelId, messageId, message) =>
       live?.publishAttachments(channelId, messageId, message),
+    onSessionLinksChanged: (channelId, messageId, message) =>
+      live?.publishSessionLinks(channelId, messageId, message),
     ...(options.warn === undefined ? {} : { warn: options.warn }),
   });
   changedFiles = (fileId) => channels.recordAttachmentChange?.(fileId);
