@@ -98,7 +98,7 @@ import {
   parseGenuiDocumentView as parseHostGenuiDocumentView,
   saveGenuiDocumentView as saveGenuiDocumentViewTo,
 } from '@botharness/host-client/genui/view';
-import { clientLog } from './diagnostic-log.js';
+import { clientLog, reportFailure } from './diagnostic-log.js';
 import {
   genuiReplySchema,
   genuiViewSchema,
@@ -4613,7 +4613,11 @@ export function parseStoredChannelMessage(value: unknown): ChannelMessage | unde
   )
     return undefined;
   const revision = record?.['channelRevision'];
-  console.warn('botharness: showing an unreadable Channel message as plain text', id);
+  reportFailure(
+    'showing-an-unreadable-channel-message-as-plain-text',
+    'showing an unreadable Channel message as plain text',
+    id,
+  );
   return {
     id,
     at,
