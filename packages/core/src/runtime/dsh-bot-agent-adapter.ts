@@ -81,6 +81,8 @@ import {
   type OrchestratorAssignmentAccess,
 } from './bot-runtime.js';
 import { DEFAULT_PROMPT_TEXT, type PromptText } from '../prompts/prompt-parts.js';
+import { ENGINE_GATEWAY_TOOLS, type EngineTurnRequest } from '../engines/engine-host.js';
+import { engineInstructions } from '../engines/engine-persona.js';
 
 export interface AssignmentGroupRoutes {
   pick(botSlug: string, groupId: string): Promise<GroupPick>;
@@ -507,6 +509,15 @@ export interface DshBotAgentAdapterOptions {
 
   observePreparation?: (botSlug: string, sessionId: string, preparing: boolean) => void;
   observeDirectToolCleanupFailure?: (event: { sessionId: string; durationMs: number }) => void;
+  engines?: DshBotEngines;
+  enginePersona?: (bot: PersonaBotRecord) => { soul?: string; coreMemory?: string };
+}
+
+export interface DshBotEngines {
+  engineFor(botSlug: string): string | undefined;
+  runTurn(request: EngineTurnRequest): Promise<void>;
+  release(sessionId: string): Promise<void>;
+  isLive(sessionId: string): boolean;
 }
 
 export interface BotAgentSetupInfo {
@@ -763,6 +774,10 @@ class DshBotAgentAdapter implements BotAgentAdapter {
   readonly #preparationTimeoutMs: number;
   readonly #observePreparation: DshBotAgentAdapterOptions['observePreparation'];
   readonly #observeDirectToolCleanupFailure: DshBotAgentAdapterOptions['observeDirectToolCleanupFailure'];
+  readonly #engines: DshBotEngines | undefined;
+  readonly #enginePersona: DshBotAgentAdapterOptions['enginePersona'];
+  readonly #engineStops = new Map<string, AbortController>();
+  readonly #engineChannels = new Map<string, string>();
   readonly #preparationVisibleMs: number;
   readonly #drafts: ChannelDraftTracker;
   #closed = false;
@@ -804,6 +819,8 @@ class DshBotAgentAdapter implements BotAgentAdapter {
     this.#observePreparation = options.observePreparation;
     this.#observeDirectToolCleanupFailure = options.observeDirectToolCleanupFailure;
     this.#preparationVisibleMs = options.preparationVisibleMs ?? PREPARATION_VISIBLE_MS;
+    this.#engines = options.engines;
+    this.#enginePersona = options.enginePersona;
   }
 
   async #prepare<T>(
@@ -913,6 +930,11 @@ class DshBotAgentAdapter implements BotAgentAdapter {
         },
       });
     try {
+      if (run.tobCliTurn === undefined && this.#engines?.engineFor(run.bot.slug) !== undefined) {
+        await this.#runEngineTurn(run, this.#engines, abandonable.abandoned);
+        return;
+      }
+      if (this.#engines?.isLive(run.sessionId)) await this.#engines.release(run.sessionId);
       let handle: AgentHandle;
       let shown = false;
       const reveal = setTimeout(() => {
@@ -1036,6 +1058,70 @@ class DshBotAgentAdapter implements BotAgentAdapter {
     }
   }
 
+  async #runEngineTurn(
+    run: OrchestratorAgentRun,
+    engines: DshBotEngines,
+    abandoned: Promise<'abandoned'>,
+  ): Promise<void> {
+    const stop = new AbortController();
+    this.#engineStops.set(run.sessionId, stop);
+    if (run.inboundChannelId !== undefined)
+      this.#engineChannels.set(run.sessionId, run.inboundChannelId);
+    void abandoned.then(() => stop.abort());
+    try {
+      const native = this.#handles.get(run.sessionId);
+      if (native !== undefined) {
+        this.#forgetHandle(run.sessionId);
+        await native.dispose();
+      }
+      if (stop.signal.aborted) return;
+      run.setExecutionReady?.(true);
+      run.requireContent?.();
+      if (run.acceptNativeInput !== undefined && !run.acceptNativeInput()) return;
+      const tools = this.#directToolDefinitions(run).filter((tool) =>
+        ENGINE_GATEWAY_TOOLS.has(tool.name),
+      );
+      const text = [run.message, run.inbox].filter((part) => part.trim().length > 0).join('\n\n');
+      const promptText = this.#promptText(run.sessionId);
+      const persona = this.#enginePersona?.(run.bot) ?? {};
+      run.inputAccepted?.();
+      await engines.runTurn({
+        botSlug: run.bot.slug,
+        sessionId: run.sessionId,
+        channelId: run.inboundChannelId,
+        input: `${text}\n\n${replyReminder(promptText)}`,
+        instructions: engineInstructions({
+          name: run.bot.displayName,
+          ...persona,
+          replyDelivery: orchestratorPromptSections(promptText).replyDelivery,
+        }),
+        tools,
+        execute: async (name, args, signal) => {
+          const tool = tools.find((entry) => entry.name === name);
+          if (tool === undefined)
+            throw new Error(`${name} is not available to this engine Session`);
+          const callId = `${run.sessionId}:engine:${randomUUID()}`;
+          const value = await tool.execute(args, {
+            callId,
+            rootCallId: callId,
+            name,
+            arguments: args,
+            signal,
+            deferContext: () => undefined,
+            concludeTurn: () => undefined,
+          } as unknown as ToolRunContext);
+          return value;
+        },
+        signal: stop.signal,
+      });
+    } finally {
+      if (this.#engineStops.get(run.sessionId) === stop) {
+        this.#engineStops.delete(run.sessionId);
+        this.#engineChannels.delete(run.sessionId);
+      }
+    }
+  }
+
   ownsModelFreeTobTurn(agent: Agent): boolean {
     const pending = this.#modelFreeTobTurns.get(agent.session.id);
     return pending?.agent === agent;
@@ -1139,6 +1225,12 @@ class DshBotAgentAdapter implements BotAgentAdapter {
     for (const [sessionId, active] of this.#runs) {
       if (active.role !== 'orchestrator' || active.direct || active.run.bot.slug !== botSlug)
         continue;
+      const engineStop = this.#engineStops.get(sessionId);
+      if (engineStop !== undefined) {
+        this.#humanStops.add(sessionId);
+        engineStop.abort();
+        return sessionId;
+      }
       if (this.#abortPreparation(sessionId)) {
         this.#humanStops.add(sessionId);
         return sessionId;
@@ -3297,8 +3389,10 @@ class DshBotAgentAdapter implements BotAgentAdapter {
           if (active?.role !== 'orchestrator' || active.run.triage === undefined)
             throw new Error('inbox_resolve: the Orchestrator inbox is unavailable');
           const filter = inboxFilter(args);
+          const scope = this.#engineChannels.get(run.sessionId);
           return JSON.stringify(
             active.run.triage.resolve({
+              ...(scope === undefined ? {} : { channelId: scope }),
               outcome: args.outcome,
               ...(args.ids === undefined ? {} : { ids: args.ids }),
               ...(Object.keys(filter).length === 0 ? {} : { filter }),

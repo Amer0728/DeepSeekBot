@@ -748,6 +748,7 @@ export interface OwnedSessionSummary {
   assignmentDescription?: string;
   assignmentModelRoute?: ModelRoute;
   modelRoute?: ModelRoute;
+  engine?: { engine: string; account?: string };
   agentPreset?: string;
   currentOrchestrator?: boolean;
   triageOpenCount?: number;
@@ -1469,6 +1470,9 @@ export interface BridgeMethodsDeps {
   usage?: UsageProjection;
   readUsageSessionLog?: DshUsageSessionLogReader;
   describeToolCall?(sessionId: string, name: string, args: unknown): PublicToolCall | undefined;
+  describeEngineSession?(
+    sessionId: string,
+  ): { engine: string; account?: string; state: 'starting' | 'running' | 'idle' } | undefined;
   presentToolResult?: PresentToolResult;
   sessionLive?: SessionLiveStreams;
   roster: RosterStore;
@@ -9719,11 +9723,13 @@ function buildBridgeMethods(
       const read = deps.readUsageSessionLog;
       if (read === undefined) return unavailable();
       const log = await read(sessionId);
+      const engine = deps.describeEngineSession?.(sessionId);
       return {
         ok: true,
         value: {
           sessionId,
           role: owner.rootRole,
+          ...(engine === undefined ? {} : { engine }),
           ...summarizeSessionTranscript({
             sessionId,
             events: log?.events ?? [],
@@ -10654,12 +10660,15 @@ function buildBridgeMethods(
       const sessions = roots.map((root) => {
         const assignment = assignments.get(root.sessionId);
         const subagentCount = subagentCounts.get(root.sessionId);
+        const engine = deps.describeEngineSession?.(root.sessionId);
         const modelRoute =
-          deps.usage?.latestRoute(root.sessionId) ??
-          (root.rootRole === 'assignment'
-            ? (assignment?.modelRoute ?? plan?.assignmentDefault)
-            : plan?.orchestrator) ??
-          fallbackRoute;
+          engine !== undefined
+            ? undefined
+            : (deps.usage?.latestRoute(root.sessionId) ??
+              (root.rootRole === 'assignment'
+                ? (assignment?.modelRoute ?? plan?.assignmentDefault)
+                : plan?.orchestrator) ??
+              fallbackRoute);
         return {
           sessionId: root.sessionId,
           role: root.rootRole,
@@ -10692,6 +10701,14 @@ function buildBridgeMethods(
             ? {}
             : { assignmentModelRoute: assignment.modelRoute }),
           ...(modelRoute === undefined ? {} : { modelRoute }),
+          ...(engine === undefined
+            ? {}
+            : {
+                engine: {
+                  engine: engine.engine,
+                  ...(engine.account === undefined ? {} : { account: engine.account }),
+                },
+              }),
           ...(root.agentPreset === undefined ? {} : { agentPreset: root.agentPreset }),
           ...(subagentCount === undefined ? {} : { subagentCount }),
         };
