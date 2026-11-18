@@ -2267,7 +2267,7 @@ window.__ModuleLoader__.load({
 				children
 			});
 		}
-		function SidebarCardRow({ icon, leading, iconLabel, selection, title, titleClassName, badge, summary, flipKey, hint, chips, meta, trailing, trailingAlign, detail, onClick, disabled, muted, mainClassName, dialog, expanded, controls, state, anchor }) {
+		function SidebarCardRow({ icon, leading, iconLabel, selection, title, titleClassName, badge, summary, flipKey, hint, chips, meta, trailing, trailingAlign, detail, onClick, onIntent, disabled, muted, mainClassName, dialog, expanded, controls, state, anchor }) {
 			const inGroup = (0, react.useContext)(SettingsGroupContext);
 			const body = /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				leading === void 0 ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
@@ -2350,6 +2350,10 @@ window.__ModuleLoader__.load({
 						"aria-expanded": expanded,
 						"aria-controls": controls,
 						onClick,
+						onPointerEnter: onIntent === void 0 ? void 0 : (event) => {
+							if (event.pointerType !== "touch") onIntent();
+						},
+						onFocus: onIntent,
 						children: body
 					}), trailing === void 0 ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "bh-card-trailing",

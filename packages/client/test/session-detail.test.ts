@@ -30,12 +30,19 @@ import {
   SessionDetailPrefsContext,
   type SessionDetailPrefs,
 } from '../src/client/session-detail.js';
+import {
+  cachedSessionDetail,
+  clearSessionDetailCache,
+  prefetchSessionDetail,
+  rememberSessionDetail,
+} from '../src/client/session-detail-cache.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const mounted: (() => void)[] = [];
 afterEach(() => {
   for (const unmount of mounted.splice(0)) unmount();
+  clearSessionDetailCache();
 });
 
 const transcript = (role: SessionTranscript['role'], running = false): SessionTranscript => ({
@@ -526,6 +533,142 @@ it('offers turn navigation once there are several turns', async () => {
     sessionTranscript: vi.fn(async () => ({ ...editTurn(), items })),
   });
   expect(host.querySelectorAll('[data-nav-turn]')).toHaveLength(3);
+});
+
+it('reopens a Session from its last transcript while it refreshes', async () => {
+  const actions: Partial<BridgeActions> = {
+    sessionTranscript: vi.fn(async () => transcript('assignment')),
+  };
+  await render(actions);
+  for (const unmount of mounted.splice(0)) unmount();
+  actions.sessionTranscript = vi.fn(() => new Promise<never>(() => {}));
+  const host = await render(actions);
+  expect(host.textContent).not.toContain('正在读取会话');
+  expect(host.querySelectorAll('[data-transcript="reply"]')).toHaveLength(1);
+});
+
+it('keeps another Host from reopening a cached Session', async () => {
+  await render({ sessionTranscript: vi.fn(async () => transcript('assignment')) });
+  for (const unmount of mounted.splice(0)) unmount();
+  const host = await render({ sessionTranscript: vi.fn(() => new Promise<never>(() => {})) });
+  expect(host.textContent).toContain('正在读取会话');
+});
+
+it('prefetches a Session once before it opens', async () => {
+  const read = vi.fn(async () => transcript('assignment'));
+  const actions: Partial<BridgeActions> = { sessionTranscript: read };
+  const at = { host: actions, botSlug: 'tobs', sessionId: 'asg-1' };
+  prefetchSessionDetail(actions, at);
+  prefetchSessionDetail(actions, at);
+  await act(async () => {});
+  expect(read).toHaveBeenCalledTimes(1);
+  actions.sessionTranscript = vi.fn(() => new Promise<never>(() => {}));
+  const host = await render(actions);
+  expect(host.textContent).not.toContain('正在读取会话');
+  expect(host.textContent).toContain('The download runs after an await.');
+});
+
+it('drops a prefetch that finishes after the cache was cleared', async () => {
+  let finish: (value: SessionTranscript) => void = () => {};
+  const at = { host: {}, botSlug: 'tobs', sessionId: 'asg-1' };
+  prefetchSessionDetail({ sessionTranscript: () => new Promise((done) => (finish = done)) }, at);
+  clearSessionDetailCache();
+  await act(async () => finish(transcript('assignment')));
+  expect(cachedSessionDetail(at)).toBeUndefined();
+});
+
+it('keeps a newer transcript when a hover prefetch finishes late', async () => {
+  let finish: (value: SessionTranscript) => void = () => {};
+  const at = { host: {}, botSlug: 'tobs', sessionId: 'asg-1' };
+  prefetchSessionDetail({ sessionTranscript: () => new Promise((done) => (finish = done)) }, at);
+  const newer = transcript('assignment');
+  rememberSessionDetail(at, { transcript: newer });
+  await act(async () => finish({ ...newer, items: [] }));
+  expect(cachedSessionDetail(at)?.transcript).toBe(newer);
+});
+
+it('offers a jump to the latest step after scrolling up', async () => {
+  const host = await render({
+    sessionTranscript: vi.fn(async () => transcript('assignment')),
+    sendSessionRequest: vi.fn(async () => {}),
+  });
+  const timeline = host.querySelector<HTMLElement>('[data-session-transcript]')!;
+  const jump = (): HTMLButtonElement | null =>
+    host.querySelector<HTMLButtonElement>('[aria-label="跳到最新"]');
+  Object.defineProperty(timeline, 'scrollHeight', { configurable: true, value: 1000 });
+  Object.defineProperty(timeline, 'clientHeight', { configurable: true, value: 300 });
+  const scrollTo = vi.fn();
+  timeline.scrollTo = scrollTo;
+  expect(jump()).toBeNull();
+  timeline.scrollTop = 100;
+  await act(async () => timeline.dispatchEvent(new Event('scroll')));
+  expect(host.querySelector('[data-session-composer]')?.contains(jump())).toBe(true);
+  const other = document.createElement('button');
+  document.body.append(other);
+  other.focus();
+  act(() => {
+    jump()!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+  });
+  expect(scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: 'smooth' });
+  expect(document.activeElement).toBe(other);
+  other.remove();
+  jump()!.focus();
+  act(() => jump()!.click());
+  expect(document.activeElement).toBe(timeline);
+  expect(scrollTo).toHaveBeenLastCalledWith({ top: 1000, behavior: 'auto' });
+  document.documentElement.dataset['botharnessMotion'] = 'reduce';
+  act(() => jump()!.click());
+  delete document.documentElement.dataset['botharnessMotion'];
+  expect(scrollTo).toHaveBeenLastCalledWith({ top: 1000, behavior: 'auto' });
+  timeline.scrollTop = 700;
+  await act(async () => timeline.dispatchEvent(new Event('scroll')));
+  expect(jump()).toBeNull();
+});
+
+it('keeps a prefetched transcript when progress arrives first', async () => {
+  let finish: (value: SessionTranscript) => void = () => {};
+  const at = { host: {}, botSlug: 'tobs', sessionId: 'asg-1' };
+  prefetchSessionDetail({ sessionTranscript: () => new Promise((done) => (finish = done)) }, at);
+  rememberSessionDetail(at, { progress: undefined });
+  const value = transcript('assignment');
+  await act(async () => finish(value));
+  expect(cachedSessionDetail(at)?.transcript).toBe(value);
+});
+
+it('drops a prefetch whose newer transcript was evicted while it ran', async () => {
+  let finish: (value: SessionTranscript) => void = () => {};
+  const host = {};
+  const at = { host, botSlug: 'tobs', sessionId: 'asg-1' };
+  prefetchSessionDetail({ sessionTranscript: () => new Promise((done) => (finish = done)) }, at);
+  rememberSessionDetail(at, { transcript: transcript('assignment') });
+  for (let index = 0; index < 24; index += 1)
+    rememberSessionDetail({ host, botSlug: 'tobs', sessionId: `other-${index}` }, {});
+  expect(cachedSessionDetail(at)).toBeUndefined();
+  await act(async () => finish({ ...transcript('assignment'), items: [] }));
+  expect(cachedSessionDetail(at)).toBeUndefined();
+});
+
+it('warns while a refresh fails and clears the warning once one succeeds', async () => {
+  const empty = { ...transcript('assignment'), items: [] };
+  const actions: Partial<BridgeActions> = { sessionTranscript: vi.fn(async () => empty) };
+  await render(actions);
+  for (const unmount of mounted.splice(0)) unmount();
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    actions.sessionTranscript = vi
+      .fn<NonNullable<BridgeActions['sessionTranscript']>>()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue(empty);
+    const host = await render(actions);
+    await act(async () => {});
+    expect(host.textContent).toContain('刷新失败');
+    expect(host.textContent).toContain('还没有会话记录');
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(actions.sessionTranscript).toHaveBeenCalledTimes(2);
+    expect(host.textContent).not.toContain('刷新失败');
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('quotes selected Session text with a reply and sends it ahead of the request', async () => {

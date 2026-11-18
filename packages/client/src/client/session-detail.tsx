@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactElement, type ReactNode } from 'react';
+import { createContext, useContext, useRef, useState, type ReactElement } from 'react';
 
 import * as stylex from '@stylexjs/stylex';
 
@@ -24,17 +24,18 @@ import { MAX_DRAFT_QUOTES, type ComposerQuote } from './composer-draft-store.js'
 import { MessageMarkdown } from './channel-message-body.js';
 import { ChannelSidebarIcon } from './channel-sidebar-icon.js';
 import { ChipButton } from './ds/chip-button.js';
-import { font, status } from './ds/tobs.stylex.js';
 import { WorkRow } from './ds/work-row.js';
 import { color, radius, space, text } from './ds/tokens.stylex.js';
 import type { BotHarnessTranslate } from './locale.js';
 import { useMountedResource } from './mounted-resource.js';
+import { cachedSessionDetail, rememberSessionDetail } from './session-detail-cache.js';
+import { SessionJump } from './session-jump.js';
 import { quotedRequest, quoteSourceId, SessionQuoteToolbar } from './session-quotes.js';
+import { ChangedFiles } from './session-changed-files.js';
 import { DiffStat, ToolDetailView } from './session-tool-detail-view.js';
 import { TurnNav } from './session-turn-nav.js';
 import { todoCount, TodoRing } from './session-progress-view.js';
 import {
-  changedFiles,
   clockText,
   detailDefaults,
   durationText,
@@ -201,30 +202,6 @@ const styles = stylex.create({
   },
   add: { color: color.success },
   remove: { color: color.danger },
-  files: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space.x1,
-    paddingInlineStart: space.x6,
-    paddingBottom: space.x2,
-  },
-  file: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space.x3,
-    minWidth: 0,
-    fontFamily: font.familyMono,
-    fontSize: text.metaSize,
-    lineHeight: text.metaLine,
-  },
-  filePath: {
-    flex: 1,
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: color.muted,
-  },
   stat: { display: 'inline-flex', gap: space.x2, flexShrink: 0 },
   bad: { color: color.danger },
   ok: { color: color.success, display: 'inline-flex' },
@@ -457,43 +434,6 @@ function ProcessGroup({
   );
 }
 
-function ChangedFiles({
-  block,
-  t,
-}: {
-  block: Extract<TranscriptBlock, { kind: 'turn' }>;
-  t: BotHarnessTranslate;
-}): ReactNode {
-  const [open, setOpen] = useState(false);
-  const files = changedFiles(block.segments);
-  if (block.live || files.length === 0) return null;
-  const added = files.reduce((sum, file) => sum + file.added, 0);
-  const removed = files.reduce((sum, file) => sum + file.removed, 0);
-  return (
-    <div data-transcript="changes">
-      <WorkRow
-        icon="files"
-        label={t('sessions.detail.changes', { count: files.length })}
-        trailing={<DiffStat added={added} removed={removed} />}
-        expanded={open}
-        onToggle={() => setOpen(!open)}
-      />
-      {open ? (
-        <div {...stylex.props(styles.files)}>
-          {files.map((file) => (
-            <div key={file.path} data-changed-file={file.path} {...stylex.props(styles.file)}>
-              <span title={file.path} {...stylex.props(styles.filePath)}>
-                {file.path}
-              </span>
-              <DiffStat added={file.added} removed={file.removed} />
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function TurnBlock({
   block,
   context,
@@ -638,9 +578,11 @@ export function SessionDetail({
   t: BotHarnessTranslate;
 }): ReactElement {
   const prefs = useContext(SessionDetailPrefsContext);
-  const [transcript, setTranscript] = useState<SessionTranscript | undefined>();
+  const [cached] = useState(() => cachedSessionDetail({ host: actions, botSlug, sessionId }));
+  const openedCached = useRef(cached?.transcript !== undefined);
+  const [transcript, setTranscript] = useState<SessionTranscript | undefined>(cached?.transcript);
   const [live, setLive] = useState<SessionTranscriptItem[]>([]);
-  const [progress, setProgress] = useState<SessionProgress | undefined>();
+  const [progress, setProgress] = useState<SessionProgress | undefined>(cached?.progress);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<'goal' | 'todos' | undefined>();
   const [draft, setDraft] = useState('');
@@ -648,6 +590,7 @@ export function SessionDetail({
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | undefined>();
   const [revision, setRevision] = useState(0);
+  const [away, setAway] = useState(false);
   const running = transcript?.running === true || live.length > 0;
   const mount = useMountedResource<HTMLDivElement>(
     (node) => {
@@ -662,6 +605,19 @@ export function SessionDetail({
       let lastLoad = 0;
       let gap: ReturnType<typeof setTimeout> | undefined;
       const pinned = (): boolean => node.scrollHeight - node.scrollTop - node.clientHeight < 48;
+      const at = { host: actions, botSlug, sessionId };
+      let progressSeq = 0;
+      const measure = (): void =>
+        setAway(node.scrollHeight - node.scrollTop - node.clientHeight > 80);
+      if (openedCached.current) {
+        openedCached.current = false;
+        requestAnimationFrame(() => {
+          if (!abort.signal.aborted) node.scrollTop = node.scrollHeight;
+        });
+      }
+      const resize =
+        typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
+      resize?.observe(node);
       const follow = (wasPinned: boolean): void => {
         if (wasPinned) requestAnimationFrame(() => (node.scrollTop = node.scrollHeight));
       };
@@ -685,6 +641,7 @@ export function SessionDetail({
               const wasPinned = pinned();
               durableSeq = next.seq;
               busy = next.running;
+              rememberSessionDetail(at, { transcript: next });
               setTranscript(next);
               setFailed(false);
               if (latest.seq <= durableSeq) setLive(liveOf(latest.items));
@@ -701,9 +658,13 @@ export function SessionDetail({
               load();
             }
           });
+        const progressAt = ++progressSeq;
         void actions.sessionProgress?.(botSlug, [sessionId]).then(
           (next) => {
-            if (!abort.signal.aborted) setProgress(next[sessionId]);
+            if (abort.signal.aborted || progressAt !== progressSeq) return;
+            const value = next[sessionId];
+            rememberSessionDetail(at, { progress: value });
+            setProgress(value);
           },
           () => {},
         );
@@ -749,6 +710,7 @@ export function SessionDetail({
         })();
       return () => {
         abort.abort();
+        resize?.disconnect();
         if (timer !== undefined) clearTimeout(timer);
         if (gap !== undefined) clearTimeout(gap);
       };
@@ -910,7 +872,21 @@ export function SessionDetail({
           ))}
         </div>
       ) : null}
-      <div ref={mount} data-session-transcript="" {...stylex.props(styles.transcript)}>
+      <div
+        ref={mount}
+        data-session-transcript=""
+        tabIndex={-1}
+        onScroll={(event) => {
+          const node = event.currentTarget;
+          setAway(node.scrollHeight - node.scrollTop - node.clientHeight > 80);
+        }}
+        {...stylex.props(styles.transcript)}
+      >
+        {transcript !== undefined && failed ? (
+          <div role="status" {...stylex.props(styles.quiet, styles.center)}>
+            {t('sessions.detail.refreshFailed')}
+          </div>
+        ) : null}
         {transcript === undefined ? (
           <div {...stylex.props(styles.quiet)}>
             {failed ? t('sessions.detail.loadFailed') : t('sessions.detail.loading')}
@@ -938,6 +914,7 @@ export function SessionDetail({
       {(transcript?.role === 'assignment' && actions.sendSessionRequest !== undefined) ||
       (transcript?.role === 'orchestrator' && actions.sendOrchestratorMessage !== undefined) ? (
         <div ref={composerMount} data-session-composer="" {...stylex.props(styles.composer)}>
+          {away ? <SessionJump floating={false} t={t} /> : null}
           {sendError === undefined ? null : (
             <div role="alert" {...stylex.props(styles.quiet, styles.error)}>
               {sendError}
@@ -985,6 +962,8 @@ export function SessionDetail({
             }
           />
         </div>
+      ) : away ? (
+        <SessionJump floating t={t} />
       ) : null}
     </div>
   );
