@@ -297,6 +297,7 @@ import { bubbleMedia } from './message-album.js';
 import { ReplyQuoteThumb, replyQuoteText } from './reply-quote-media.js';
 import { TurnStopLine } from './turn-stop-line.js';
 import { VoiceCallRecordBubble } from './voice-call-record.js';
+import { observeHumanAttention } from './messaging-defaults-live.js';
 import { reportFailure } from './diagnostic-log.js';
 
 export function committedMessageIds(messages: readonly ChannelMessage[]): Set<string> {
@@ -1452,8 +1453,7 @@ function ConversationView({
   const dockInboxMount = useMountedResource<HTMLSpanElement>(() => {
     if (!inboxOpen || dockBotSlug === undefined) return;
     void actions.refreshBotInbox(dockBotSlug);
-    const timer = window.setInterval(() => void actions.refreshBotInbox(dockBotSlug), 10_000);
-    return () => window.clearInterval(timer);
+    return observeHumanAttention(() => void actions.refreshBotInbox(dockBotSlug));
   }, [inboxOpen, dockBotSlug, actions]);
   const sendKey = useContext(ComposerSendKeyContext);
   const streamReplies = useContext(StreamReplies);
@@ -2199,8 +2199,6 @@ function ConversationView({
         );
       else refreshUsage();
     }
-    const usageTimer =
-      channel?.type === 'dm' ? window.setInterval(refreshUsage, 30_000) : undefined;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!profileViewOpen) return;
       if (event.key !== 'Escape' || event.defaultPrevented) return;
@@ -2211,7 +2209,6 @@ function ConversationView({
     document.addEventListener('keydown', onKeyDown);
     return () => {
       cancelled = true;
-      window.clearInterval(usageTimer);
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [
