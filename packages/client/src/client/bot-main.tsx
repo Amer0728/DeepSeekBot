@@ -204,6 +204,7 @@ import { GroupProfileView } from './group-profile.js';
 import { personaBotActivity } from './persona-activity.js';
 import { BotDmActionLabel } from './bot-dm-action-line.js';
 import { MemoryCommitLine } from './memory-commit-line.js';
+import { ModelSwitchLine } from './model-switch-line.js';
 import { AutoApprovalLine, AutoApprovalPauseLine } from './approval-template-entry.js';
 import { BotChannelPostLine, elsewhereAction } from './bot-channel-post-line.js';
 import {
@@ -1759,6 +1760,7 @@ function ConversationView({
       item.memoryCommit === undefined &&
       item.memberDeparture === undefined &&
       item.turnStop === undefined &&
+      item.modelSwitch === undefined &&
       item.voiceCallRecord === undefined &&
       item.toolAutoApproval === undefined &&
       item.toolAutoApprovalPause === undefined,
@@ -3374,6 +3376,13 @@ function ConversationView({
                         <VoiceCallRecordBubble
                           messageId={first.id}
                           record={first.voiceCallRecord}
+                          t={t}
+                        />
+                      ) : first.modelSwitch !== undefined ? (
+                        <ModelSwitchLine
+                          messageId={first.id}
+                          record={first.modelSwitch}
+                          bots={state.bots}
                           t={t}
                         />
                       ) : first.turnStop !== undefined ? (
