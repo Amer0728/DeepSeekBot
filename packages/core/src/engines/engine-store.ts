@@ -1,23 +1,34 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { type EngineId, type EngineQuota, isEngineId } from './engine-session.js';
+import {
+  type EngineChoice,
+  type EngineId,
+  type EngineQuota,
+  isEngineId,
+} from './engine-session.js';
 
 export type EngineRole = 'orchestrator';
 
 interface EngineFile {
   version: 1;
-  bots: Record<
-    string,
-    {
-      orchestrator?: EngineId;
-      fallback?: true;
-      accounts?: Partial<Record<EngineId, string>>;
-      models?: Partial<Record<EngineId, string>>;
-    }
-  >;
+  bots: Record<string, BotEngine>;
   sessions: Record<string, { engine: EngineId; nativeId: string; account?: string }>;
   quota?: Partial<Record<EngineId, EngineQuota>>;
+}
+
+interface BotEngine extends EngineChoice {
+  orchestrator?: EngineId;
+  fallback?: true;
+  accounts?: Partial<Record<EngineId, string>>;
+  models?: Partial<Record<EngineId, string>>;
+}
+
+export interface EngineSelection extends EngineChoice {
+  botSlug: string;
+  role: EngineRole;
+  engine: EngineId;
+  fallback: boolean;
 }
 
 export interface EngineStore {
@@ -26,14 +37,15 @@ export interface EngineStore {
     botSlug: string,
     role: EngineRole,
     engine: EngineId | undefined,
-    options?: { fallback?: boolean },
+    options?: { fallback?: boolean } & EngineChoice,
   ): void;
   fallback(botSlug: string, role: EngineRole): boolean;
+  choice(botSlug: string, role: EngineRole): EngineChoice;
   account(botSlug: string, engine: EngineId): string | undefined;
   rememberAccount(botSlug: string, engine: EngineId, account: string): void;
   model(botSlug: string, engine: EngineId): string | undefined;
   rememberModel(botSlug: string, engine: EngineId, model: string): void;
-  selections(): Array<{ botSlug: string; role: EngineRole; engine: EngineId; fallback: boolean }>;
+  selections(): EngineSelection[];
   quota(engine: EngineId): EngineQuota | undefined;
   rememberQuota(engine: EngineId, quota: EngineQuota): void;
   nativeSession(
@@ -66,19 +78,21 @@ function parse(text: string, path: string): EngineFile {
     );
   const file = empty();
   for (const [slug, roles] of Object.entries(fields(value['bots']) ?? {})) {
-    const orchestrator = fields(roles)?.['orchestrator'];
+    const entry = fields(roles);
+    const orchestrator = entry?.['orchestrator'];
     const accounts: Partial<Record<EngineId, string>> = {};
-    for (const [engine, account] of Object.entries(fields(fields(roles)?.['accounts']) ?? {}))
+    for (const [engine, account] of Object.entries(fields(entry?.['accounts']) ?? {}))
       if (isEngineId(engine) && typeof account === 'string' && account.trim())
         accounts[engine] = account;
     const models: Partial<Record<EngineId, string>> = {};
-    for (const [engine, model] of Object.entries(fields(fields(roles)?.['models']) ?? {}))
+    for (const [engine, model] of Object.entries(fields(entry?.['models']) ?? {}))
       if (isEngineId(engine) && typeof model === 'string' && model.trim()) models[engine] = model;
     file.bots[slug] = {
       ...(isEngineId(orchestrator) ? { orchestrator } : {}),
-      ...(isEngineId(orchestrator) && fields(roles)?.['fallback'] === true
+      ...(isEngineId(orchestrator) && entry?.['fallback'] === true
         ? { fallback: true as const }
         : {}),
+      ...(isEngineId(orchestrator) ? choiceOf(entry) : {}),
       accounts,
       models,
     };
@@ -96,6 +110,15 @@ function parse(text: string, path: string): EngineFile {
       file.sessions[id] = { engine, nativeId, ...(typeof account === 'string' ? { account } : {}) };
   }
   return file;
+}
+
+function choiceOf(entry: Fields | undefined): EngineChoice {
+  const model = entry?.['model'];
+  const effort = entry?.['effort'];
+  return {
+    ...(typeof model === 'string' && model !== '' ? { model } : {}),
+    ...(typeof effort === 'string' && effort !== '' ? { effort } : {}),
+  };
 }
 
 function parseQuota(raw: unknown): EngineQuota | undefined {
@@ -131,6 +154,8 @@ export function createEngineStore(path: string): EngineStore {
     select: (botSlug, _role, engine, options) => {
       const file = structuredClone(read());
       const entry = file.bots[botSlug] ?? {};
+      delete entry.model;
+      delete entry.effort;
       if (engine === undefined) {
         delete entry.orchestrator;
         delete entry.fallback;
@@ -138,6 +163,7 @@ export function createEngineStore(path: string): EngineStore {
         entry.orchestrator = engine;
         if (options?.fallback === true) entry.fallback = true;
         else delete entry.fallback;
+        Object.assign(entry, choiceOf(options as Fields | undefined));
       }
       file.bots[botSlug] = entry;
       write(file);
@@ -157,6 +183,7 @@ export function createEngineStore(path: string): EngineStore {
       write(file);
     },
     fallback: (botSlug) => read().bots[botSlug]?.fallback === true,
+    choice: (botSlug) => choiceOf(read().bots[botSlug] as Fields | undefined),
     selections: () =>
       Object.entries(read().bots).flatMap(([botSlug, roles]) =>
         roles.orchestrator === undefined
@@ -167,6 +194,7 @@ export function createEngineStore(path: string): EngineStore {
                 role: 'orchestrator' as const,
                 engine: roles.orchestrator,
                 fallback: roles.fallback === true,
+                ...choiceOf(roles as Fields),
               },
             ],
       ),
