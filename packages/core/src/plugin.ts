@@ -147,6 +147,12 @@ import { mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { createEngineGateway } from './engines/engine-gateway.js';
 import { EngineHost } from './engines/engine-host.js';
+import {
+  createEngineMemoryTools,
+  ENGINE_MEMORY_TOOL_NAMES,
+} from './engines/engine-memory-tools.js';
+import type { EngineBotTool, EngineToolInfo, EngineToolSource } from './engines/engine-tools.js';
+import { createEngineToolGate, type EngineDeviceTools } from './engines/engine-tool-gate.js';
 import type { EngineSessionPersistence, EngineSessionStore } from './engines/engine-dsh-session.js';
 import { readEnginePersona, subscriptionEnginesAllowed } from './engines/engine-plugin.js';
 import { ENGINES_PATH, engineRouteFetch } from './engines/engine-route.js';
@@ -611,6 +617,8 @@ export interface BotHarnessCore {
   fallbackOverrides: FallbackOverrideStore;
 
   contributeBotAgentSetup(contribute: BotAgentSetup): () => void;
+  contributeEngineTools(source: EngineToolSource): () => void;
+  engineTools(info: EngineToolInfo): Promise<EngineBotTool[]>;
 
   configureGroupInvitations(autoAccept: () => boolean): () => void;
   configureAssignmentConcurrencyLimit(read: () => number): () => void;
@@ -1382,6 +1390,25 @@ function initializeCore(
       botAgentSetups.delete(contribute);
     };
   };
+  const engineToolSources = new Set<EngineToolSource>();
+  const contributeEngineTools = (source: EngineToolSource): (() => void) => {
+    engineToolSources.add(source);
+    return () => {
+      engineToolSources.delete(source);
+    };
+  };
+  const engineTools = async (info: EngineToolInfo): Promise<EngineBotTool[]> =>
+    (
+      await Promise.all(
+        [...engineToolSources].map(async (source) => {
+          try {
+            return [...(await source(info))];
+          } catch {
+            return [];
+          }
+        }),
+      )
+    ).flat();
   const runBotAgentSetups = (
     agentCtx: import('@deepseek-ai/cordis').Context,
     agent: import('@deepseek-ai/dsh-agent').Agent,
@@ -1642,6 +1669,8 @@ function initializeCore(
       };
     },
     contributeBotAgentSetup,
+    contributeEngineTools,
+    engineTools,
     runBotAgentSetups,
     hostTools,
     states,
@@ -1874,6 +1903,8 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
         callId: request.callId,
         toolName: request.toolName,
         input: request.input,
+        ...(request.reason === undefined ? {} : { reason: request.reason }),
+        ...(request.device === undefined ? {} : { device: request.device }),
         signal: request.signal,
       })) ?? 'unavailable',
     observe: (slug, sessionId, state) => {
@@ -1890,8 +1921,28 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     },
     'botharness: Subscription Engine Sessions',
   );
+  const engineToolGate = createEngineToolGate({
+    owner: (sessionId) => core.ownership.resolve(sessionId)?.botSlug,
+    botExists: (slug) => core.registry.get(slug) !== undefined,
+    fullAccess: (sessionId) => sessionHasFullAccess(core, sessionId),
+    devices: () => [
+      {
+        kind: 'computer',
+        tools: ctx.get('botharnessComputerTools') as EngineDeviceTools | undefined,
+        reason: "This PersonaBot wants to act on the profile's shared Computer.",
+      },
+      {
+        kind: 'browser',
+        tools: ctx.get('botharnessBrowserTools') as EngineDeviceTools | undefined,
+        reason: 'This PersonaBot wants to use the Browser authorized by the Human.',
+      },
+    ],
+    approvalRequired: (name, args) => requiresHumanToolApproval(name, args, templateInUse),
+  });
   const agentAdapter = createDshBotAgentAdapter({
     engines: engineHost,
+    engineTools: (info) => core.engineTools(info),
+    engineToolGate,
     enginePersona: (bot) =>
       readEnginePersona(core.registry.memoryDirFor(bot.slug), bot.standingLimits),
     tobCliInvocation,
@@ -2559,6 +2610,20 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
   core.cloudWork = cloudWork;
   ctx.effect(() => () => cloudWork.close(), 'botharness: cloud work');
   core.hostTools.add('cloud_work');
+  ctx.effect(
+    () =>
+      core.contributeEngineTools(({ botSlug }) =>
+        createEngineMemoryTools(() => core.registry.memoryDirFor(botSlug)),
+      ),
+    'botharness: engine Memory tools',
+  );
+  for (const name of ENGINE_MEMORY_TOOL_NAMES) core.hostTools.add(name);
+  ctx.effect(
+    () => () => {
+      for (const name of ENGINE_MEMORY_TOOL_NAMES) core.hostTools.delete(name);
+    },
+    'botharness: engine Memory tool names',
+  );
   ctx.effect(
     () => () => {
       core.hostTools.delete('cloud_work');
@@ -4378,6 +4443,17 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
             engineRouteFetch(request, {
               host: engineHost,
               botExists: (slug) => core.registry.get(slug) !== undefined,
+              tools: (bot) => agentAdapter.engineToolCatalog(bot),
+              runTool: async (bot, tool, args) => {
+                const found = (await core.engineTools({ botSlug: bot, sessionId: '' })).find(
+                  (entry) => entry.name === tool,
+                );
+                if (found === undefined)
+                  throw new Error(
+                    `${tool} is not an engine-only tool; run Bot tools with deepseekbot bot tool`,
+                  );
+                return found.run(args, AbortSignal.timeout(120_000));
+              },
               releaseQuotaHold: (slug) => void core.runtime.releaseQuotaHold?.(slug),
               approvals: () =>
                 core.registry
