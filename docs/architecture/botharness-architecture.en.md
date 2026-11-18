@@ -183,7 +183,7 @@ flowchart TB
 | Messaging   | Source Events, Channel placement, Inbox Admission, Attention, Trigger/Wake Policy, Service Grants, Outbox | Agent execution, provider credentials                |
 | Assignments | Assignment Directory, Assignment Request/Delivery Intent, capacity admission, report/lifecycle routing    | DSH transcripts, Subagent runtime                    |
 | Usage       | retained daily tokens per PersonaBot, execution role, and actual model                                    | DSH Session logs, price tables, currency ledger      |
-| Portability | coordination for SoulSnapshot, PersonaBot Export, Profile Backup/Restore/Transfer                         | credentials, executable plugins, private DSH formats |
+| Portability | coordination for Profile Backup/Restore/Transfer                                                          | credentials, executable plugins, private DSH formats |
 | Read models | queries, pagination, UI-friendly projections                                                              | business facts and write rules                       |
 
 `botharness.db` is the physical transaction host for BotHarness core, not a shared generic repository. Optional Git-backed Providers own Memory content and commits. Each deep module owns its tables and invariants only through its own interfaces; explicit commands and ports coordinate cross-module flows.
@@ -233,7 +233,7 @@ flowchart TD
   Rebuild --> Ready["Enable admissions, wakes and commands"]
 ```
 
-Only one BotHarness writer may own a DSH profile at a time. Module migrations combine into one monotonically increasing Schema Generation. Migration runs against a temporary copy and atomically replaces the active database only after validation. Open, migration, or page-integrity failure enters recovery mode; the Host never falls back to NDJSON, a storage domain, or in-memory writes. Foreign key orphans left by an outside writer do not block the mount; they are recorded in diagnostics and the startup log, and a migration may not add new ones (ADR-0258).
+Only one BotHarness writer may own a DSH profile at a time. Module migrations combine into one monotonically increasing Schema Generation. Migration runs against a temporary copy and atomically replaces the active database only after validation. Open, migration, or page-integrity failure enters recovery mode; the Host never falls back to NDJSON, a storage domain, or in-memory writes. Foreign key orphans left by an outside writer do not block the mount; they are recorded in diagnostics and the startup log, and a migration may not add new ones ([ADR-0258](../decisions/persistence.md#adr-0258)).
 
 ## 4 · Messaging transaction and external side effects
 
@@ -559,7 +559,7 @@ flowchart TB
 | Data                           | Authority                                                                | Portability                                                              |
 | ------------------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
 | operational facts              | `$DSH_HOME/botharness/botharness.db`                                     | consistent SQLite snapshot in a manual profile backup                    |
-| optional Memory repositories   | Git-backed Memory Provider                                               | selected SoulSnapshot / PersonaBot Export / profile backup               |
+| optional Memory repositories   | Git-backed Memory Provider                                               | selected profile backup                                                  |
 | attachments                    | real files, identity receipts and Messaging bindings; pending legacy CAS | current referenced files and records                                     |
 | Soul bytes                     | content-addressed files                                                  | dependency-closed selected bytes                                         |
 | Session transcript / execution | DSH SessionPersistence                                                   | only through a verified DSH export adapter; otherwise explicitly omitted |
@@ -579,7 +579,7 @@ Disaster Restore preserves historical ownership but marks imported native Sessio
 
 ### Channel Content Purge runtime (#897)
 
-The application-defined `ContentPurge` Host owner in Generation 70 exposes ended Group history, selected Source Event preview and separate confirmation through the existing Typert/API Gateway seam, without a model Tool. Ended Group identities stay reserved, so a same-name Group cannot overwrite retained history. Local and external sources may have live shared placements; every placement must remain within current Human read access at its recorded revision. Ordinary deletion ends only the selected Channel's routes/ingests and preserves other Channel/Inbox targets and the provider conversation. [ADR-0146](../adr/0146-content-purge-retains-file-selectors-and-settles-issued-effects.md) records the file, effect and restore boundaries. Memory supplies recorded source-derived accepted commits through its own query and retained/deleted repository locators; Workspace grants supply possible copy locations. These references participate in consent revalidation, remain outside the ledger, and do not imply that untracked files/exports have been scanned.
+The application-defined `ContentPurge` Host owner in Generation 70 exposes ended Group history, selected Source Event preview and separate confirmation through the existing Typert/API Gateway seam, without a model Tool. Ended Group identities stay reserved, so a same-name Group cannot overwrite retained history. Local and external sources may have live shared placements; every placement must remain within current Human read access at its recorded revision. Ordinary deletion ends only the selected Channel's routes/ingests and preserves other Channel/Inbox targets and the provider conversation. [ADR-0146](../decisions/persistence.md#adr-0146) records the file, effect and restore boundaries. Memory supplies recorded source-derived accepted commits through its own query and retained/deleted repository locators; Workspace grants supply possible copy locations. These references participate in consent revalidation, remain outside the ledger, and do not imply that untracked files/exports have been scanned.
 
 The existing roster stream projects bodyless purged placement selectors after commit and on reconnect. The Client redacts active and cached conversations, sidebars and attention summaries, prevents delayed responses from restoring selected content, and renders tombstones. These ephemeral selectors derive from the Host; they add no durable authority.
 
