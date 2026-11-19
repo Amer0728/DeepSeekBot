@@ -2776,7 +2776,15 @@
       "behaviors": ["team.security-suite", "settings.model-providers"],
       "reason": "Real model: Role Policy leak attempts (direct, claimed permission, role-play, summary, encoding, Bot relay, mixed Group, Deny-wins, revocation), file tools, Shell, symlink/.. paths, Host API and grant requests against other members and the Host data directory, and private Bot/Channel/DM, offboarding and model allowlist refusals; asserts Host state and tool results. C3 asserts the model provider list and every write are refused to an authenticated member without an explicit grant.",
       "task": 4197,
-      "sha256": "395052b4cef080410cedcd2707dd08d770ced086dff9830d299016a3de4f2a17"
+      "sha256": "718e2aef0b7f4744468b0cdeaa5f0b30034a384ed5a1a4ded315dc289e63af98"
+    },
+    {
+      "path": "scripts/e2e-team-security-engines.mjs",
+      "category": "mapped",
+      "behaviors": ["team.security-suite"],
+      "reason": "M15 B4 and B5 drive a disposable owner Bot on each Subscription Engine and verify files, Session tool results and approval state.",
+      "task": 4655,
+      "sha256": "80b1d27c1245ac43ed244166a908b1d1264909a766dd5e84ac97668c9aae1342"
     }
   ],
   "native": [
