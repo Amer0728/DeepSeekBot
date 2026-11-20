@@ -223,6 +223,7 @@ function setup(options: {
   nativeReply?: string;
   beforeEngineLimit?(engine: string, clock: { now: number }): void;
   inherited?: boolean;
+  namedCodex?: boolean;
   nativeFirst?: boolean;
   nativeRuntime?: Pick<
     Awaited<ReturnType<typeof nativeRuntime>>,
@@ -282,6 +283,12 @@ function setup(options: {
     detectClaude: async () => ({ installed: true, version: '2.1.327', login: 'subscription' }),
     openClaude: claude.factory,
   });
+  const account = options.namedCodex ? host.addAccount('Work', 0) : undefined;
+  const members = options.members.map((member) =>
+    member.kind === 'engine' && member.engine === 'codex' && account !== undefined
+      ? { ...member, accountId: account.id }
+      : member,
+  );
   const routeRests = createRouteRests({ now: () => clock.now });
   const groupFallback = createGroupFallback({
     plan: (slug) => core.registry.get(slug)?.modelPlan,
@@ -290,9 +297,9 @@ function setup(options: {
     engines: {
       targets: (id) => core.routingGroups.targets(id),
       allowed: () => options.enginesAllowed ?? true,
-      limit: (engine) => {
+      limit: (engine, accountId) => {
         options.beforeEngineLimit?.(engine, clock);
-        return host.limit(engine);
+        return host.limit(engine, accountId);
       },
     },
     rests: routeRests,
@@ -333,7 +340,7 @@ function setup(options: {
         targets: core.routingGroups.targets(id),
       }),
       restingUntil: (route) => routeRests.restingUntil(route),
-      engineRestingUntil: (engine) => host.limit(engine)?.until,
+      engineRestingUntil: (engine, accountId) => host.limit(engine, accountId)?.until,
       inherited: () => core.routingGroups.defaultGroup().groupId,
     },
   });
@@ -358,9 +365,7 @@ function setup(options: {
   const nativeMember = { kind: 'model', ...API } as const;
   const group = core.routingGroups.create({
     name: 'Fallback',
-    members: options.nativeFirst
-      ? [nativeMember, ...options.members]
-      : [...options.members, nativeMember],
+    members: options.nativeFirst ? [nativeMember, ...members] : [...members, nativeMember],
   });
   if (options.inherited) core.routingGroups.setDefaultGroup(group.id, 0);
   else expect(core.registry.customizeModelPlan('ada', API, 0, group.id).ok).toBe(true);
@@ -381,6 +386,7 @@ function setup(options: {
   }
   return {
     host,
+    account,
     adapter,
     dsh,
     codex,
@@ -887,6 +893,7 @@ it.each(['api-first', 'engine-first'] as const)(
     const native = await nativeRuntime(model);
     const bot = setup({
       members: [apiFirst ? CLAUDE : CODEX],
+      namedCodex: !apiFirst,
       nativeFirst: apiFirst,
       nativeRuntime: native,
       inherited: true,
@@ -911,7 +918,7 @@ it.each(['api-first', 'engine-first'] as const)(
         assignmentGroups: [
           {
             group: bot.groupId,
-            members: apiFirst ? [API, CLAUDE] : [CODEX, API],
+            members: apiFirst ? [API, CLAUDE] : [{ ...CODEX, accountId: bot.account?.id }, API],
           },
         ],
       },
@@ -938,6 +945,12 @@ it.each(['api-first', 'engine-first'] as const)(
     expect(
       bot.channelMessages().filter((message) => message.sessionFailure?.sessionId === sessionId),
     ).toEqual([]);
+    if (!apiFirst) {
+      const accountId = bot.account?.id;
+      expect(accountId).toEqual(expect.any(String));
+      expect(bot.host.limit('codex')).toBeUndefined();
+      expect(bot.host.limit('codex', accountId)?.until).toBe(RESETS_AT);
+    }
     expect(bot.assignment(sessionId)).toMatchObject({
       activity: 'idle',
       latestReport: { state: 'completed' },

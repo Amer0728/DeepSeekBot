@@ -86,6 +86,7 @@ export interface EngineApprovalRequest {
 export interface EngineSessionDescription {
   engine: EngineId;
   account?: string;
+  accountId?: string;
   state: EngineSessionState;
   quota?: EngineQuotaView;
 }
@@ -94,6 +95,8 @@ export type { EngineQuotaView } from './engine-quota.js';
 
 export interface EngineStatusReport {
   displayName: string;
+  accountId?: string;
+  accountName?: string;
   engine: EngineId;
   available: boolean;
   reason?: 'host-not-local' | 'not-installed' | 'signed-out' | 'not-subscription' | 'login-unknown';

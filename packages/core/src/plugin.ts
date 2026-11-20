@@ -1,3 +1,5 @@
+import { engineAccountKey } from '@botharness/host-protocol/subscription-engine';
+import { requireModelSources } from './models/provider-bridge.js';
 import { createRouteRests } from './models/route-rest.js';
 import { SessionLiveStreams } from './runtime/session-live.js';
 import { mountCardContextLive } from './channels/card-context-live.js';
@@ -1864,6 +1866,23 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     root: join(dshHome, 'botharness', 'engines'),
     local: localEngines,
     gateway: engineGateway,
+    accountsChanged: () => core.live.publishResourceChanged('model-providers'),
+    accountUses: (id) => {
+      const uses = (choice: { engine: string; accountId?: string } | undefined) =>
+        choice?.engine === 'codex' && engineAccountKey('codex', choice.accountId) === id;
+      return [
+        ...core.modelPresets
+          .list()
+          .filter((preset) => uses(preset.orchestratorEngine) || uses(preset.assignmentEngine))
+          .map((preset) => `Model Preset ${preset.name} (${preset.id})`),
+        ...core.routingGroups
+          .list()
+          .filter((group) =>
+            group.members.some((member) => member.kind === 'engine' && uses(member)),
+          )
+          .map((group) => `Routing Group ${group.name} (${group.id})`),
+      ];
+    },
     routingGroupEffort: (slug) => {
       const plan = core.registry.get(slug)?.modelPlan;
       return plan === undefined
@@ -1957,7 +1976,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
         if (group !== undefined && targets !== undefined)
           return { name: group.name, routes: core.routingGroups.routes(groupId), targets };
       },
-      engineRestingUntil: (engine) => engineHost.limit(engine)?.until,
+      engineRestingUntil: (engine, accountId) => engineHost.limit(engine, accountId)?.until,
       restingUntil: (route) => routeRests.restingUntil(route),
       inherited: () => core.routingGroups.defaultGroup().groupId,
       inheritedEffort: () => core.routingGroups.defaultGroup().effort,
@@ -2282,7 +2301,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     engines: {
       targets: (groupId) => core.routingGroups.targets(groupId),
       allowed: canUseRoutingEngine,
-      limit: (engine) => engineHost.limit(engine),
+      limit: (engine, accountId) => engineHost.limit(engine, accountId),
     },
     allowsGroup: (slug, id) => allowedGroupTargets(slug, id) !== undefined,
     rests: routeRests,
@@ -3943,6 +3962,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
     modelPresets: core.modelPresets,
     ...(modelProviders === undefined ? {} : { modelProviders }),
     subscriptionEngines: engineHost,
+    engineAccounts: engineHost,
     localSubscriptionEngines: localEngines,
     routingGroupEngineOptions: () => routingGroupEngineOptions(engineHost),
     releaseEngineQuotaHold: (slug) => void core.runtime.releaseQuotaHold?.(slug),
@@ -4480,6 +4500,7 @@ export function apply(ctx: Context, config: BotHarnessConfig): void {
           fetch: (request) =>
             engineRouteFetch(request, {
               host: engineHost,
+              authorizeLogin: () => requireModelSources(team.ownerContext(), team),
               botExists: (slug) => core.registry.get(slug) !== undefined,
               tools: (bot) => agentAdapter.engineToolCatalog(bot),
               runTool: async (bot, tool, args) => {
