@@ -181,6 +181,7 @@ import {
 import { inlineImageAttachment } from './message-attachment.js';
 import { MessageAvatarsContext } from './message-avatars.js';
 import { channelAttachmentUrl } from './bridge.js';
+import { switchEngineToModel } from './turn-stop-line.js';
 import { observeHumanAttention } from './messaging-defaults-live.js';
 import { reportFailure } from './diagnostic-log.js';
 import {
@@ -1659,6 +1660,8 @@ function ConversationView({
     channels: state.channels,
     dmBotSlug,
     memoryDisplay,
+    switchToModel: (slug) =>
+      actions.subscriptionEngine?.use(slug, 'orchestrator', null) ?? switchEngineToModel(slug),
     onOpenInbox: setInboxTarget,
     onOpenChannelMessage: (targetChannelId, messageId) => {
       void actions

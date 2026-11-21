@@ -47,6 +47,11 @@ import {
   type EngineAccountOperations,
 } from '../engines/engine-account-bridge.js';
 import {
+  createEngineSelectionBridge,
+  type EngineSelectionBridgeMethods,
+  type EngineSelectionOperations,
+} from '../engines/engine-selection-bridge.js';
+import {
   createModelProviderBridge,
   modelFailure,
   type ModelProviderBridgeMethods,
@@ -54,6 +59,8 @@ import {
 import type { ModelProviders } from '../models/providers.js';
 import {
   engineAccountKey,
+  type EngineId,
+  type RoutingGroupEngineMember,
   type RoutingGroupEngineOptions,
 } from '@botharness/host-protocol/subscription-engine';
 import type { EngineHost } from '../engines/engine-host.js';
@@ -70,8 +77,9 @@ import {
 } from '../channels/quotes.js';
 import type { ApprovalTemplateDeletionPreview } from '../workspaces/approval-template-deletion-contract.js';
 import type { ApprovalCard } from '../team/approval-contract.js';
-import { botIsHostOwner, requireBotModel, botModelAllowed } from '../team/models.js';
-import { allowsModel } from '../team/permissions.js';
+import { botModelGrants, requireBotModel, botModelAllowed } from '../team/models.js';
+import { requireEngineAccountGrant } from '../team/roles.js';
+import { allowsEngineAccount, allowsModel } from '../team/permissions.js';
 import { TeamError } from '../team/error.js';
 import type { UsageByMemberResult } from '../usage/overview.js';
 import { MEMBER_CHANNEL_METHODS } from '../team/member-methods.js';
@@ -773,6 +781,7 @@ export interface BridgeMethods
     TeamBridgeMethods,
     ModelProviderBridgeMethods,
     EngineAccountBridgeMethods,
+    EngineSelectionBridgeMethods,
     PromptBridgeMethods,
     SchedulesBridgeMethods,
     SkillsBridgeMethods,
@@ -1397,8 +1406,11 @@ export interface BridgeMethodsDeps
     store: Pick<EngineHost['store'], 'selection'>;
   };
   engineAccounts?: EngineAccountOperations;
+  engineSelection?: EngineSelectionOperations;
   localSubscriptionEngines?: boolean;
-  routingGroupEngineOptions?(): Promise<RoutingGroupEngineOptions[]>;
+  routingGroupEngineOptions?(
+    allowed: (id: string) => boolean,
+  ): Promise<RoutingGroupEngineOptions[]>;
   releaseEngineQuotaHold?(slug: string): void;
   modelFavorites?: ModelFavoriteStore;
   routingGroups?: RoutingGroupStore;
@@ -2288,24 +2300,28 @@ function buildBridgeMethods(
   const catalogGroups = (
     rests: ReadonlyMap<string, string>,
     allowed: (route: ModelRoute) => boolean,
+    engineAllowed: (id: string) => boolean,
   ): { groups?: ModelCatalogGroup[] } => {
     const store = deps.routingGroups;
     if (store === undefined) return {};
-    const engineGroupsAllowed = canChooseRoutingEngines();
     return {
       groups: store.list().flatMap((group) => {
         let routes: ModelRoute[];
         try {
-          routes = store.routes(group.id);
+          const targets = store.targets(group.id);
+          if (
+            targets.some(
+              (target) =>
+                target.kind === 'engine' &&
+                !engineAllowed(engineAccountKey(target.engine, target.accountId)),
+            )
+          )
+            return [];
+          routes = targets.flatMap((target) => (target.kind === 'route' ? [target.route] : []));
         } catch {
           return [];
         }
-        if (
-          routes.length === 0 ||
-          !routes.every(allowed) ||
-          (!engineGroupsAllowed && hasGroupEngine(group.id))
-        )
-          return [];
+        if (routes.length === 0 || !routes.every(allowed)) return [];
         const untils = routes.map((route) => rests.get(routeKey(route)));
         const restingUntil = untils.every((until) => until !== undefined)
           ? [...(untils as string[])].sort()[0]
@@ -2328,18 +2344,45 @@ function buildBridgeMethods(
     deps.modelFavorites === undefined ? {} : { favorites: deps.modelFavorites.list(human.humanId) };
   const isHostOwner = () =>
     deps.team?.isOwner(human) ?? human.humanId === OWNER_HUMAN_CONTEXT.humanId;
-  const canChooseRoutingEngines = () => isHostOwner() && deps.localSubscriptionEngines !== false;
-  const hasGroupEngine = (id: string): boolean =>
-    deps.routingGroups?.targets(id).some((target) => target.kind === 'engine') ?? false;
-  const requireGroupEngineOwner = (id: string, slug?: string): void => {
-    if (!hasGroupEngine(id)) return;
-    const bot = slug === undefined ? undefined : deps.registry.get(slug);
-    if (
-      !canChooseRoutingEngines() ||
-      (bot !== undefined && deps.team && !botIsHostOwner(deps.team, bot))
-    )
-      throw new TeamError('model-not-allowed');
+  type EngineChoice = { engine: EngineId; accountId?: string };
+  const groupEngineChoices = (id: string): RoutingGroupEngineMember[] =>
+    deps.routingGroups?.targets(id).filter((target) => target.kind === 'engine') ?? [];
+  const memberEngineChoices = (members: readonly RoutingGroupMember[]): EngineChoice[] =>
+    members.flatMap((member) =>
+      member.kind === 'engine'
+        ? [member]
+        : member.kind === 'group'
+          ? groupEngineChoices(member.id)
+          : [],
+    );
+  const engineChoiceFilter = () => {
+    const owner = isHostOwner();
+    const grants = owner ? undefined : deps.team?.roles.modelsAllowed(human);
+    return ({ engine, accountId }: EngineChoice) =>
+      deps.localSubscriptionEngines !== false &&
+      (owner ||
+        (grants !== undefined && allowsEngineAccount(grants, engineAccountKey(engine, accountId))));
   };
+  const requireEngineChoices = (choices: readonly EngineChoice[], slug?: string): void => {
+    if (choices.length === 0) return;
+    if (deps.localSubscriptionEngines === false)
+      throw new EngineRefusal(
+        'engine-unavailable',
+        'Subscription Engines run only on a local Host',
+      );
+    const actor = deps.team?.roles.modelsAllowed(human);
+    const bot = slug === undefined ? undefined : deps.registry.get(slug);
+    if (slug !== undefined && bot === undefined) throw new TeamError('bot-not-found');
+    const botGrants = deps.team && bot ? botModelGrants(deps.team, bot) : undefined;
+    for (const { engine, accountId } of choices) {
+      const id = engineAccountKey(engine, accountId);
+      if (actor !== undefined) requireEngineAccountGrant(actor, id);
+      else if (!isHostOwner()) throw new TeamError('model-not-allowed', undefined, { route: id });
+      if (botGrants !== undefined) requireEngineAccountGrant(botGrants, id);
+    }
+  };
+  const requireGroupEngines = (id: string, slug?: string): void =>
+    requireEngineChoices(groupEngineChoices(id), slug);
   const channelSkillBots = (channel: ChannelRecord): string[] => {
     if (channel.type === 'group')
       return channel.members.filter((slug) => {
@@ -2363,6 +2406,7 @@ function buildBridgeMethods(
     members: RoutingGroupMember[],
     previous: readonly RoutingGroupMember[] = [],
   ): Promise<void> => {
+    requireEngineChoices(memberEngineChoices(members));
     const engineEfforts = members.flatMap((member) =>
       member.kind === 'engine' &&
       member.model !== undefined &&
@@ -2388,11 +2432,8 @@ function buildBridgeMethods(
     );
     if (engineEfforts.length > 0) {
       const engines = deps.subscriptionEngines;
-      if (engines === undefined || (deps.team !== undefined && !deps.team.isOwner(human)))
-        throw new RoutingGroupError(
-          'invalid-input',
-          'Subscription Engines require the local Host owner',
-        );
+      if (engines === undefined)
+        throw new EngineRefusal('engine-unavailable', 'Subscription Engines are unavailable');
       try {
         await Promise.all(
           engineEfforts.map(({ engine, ...choice }) => engines.validateChoice(engine, choice)),
@@ -2457,31 +2498,30 @@ function buildBridgeMethods(
       throw new RoutingGroupError('not-found', `Routing Group ${id} does not exist`);
     return deps.routingGroups.routes(id);
   };
+  const presetEngineChoices = (choices: ModelPresetEngineInput): EngineChoice[] =>
+    [choices.orchestratorEngine, choices.assignmentEngine].filter((choice) => choice != null);
   const checkPresetEngines = async (
     choices: ModelPresetEngineInput,
-    applyingToBot = false,
+    slug?: string,
   ): Promise<void> => {
-    if (choices.orchestratorEngine == null && choices.assignmentEngine == null) return;
-    const engines = deps.subscriptionEngines;
-    if (engines === undefined || (applyingToBot && !isHostOwner()))
-      throw new EngineRefusal(
-        'engine-unavailable',
-        'Subscription Engines require the local Host owner',
-      );
-    await Promise.all(
-      [choices.orchestratorEngine, choices.assignmentEngine].flatMap((choice) =>
-        choice == null ? [] : [engines.validateChoice(choice.engine, choice)],
-      ),
+    const selected = [choices.orchestratorEngine, choices.assignmentEngine].filter(
+      (choice) => choice != null,
     );
+    if (selected.length === 0) return;
+    requireEngineChoices(selected, slug);
+    const engines = deps.subscriptionEngines;
+    if (engines === undefined)
+      throw new EngineRefusal('engine-unavailable', 'Subscription Engines are unavailable');
+    await Promise.all(selected.map((choice) => engines.validateChoice(choice.engine, choice)));
   };
-
+  const presetGroupIds = (groups: ModelPresetGroups): string[] => [
+    ...(groups.orchestratorGroupId === undefined ? [] : [groups.orchestratorGroupId]),
+    ...(groups.assignmentGroups ?? []),
+  ];
   const presetGroupRoutes = (groups: ModelPresetGroups, slug?: string): ModelRoute[] =>
-    [
-      ...(groups.orchestratorGroupId === undefined ? [] : [groups.orchestratorGroupId]),
-      ...(groups.assignmentGroups ?? []),
-    ].flatMap((id) => {
+    presetGroupIds(groups).flatMap((id) => {
       const routes = groupRoutes(id);
-      if (slug !== undefined) requireGroupEngineOwner(id, slug);
+      requireGroupEngines(id, slug);
       return routes;
     });
   const requireGroupEfforts = async (group: string, efforts: readonly string[]): Promise<void> => {
@@ -3037,6 +3077,7 @@ function buildBridgeMethods(
     ...createTeamBridge(human, deps.team),
     ...createModelProviderBridge(human, deps),
     ...createEngineAccountBridge(human, deps),
+    ...createEngineSelectionBridge(human, { ...deps, registry: globalRegistry }),
     ...createVoiceBridgeMethods({
       providers: deps.voiceProviders,
       registry: deps.registry,
@@ -3787,7 +3828,7 @@ function buildBridgeMethods(
         try {
           if (deps.routingGroups?.get(groupId) === undefined)
             throw new RoutingGroupError('not-found', `Routing Group ${groupId} does not exist`);
-          requireGroupEngineOwner(groupId);
+          requireGroupEngines(groupId);
           if (effort !== undefined) await requireGroupEfforts(groupId, [effort]);
           const first = await firstUsableRoute(deps.routingGroups.routes(groupId));
           route =
@@ -3795,9 +3836,7 @@ function buildBridgeMethods(
               ? first
               : groupMemberRoute(first, effort, await deps.modelCatalog.list());
         } catch (error) {
-          return error instanceof RoutingGroupError
-            ? routingGroupFailure(error)
-            : invalidInput(error instanceof Error ? error.message : 'Model unavailable');
+          return routingGroupFailure(error);
         }
       }
       if (
@@ -3823,6 +3862,7 @@ function buildBridgeMethods(
       try {
         if (slug !== undefined && !source['globalDefault']) requireRoutes(slug, [route]);
         await deps.modelCatalog.validate(route);
+        if (typeof groupId === 'string') requireGroupEngines(groupId);
         if (source['globalDefault']) {
           let savedDefaultRevision = 0;
           const groups = deps.routingGroups;
@@ -4231,7 +4271,10 @@ function buildBridgeMethods(
           ?.describe({ redactSecrets: true })
           .find((entry) => entry.ns === 'agent-default-model')?.revision;
         const defaultGroup = deps.routingGroups?.defaultGroup();
-        const groups = catalogGroups(rests, isListed);
+        const canUseEngine = (id: string) =>
+          deps.localSubscriptionEngines !== false &&
+          (owner || (allowed !== undefined && allowsEngineAccount(allowed, id)));
+        const groups = catalogGroups(rests, isListed, canUseEngine);
         const defaultGroupVisible = groups.groups?.some(
           (group) => group.id === defaultGroup?.groupId,
         );
@@ -4257,7 +4300,7 @@ function buildBridgeMethods(
             ...(asObject(payload)['includeRoutingGroupEngines'] === true &&
             (owner || deps.team?.roles.permissions(human).includes('models.configure')) &&
             deps.routingGroupEngineOptions !== undefined
-              ? { routingGroupEngines: await deps.routingGroupEngineOptions() }
+              ? { routingGroupEngines: await deps.routingGroupEngineOptions(canUseEngine) }
               : {}),
           },
         };
@@ -4286,7 +4329,19 @@ function buildBridgeMethods(
     },
     modelPresets(payload) {
       if (deps.modelPresets === undefined) return unavailable();
-      const presets = deps.modelPresets.list();
+      const owner = isHostOwner();
+      const engineAllowed = engineChoiceFilter();
+      const presets = deps.modelPresets.list().filter((preset) => {
+        if (owner) return true;
+        try {
+          return [
+            ...presetEngineChoices(preset),
+            ...presetGroupIds(preset).flatMap(groupEngineChoices),
+          ].every(engineAllowed);
+        } catch {
+          return false;
+        }
+      });
       if (asObject(payload)['includeUsage'] !== true) return { ok: true, value: { presets } };
       const entries = new Map<string, ModelPresetUsage>(
         presets.map(({ id }) => [id, { presetId: id, count: 0, botNames: [] }]),
@@ -4379,7 +4434,8 @@ function buildBridgeMethods(
           ],
         );
         if (groups !== undefined) presetGroupRoutes(groups);
-        assertEngineAccounts([engines.orchestratorEngine, engines.assignmentEngine]);
+        requireEngineChoices(presetEngineChoices(engines));
+        assertEngineAccounts(presetEngineChoices(engines));
         const preset = deps.modelPresets.create({
           name,
           orchestrator,
@@ -4392,7 +4448,10 @@ function buildBridgeMethods(
         return { ok: true, value: { preset } };
       } catch (error) {
         if (error instanceof RoutingGroupError) return routingGroupFailure(error);
-        return !deps.team || deps.team.isOwner(human)
+        return error instanceof TeamError ||
+          error instanceof EngineRefusal ||
+          !deps.team ||
+          deps.team.isOwner(human)
           ? modelFailure(error)
           : invalidInput('model-unavailable');
       }
@@ -4459,7 +4518,8 @@ function buildBridgeMethods(
             ],
         );
         if (groups !== undefined) presetGroupRoutes(groups);
-        assertEngineAccounts([engines.orchestratorEngine, engines.assignmentEngine]);
+        requireEngineChoices(presetEngineChoices(engines));
+        assertEngineAccounts(presetEngineChoices(engines));
         const preset = deps.modelPresets.update(id, {
           expectedRevision,
           name,
@@ -4474,7 +4534,10 @@ function buildBridgeMethods(
         return { ok: true, value: { preset } };
       } catch (error) {
         if (error instanceof RoutingGroupError) return routingGroupFailure(error);
-        return !deps.team || deps.team.isOwner(human)
+        return error instanceof TeamError ||
+          error instanceof EngineRefusal ||
+          !deps.team ||
+          deps.team.isOwner(human)
           ? modelFailure(error)
           : invalidInput('model-unavailable');
       }
@@ -4530,7 +4593,7 @@ function buildBridgeMethods(
         await deps.modelCatalog.validate(preset.assignmentDefault);
         if (preset.assignmentModels !== undefined)
           await validateAssignmentCatalog(preset.assignmentDefault, preset.assignmentModels);
-        if (hasPresetEngines(preset)) await checkPresetEngines(preset, true);
+        if (hasPresetEngines(preset)) await checkPresetEngines(preset, slug);
         await validateGroupOptions(preset.assignmentGroupOptions);
         await validateGroupEffort(preset);
         if (changed()) return stale();
@@ -4541,7 +4604,8 @@ function buildBridgeMethods(
           ...(preset.assignmentModels ?? []),
           ...presetGroupRoutes(preset, slug),
         ]);
-        assertEngineAccounts([preset.orchestratorEngine, preset.assignmentEngine]);
+        requireEngineChoices(presetEngineChoices(preset), slug);
+        assertEngineAccounts(presetEngineChoices(preset));
         const result = deps.registry.applyModelPreset(slug, { ...preset, orchestrator });
         if (!result.ok || result.record.modelPlan === undefined) return unknownBot(slug);
         const engines = deps.subscriptionEngines;
@@ -4567,16 +4631,31 @@ function buildBridgeMethods(
         return { ok: true, value: { plan: result.record.modelPlan } };
       } catch (error) {
         if (error instanceof RoutingGroupError) return routingGroupFailure(error);
-        return error instanceof TeamError || !deps.team || deps.team.isOwner(human)
+        return error instanceof TeamError ||
+          error instanceof EngineRefusal ||
+          !deps.team ||
+          deps.team.isOwner(human)
           ? modelFailure(error)
           : invalidInput('model-unavailable');
       }
     },
     modelGroups() {
       if (deps.routingGroups === undefined) return unavailable();
+      const owner = isHostOwner();
+      const engineAllowed = engineChoiceFilter();
       return {
         ok: true,
-        value: { groups: deps.routingGroups.list(), rests: deps.routeRests?.list() ?? [] },
+        value: {
+          groups: deps.routingGroups.list().filter((group) => {
+            if (owner) return true;
+            try {
+              return groupEngineChoices(group.id).every(engineAllowed);
+            } catch {
+              return false;
+            }
+          }),
+          rests: deps.routeRests?.list() ?? [],
+        },
       };
     },
     modelGroup(payload) {
@@ -4588,6 +4667,7 @@ function buildBridgeMethods(
         const group = deps.routingGroups.get(id.trim());
         if (group === undefined)
           throw new RoutingGroupError('not-found', `Routing Group ${id} does not exist`);
+        if (!isHostOwner()) requireGroupEngines(group.id);
         return { ok: true, value: { group, routes: deps.routingGroups.routes(group.id) } };
       } catch (error) {
         return routingGroupFailure(error);
@@ -4599,6 +4679,7 @@ function buildBridgeMethods(
       try {
         const input = routingGroupInput(source);
         await validateGroupMembers(input.members);
+        requireEngineChoices(memberEngineChoices(input.members));
         assertEngineAccounts(input.members.filter((member) => member.kind === 'engine'));
         return { ok: true, value: { group: deps.routingGroups.create(input) } };
       } catch (error) {
@@ -4623,6 +4704,7 @@ function buildBridgeMethods(
           input.members,
           current?.revision === expectedRevision ? current?.members : undefined,
         );
+        requireEngineChoices(memberEngineChoices(input.members));
         assertEngineAccounts(input.members.filter((member) => member.kind === 'engine'));
         const group = deps.routingGroups.update(id, {
           ...input,
@@ -4743,13 +4825,13 @@ function buildBridgeMethods(
           group === undefined
             ? [source['orchestrator'] as ModelRoute]
             : deps.routingGroups!.routes(group.id);
-        if (group !== undefined) requireGroupEngineOwner(group.id, slug);
+        if (group !== undefined) requireGroupEngines(group.id, slug);
         requireRoutes(slug, candidates);
         if (group !== undefined && typeof groupEffort === 'string')
           await requireGroupEfforts(group.id, [groupEffort.trim()]);
         const orchestrator = await firstUsableRoute(candidates);
         beforeCommit?.();
-        if (group !== undefined) requireGroupEngineOwner(group.id, slug);
+        if (group !== undefined) requireGroupEngines(group.id, slug);
         requireRoutes(slug, candidates);
         if (group !== undefined && deps.routingGroups!.get(group.id)?.revision !== group.revision)
           return invalidInput('Routing Group changed; read it again before saving');
@@ -4769,7 +4851,10 @@ function buildBridgeMethods(
         return { ok: true, value: { plan: result.record.modelPlan } };
       } catch (error) {
         if (error instanceof RoutingGroupError) return routingGroupFailure(error);
-        return error instanceof TeamError || !deps.team || deps.team.isOwner(human)
+        return error instanceof TeamError ||
+          error instanceof EngineRefusal ||
+          !deps.team ||
+          deps.team.isOwner(human)
           ? modelFailure(error)
           : invalidInput('model-unavailable');
       }
@@ -4857,7 +4942,10 @@ function buildBridgeMethods(
         return { ok: true, value: { plan: result.record.modelPlan } };
       } catch (error) {
         if (error instanceof RoutingGroupError) return routingGroupFailure(error);
-        return error instanceof TeamError || !deps.team || deps.team.isOwner(human)
+        return error instanceof TeamError ||
+          error instanceof EngineRefusal ||
+          !deps.team ||
+          deps.team.isOwner(human)
           ? modelFailure(error)
           : invalidInput('model-unavailable');
       }
@@ -5009,7 +5097,10 @@ function buildBridgeMethods(
         return { ok: true, value: { plan: result.record.modelPlan } };
       } catch (error) {
         if (error instanceof RoutingGroupError) return routingGroupFailure(error);
-        return error instanceof TeamError || !deps.team || deps.team.isOwner(human)
+        return error instanceof TeamError ||
+          error instanceof EngineRefusal ||
+          !deps.team ||
+          deps.team.isOwner(human)
           ? modelFailure(error)
           : invalidInput('model-unavailable');
       }
