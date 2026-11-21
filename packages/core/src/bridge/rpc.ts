@@ -3108,6 +3108,14 @@ export class BotharnessBridgeService extends TypertRemoteService {
     return marketplaceRpc.marketplaceReport(this.methods, id, altcha, reason);
   }
 
+  async marketplaceAvatarReport(
+    id: string,
+    altcha: string,
+    reason?: string,
+  ): Promise<{ received: true }> {
+    return marketplaceRpc.marketplaceAvatarReport(this.methods, id, altcha, reason);
+  }
+
   async marketplaceTopics(): Promise<MarketplaceTopic[]> {
     return marketplaceRpc.marketplaceTopics(this.methods);
   }
@@ -3769,6 +3777,7 @@ markRemoteMethods(BotharnessBridgeService.prototype, [
   'marketplaceFileView',
   'marketplaceChallenge',
   'marketplaceReport',
+  'marketplaceAvatarReport',
   'marketplaceAccount',
   'marketplaceAuthorSave',
   'marketplaceAuthorAvatarSet',
